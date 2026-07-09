@@ -1,0 +1,57 @@
+export interface User {
+  fullName: string;
+  email: string;
+  balance: number;
+  dailyTarget: number;
+  dailySpent: number;
+  pinCreated: boolean;
+  pinCode?: string;
+  biometricEnabled: boolean;
+}
+
+export type BpcStatus = 'unused' | 'redeemed';
+
+export interface BpcCode {
+  id: string;
+  code: string;
+  amount: number;
+  fullName: string;
+  email: string;
+  createdAt: string;
+  status: BpcStatus;
+  redeemedFor?: string; // e.g. "Airtime to 08012345678" or "Bank Transfer"
+}
+
+export type TransactionType = 
+  | 'deposit'
+  | 'withdraw'
+  | 'buy_bpc'
+  | 'redeem_airtime'
+  | 'redeem_transfer'
+  | 'bank_transfer_direct';
+
+export interface Transaction {
+  id: string;
+  type: TransactionType;
+  amount: number;
+  date: string;
+  status: 'pending' | 'success' | 'failed';
+  description: string;
+  reference?: string;
+  bpcCodeUsed?: string;
+  bpcCodeGenerated?: string;
+}
+
+export interface BankAccount {
+  accountName: string;
+  accountNumber: string;
+  bankName: string;
+}
+
+export interface NotificationItem {
+  id: string;
+  title: string;
+  body: string;
+  date: string;
+  unread: boolean;
+}

@@ -7,6 +7,12 @@ export interface User {
   pinCreated: boolean;
   pinCode?: string;
   biometricEnabled: boolean;
+  phone?: string;
+  profilePic?: string;
+  isSuspended?: boolean;
+  isFrozen?: boolean;
+  tier?: number; // Verification tier, e.g. 1, 2, 3
+  is2faEnabled?: boolean;
 }
 
 export type BpcStatus = 'unused' | 'redeemed';
@@ -40,6 +46,12 @@ export interface Transaction {
   reference?: string;
   bpcCodeUsed?: string;
   bpcCodeGenerated?: string;
+  narration?: string;
+  senderName?: string;
+  recipientName?: string;
+  recipientBank?: string;
+  recipientAccount?: string;
+  charges?: number;
 }
 
 export interface BankAccount {
@@ -54,4 +66,44 @@ export interface NotificationItem {
   body: string;
   date: string;
   unread: boolean;
+  type?: 'login' | 'airtime' | 'data' | 'transfer' | 'withdraw' | 'security' | 'system';
+}
+
+export interface DeviceSession {
+  id: string;
+  name: string;
+  os: string;
+  browser: string;
+  loginDate: string;
+  lastActivity: string;
+  isCurrent: boolean;
+}
+
+export interface LoginHistoryItem {
+  id: string;
+  date: string;
+  time: string;
+  device: string;
+  browser: string;
+  ip: string;
+  location: string;
+  status: 'success' | 'failed' | 'locked';
+}
+
+export interface Beneficiary {
+  id: string;
+  name: string;
+  accountNumber: string;
+  bankName: string;
+  phone?: string;
+  network?: string;
+}
+
+export interface SimulatedEmail {
+  id: string;
+  to: string;
+  subject: string;
+  body: string;
+  date: string;
+  read: boolean;
 }

@@ -52,6 +52,13 @@ import NotificationsModal from './components/NotificationsModal';
 import TransactionList from './components/TransactionList';
 import { TermsOfService, PrivacyPolicy } from './components/LegalPages';
 
+// Upgraded components
+import EmailSimulator from './components/EmailSimulator';
+import DevicesHistory from './components/DevicesHistory';
+import TransactionReceipt from './components/TransactionReceipt';
+import AdminPanel from './components/AdminPanel';
+import { DeviceSession, LoginHistoryItem, Beneficiary, SimulatedEmail } from './types';
+
 export default function App() {
   // Theme & App Settings (Light, Dark, System Default)
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(() => {
@@ -158,6 +165,7 @@ export default function App() {
   const [transferAmount, setTransferAmount] = useState('');
   const [transferBpcCode, setTransferBpcCode] = useState('');
   const [isVerifyingAccount, setIsVerifyingAccount] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Direct Withdraw flow - Redesigned into dedicated screen with Real-time Account Verification
   const [withdrawAmount, setWithdrawAmount] = useState('');
@@ -181,15 +189,78 @@ export default function App() {
   const [isAgentTyping, setIsAgentTyping] = useState(false);
   const [generatedBpc, setGeneratedBpc] = useState<BpcCode | null>(null);
 
+  // New Upgraded States for Fintech Compliance
+  const [isEmailSimulatorOpen, setIsEmailSimulatorOpen] = useState(false);
+  const [emails, setEmails] = useState<SimulatedEmail[]>(() => {
+    const saved = localStorage.getItem('swiftpay_simulated_emails');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const [devices, setDevices] = useState<DeviceSession[]>(() => {
+    const saved = localStorage.getItem('swiftpay_devices');
+    return saved ? JSON.parse(saved) : [
+      { id: 'dev-1', name: 'Chrome Desktop', os: 'macOS', browser: 'Chrome 125', loginDate: new Date().toLocaleDateString(), lastActivity: 'Just now', isCurrent: true },
+      { id: 'dev-2', name: 'iPhone 15 Pro', os: 'iOS 17', browser: 'Safari Mobile', loginDate: '2026-07-08', lastActivity: '1 day ago', isCurrent: false }
+    ];
+  });
+
+  const [loginHistory, setLoginHistory] = useState<LoginHistoryItem[]>(() => {
+    const saved = localStorage.getItem('swiftpay_login_history');
+    return saved ? JSON.parse(saved) : [
+      { id: 'log-1', date: new Date().toLocaleDateString(), time: new Date().toLocaleTimeString(), device: 'Chrome Desktop', browser: 'Chrome 125', ip: '197.210.64.12', location: 'Lagos, Nigeria', status: 'success' },
+      { id: 'log-2', date: '2026-07-08', time: '14:22:10', device: 'iPhone 15 Pro', browser: 'Safari Mobile', ip: '102.89.33.45', location: 'Abuja, Nigeria', status: 'success' },
+      { id: 'log-3', date: '2026-07-08', time: '09:05:14', device: 'Unknown Linux Device', browser: 'Firefox 120', ip: '185.190.140.2', location: 'Frankfurt, Germany', status: 'failed' }
+    ];
+  });
+
+  const [beneficiaries, setBeneficiaries] = useState<Beneficiary[]>(() => {
+    const saved = localStorage.getItem('swiftpay_beneficiaries');
+    return saved ? JSON.parse(saved) : [
+      { id: 'ben-1', name: 'Alhaji Yusuf Dangote', accountNumber: '0123456789', bankName: 'Access Bank Limited' },
+      { id: 'ben-2', name: 'Chioma Sandra Okafor', accountNumber: '8960723295', bankName: 'OPay' },
+      { id: 'ben-3', name: 'Adebayo Balogun', accountNumber: '2001458922', bankName: 'Zenith Bank Plc' }
+    ];
+  });
+
+  const [phoneBeneficiaries, setPhoneBeneficiaries] = useState<any[]>(() => {
+    const saved = localStorage.getItem('swiftpay_phone_beneficiaries');
+    return saved ? JSON.parse(saved) : [
+      { id: 'pben-1', name: 'Mom', phone: '08034567890', network: 'mtn' },
+      { id: 'pben-2', name: 'Office', phone: '09012345678', network: 'airtel' },
+      { id: 'pben-3', name: 'Sister', phone: '07055544433', network: 'glo' }
+    ];
+  });
+
+  const [selectedReceiptTx, setSelectedReceiptTx] = useState<Transaction | null>(null);
+  
+  // Security 2FA / sensitive action states
+  const [securityOtp, setSecurityOtp] = useState('');
+  const [securityOtpSession, setSecurityOtpSession] = useState<{ otp: string; purpose: string; data?: any; expiresAt: number } | null>(null);
+
+  // Inactivity countdown
+  const [inactivityCountdown, setInactivityCountdown] = useState<number | null>(null);
+
+  // Transfer specific additions
+  const [transferNarration, setTransferNarration] = useState('');
+  const [transferPin, setTransferPin] = useState('');
+  const [transferConfirmationTx, setTransferConfirmationTx] = useState<any | null>(null);
+  const [isTransferConfirming, setIsTransferConfirming] = useState(false);
+  const [isTransferSuccess, setIsTransferSuccess] = useState(false);
+  const [transferSuccessTx, setTransferSuccessTx] = useState<Transaction | null>(null);
+
   // Modals & Sliders Toggle
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isFabMenuOpen, setIsFabMenuOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
+  const [activeDataTab, setActiveDataTab] = useState<'daily' | 'weekly' | 'monthly' | 'sme'>('daily');
 
   // Feedback Notifications (Toasts)
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastType, setToastType] = useState<'success' | 'info' | 'error'>('success');
+
+  // Offline/Online detection (Point 5)
+  const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -245,6 +316,87 @@ export default function App() {
     localStorage.setItem('swiftpay_notifications', JSON.stringify(notifications));
   }, [notifications]);
 
+  useEffect(() => {
+    localStorage.setItem('swiftpay_simulated_emails', JSON.stringify(emails));
+  }, [emails]);
+
+  useEffect(() => {
+    localStorage.setItem('swiftpay_devices', JSON.stringify(devices));
+  }, [devices]);
+
+  useEffect(() => {
+    localStorage.setItem('swiftpay_login_history', JSON.stringify(loginHistory));
+  }, [loginHistory]);
+
+  useEffect(() => {
+    localStorage.setItem('swiftpay_beneficiaries', JSON.stringify(beneficiaries));
+  }, [beneficiaries]);
+
+  // Online/Offline Event Listeners (Point 5)
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      showToast('Connection restored. You are back online!', 'success');
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      showToast('Network connection lost. SwiftPay is running in offline mode.', 'error');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Inactivity automatic logout monitor
+  useEffect(() => {
+    if (!isAuthenticated || currentScreen === 'onboarding') {
+      setInactivityCountdown(null);
+      return;
+    }
+
+    let activityTimer: any = null;
+    let countdownInterval: any = null;
+
+    const resetInactivityTimer = () => {
+      setInactivityCountdown(null);
+      if (activityTimer) clearTimeout(activityTimer);
+      if (countdownInterval) clearInterval(countdownInterval);
+
+      // Set inactivity alert to trigger after 270 seconds (4.5 minutes)
+      activityTimer = setTimeout(() => {
+        let remaining = 30;
+        setInactivityCountdown(remaining);
+
+        countdownInterval = setInterval(() => {
+          remaining -= 1;
+          if (remaining <= 0) {
+            clearInterval(countdownInterval);
+            handleLogout();
+            showToast('Automatic logout: Inactive session expired.', 'info');
+          } else {
+            setInactivityCountdown(remaining);
+          }
+        }, 1000);
+      }, 270 * 1000);
+    };
+
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    events.forEach(ev => window.addEventListener(ev, resetInactivityTimer));
+
+    resetInactivityTimer();
+
+    return () => {
+      if (activityTimer) clearTimeout(activityTimer);
+      if (countdownInterval) clearInterval(countdownInterval);
+      events.forEach(ev => window.removeEventListener(ev, resetInactivityTimer));
+    };
+  }, [isAuthenticated, currentScreen]);
+
   // Scroll live chat
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -257,6 +409,37 @@ export default function App() {
     setTimeout(() => {
       setToastMessage(null);
     }, 3000);
+  };
+
+  // Send a simulated email
+  const sendSimulatedEmail = (to: string, subject: string, body: string) => {
+    const newEmail: SimulatedEmail = {
+      id: 'email-' + Math.random().toString(36).substring(2, 9),
+      to,
+      subject,
+      body,
+      date: new Date().toISOString(),
+      read: false
+    };
+    setEmails(prev => [newEmail, ...prev]);
+  };
+
+  // Helper to start a secure 2FA session for a sensitive action
+  const startSecurityOtpSession = (purpose: string, data: any, emailAddress: string) => {
+    const generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
+    setSecurityOtpSession({
+      otp: generatedCode,
+      purpose,
+      data,
+      expiresAt: Date.now() + 5 * 60 * 1000 // 5 mins expiry
+    });
+    setSecurityOtp('');
+    sendSimulatedEmail(
+      emailAddress,
+      'SwiftPay SecurID Authorization Code',
+      `Dear customer,\n\nA sensitive operation was initiated on your SwiftPay mobile application. To confirm it is you, please enter the following 6-digit authorization code:\n\nVerification Code: ${generatedCode}\n\nThis code will expire in 5 minutes. If you did not request this, please change your password immediately or contact live chat support.`
+    );
+    showToast('A secure 2FA code was dispatched to your simulated inbox!', 'info');
   };
 
   // Onboarding registration via Express backend
@@ -433,6 +616,48 @@ export default function App() {
       showToast('Password updated securely. Please sign in.', 'success');
     } catch (err) {
       showToast('Network error during password reset.', 'error');
+    }
+  };
+
+  // 2FA Sensitive Callback Handlers
+  const handleConfirmPasswordChange = async (data: any) => {
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: user?.email,
+          currentPassword: data.currentPassword,
+          newPassword: data.newPassword
+        })
+      });
+      const resData = await res.json();
+      if (res.ok && resData.success) {
+        showToast('Password changed successfully!', 'success');
+        setChangeCurrentPassword('');
+        setChangeNewPassword('');
+        setIsChangingPasswordOpen(false);
+      } else {
+        showToast(resData.error || 'Failed to change password.', 'error');
+      }
+    } catch (err) {
+      showToast('Error executing password change.', 'error');
+    }
+  };
+
+  const handleConfirmEmailChange = async (data: any) => {
+    showToast('Email updated successfully!', 'success');
+  };
+
+  const handleConfirmPinChange = async (data: any) => {
+    showToast('PIN changed successfully!', 'success');
+  };
+
+  const handleConfirmTransferSubmit = async (data: any) => {
+    if (data && typeof data.onSuccess === 'function') {
+      data.onSuccess();
+    } else {
+      showToast('Transfer completed successfully!', 'success');
     }
   };
 
@@ -650,6 +875,7 @@ export default function App() {
   // Perform Airtime Purchase
   const handlePurchaseAirtime = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!airtimePhone || airtimePhone.length < 10) {
       showToast('Enter a valid Nigerian phone number', 'error');
       return;
@@ -671,6 +897,7 @@ export default function App() {
       return;
     }
 
+    setIsSubmitting(true);
     try {
       // Verify voucher against server (Point 7)
       const res = await fetch('/api/auth/verify-voucher', {
@@ -682,6 +909,7 @@ export default function App() {
 
       if (!res.ok || !data.success) {
         showToast(data.error || 'Invalid BPC Voucher.', 'error');
+        setIsSubmitting(false);
         return;
       }
 
@@ -690,6 +918,7 @@ export default function App() {
       // Since it's verified, we deduct the purchase cost from user balance (Point 5 - Live Balance updates instantly).
       if (!user || user.balance < price) {
         showToast('Insufficient wallet balance to complete this purchase', 'error');
+        setIsSubmitting(false);
         return;
       }
 
@@ -698,7 +927,7 @@ export default function App() {
 
       // Create transaction logs
       const newTx: Transaction = {
-        id: `tx-${Date.now()}`,
+        id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         type: 'redeem_airtime',
         amount: price,
         date: new Date().toISOString(),
@@ -728,12 +957,15 @@ export default function App() {
       setActiveTab('wallet');
     } catch (err) {
       showToast('Error validating BPC voucher.', 'error');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   // Perform Data Bundle Purchase (Point 12)
   const handlePurchaseData = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!dataPhone || dataPhone.length < 10) {
       showToast('Enter a valid Nigerian phone number', 'error');
       return;
@@ -755,6 +987,7 @@ export default function App() {
       return;
     }
 
+    setIsSubmitting(true);
     try {
       // Verify voucher against server (Point 7)
       const res = await fetch('/api/auth/verify-voucher', {
@@ -766,11 +999,13 @@ export default function App() {
 
       if (!res.ok || !data.success) {
         showToast(data.error || 'Invalid BPC Voucher.', 'error');
+        setIsSubmitting(false);
         return;
       }
 
       if (!user || user.balance < price) {
         showToast('Insufficient wallet balance to complete this purchase', 'error');
+        setIsSubmitting(false);
         return;
       }
 
@@ -779,7 +1014,7 @@ export default function App() {
 
       // Create transaction logs
       const newTx: Transaction = {
-        id: `tx-${Date.now()}`,
+        id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         type: 'redeem_airtime', // logged in transaction system
         amount: price,
         date: new Date().toISOString(),
@@ -809,12 +1044,15 @@ export default function App() {
       setActiveTab('wallet');
     } catch (err) {
       showToast('Error validating BPC voucher.', 'error');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   // Perform Bank Transfer Out flow
   const handleBankTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!transferAccNum || transferAccNum.length !== 10 || !transferAccName) {
       showToast('Please enter a verified 10-digit account number', 'error');
       return;
@@ -836,6 +1074,7 @@ export default function App() {
       return;
     }
 
+    setIsSubmitting(true);
     try {
       // Verify voucher against server (Point 7)
       const res = await fetch('/api/auth/verify-voucher', {
@@ -847,12 +1086,14 @@ export default function App() {
 
       if (!res.ok || !data.success) {
         showToast(data.error || 'Invalid BPC Voucher.', 'error');
+        setIsSubmitting(false);
         return;
       }
 
       // Deduct wallet balance (Limits are fully removed - Point 6)
       if (!user || user.balance < price) {
         showToast('Insufficient wallet balance to complete this bank transfer', 'error');
+        setIsSubmitting(false);
         return;
       }
 
@@ -860,7 +1101,7 @@ export default function App() {
       await updateBalanceOnServer(nextBalance);
 
       const newTx: Transaction = {
-        id: `tx-${Date.now()}`,
+        id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         type: 'bank_transfer_direct',
         amount: price,
         date: new Date().toISOString(),
@@ -891,12 +1132,15 @@ export default function App() {
       setActiveTab('wallet');
     } catch (err) {
       showToast('Error validating BPC voucher.', 'error');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   // Perform Dedicated Bank Withdrawal Flow (Point 11, Point 7)
   const handleWithdrawalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!withdrawAccount || withdrawAccount.length !== 10 || !withdrawAccName) {
       showToast('Please enter a verified 10-digit withdrawal account number', 'error');
       return;
@@ -918,6 +1162,7 @@ export default function App() {
       return;
     }
 
+    setIsSubmitting(true);
     try {
       // Verify voucher against server (Point 7)
       const res = await fetch('/api/auth/verify-voucher', {
@@ -929,12 +1174,14 @@ export default function App() {
 
       if (!res.ok || !data.success) {
         showToast(data.error || 'Invalid BPC Voucher.', 'error');
+        setIsSubmitting(false);
         return;
       }
 
       // Deduct wallet balance (Limits are fully removed - Point 6)
       if (!user || user.balance < price) {
         showToast('Insufficient wallet balance to complete this withdrawal', 'error');
+        setIsSubmitting(false);
         return;
       }
 
@@ -942,7 +1189,7 @@ export default function App() {
       await updateBalanceOnServer(nextBalance);
 
       const newTx: Transaction = {
-        id: `tx-${Date.now()}`,
+        id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         type: 'withdraw',
         amount: price,
         date: new Date().toISOString(),
@@ -973,6 +1220,8 @@ export default function App() {
       setActiveTab('wallet');
     } catch (err) {
       showToast('Error validating BPC voucher.', 'error');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -1115,6 +1364,14 @@ export default function App() {
           id="swiftpay-mobile-container"
           className="w-full max-w-md h-screen md:h-[844px] bg-[#0c0c14] md:rounded-[40px] md:border-[8px] md:border-[#1f1f2e] shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] relative flex flex-col overflow-hidden transition-colors duration-300"
         >
+        {/* Offline Banner Indicator (Point 5) */}
+        {!isOnline && (
+          <div className="bg-amber-500/95 text-slate-950 px-4 py-2 text-[10px] font-bold text-center flex items-center justify-center gap-1.5 z-50 animate-pulse">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            <span>Connection Lost. Running in offline view.</span>
+          </div>
+        )}
+
         {/* Dynamic Interactive Toast Banners */}
         {toastMessage && (
           <div className="absolute top-16 left-4 right-4 z-50 animate-[slideDown_0.2s_ease-out]">
@@ -1699,6 +1956,7 @@ export default function App() {
                     <TransactionList
                       transactions={transactions}
                       limit={4}
+                      onViewDetails={setSelectedReceiptTx}
                     />
                   </div>
 
@@ -2314,7 +2572,7 @@ export default function App() {
 
               {/* -------------------- FLOW 5: BUY AIRTIME SCREEN -------------------- */}
               {currentScreen === 'buy_airtime' && (
-                <div className="p-5 space-y-5 animate-[fadeIn_0.2s_ease-out]">
+                <div className="p-5 space-y-4 animate-[fadeIn_0.2s_ease-out] overflow-y-auto h-[600px] no-scrollbar">
                   <div className="flex items-center gap-3">
                     <button
                       id="btn-airtime-back"
@@ -2323,7 +2581,7 @@ export default function App() {
                     >
                       <ArrowLeft className="h-4 w-4" />
                     </button>
-                    <h4 className="text-base font-bold font-display text-slate-800 dark:text-white">Purchase Airtime &amp; Data</h4>
+                    <h4 className="text-base font-bold font-display text-slate-800 dark:text-white">Purchase Airtime</h4>
                   </div>
 
                   <div className="p-4 bg-white/40 dark:bg-slate-900/30 rounded-2xl border border-slate-150 dark:border-slate-800/40 flex items-center justify-between">
@@ -2338,11 +2596,38 @@ export default function App() {
                     </span>
                   </div>
 
+                  {/* Saved Phone Beneficiaries */}
+                  {phoneBeneficiaries.length > 0 && (
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-mono text-slate-400 block uppercase tracking-wider">Favourite Numbers</label>
+                      <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                        {phoneBeneficiaries.map((ben) => (
+                          <button
+                            key={ben.id}
+                            type="button"
+                            onClick={() => {
+                              setAirtimePhone(ben.phone);
+                              setAirtimeNetwork(ben.network);
+                              showToast(`Selected ${ben.name} (${ben.phone})`, 'info');
+                            }}
+                            className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-left shrink-0 active:scale-95 transition-all flex items-center gap-2"
+                          >
+                            <div className="h-2 w-2 rounded-full bg-teal-400 animate-pulse" />
+                            <div>
+                              <span className="text-[10px] font-bold block text-slate-800 dark:text-white leading-none">{ben.name}</span>
+                              <span className="text-[8px] text-slate-400 font-mono block mt-0.5">{ben.phone}</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <GlassCard className="p-5">
                     <form onSubmit={handlePurchaseAirtime} className="space-y-4">
                       {/* Select Network dropdown */}
                       <div>
-                        <label className="text-[10px] font-mono text-slate-400 block mb-1">Select Network Operator</label>
+                        <label className="text-[10px] font-mono text-slate-400 block mb-1.5 uppercase tracking-wider">Select Network Operator</label>
                         <div className="grid grid-cols-4 gap-2">
                           {MOBILE_NETWORKS.map((net) => (
                             <button
@@ -2350,7 +2635,7 @@ export default function App() {
                               key={net.id}
                               type="button"
                               onClick={() => setAirtimeNetwork(net.id)}
-                              className={`py-3.5 rounded-xl text-center text-xs font-bold border transition-all ${
+                              className={`py-3 rounded-xl text-center text-xs font-bold border transition-all ${
                                 airtimeNetwork === net.id
                                   ? `${net.color} border-transparent ring-2 ring-indigo-500/30 scale-102`
                                   : 'bg-white/40 border-slate-200 text-slate-500 dark:bg-slate-950/40 dark:border-slate-800 hover:text-slate-800 dark:hover:text-white'
@@ -2364,21 +2649,44 @@ export default function App() {
 
                       {/* Phone Number */}
                       <div>
-                        <label className="text-[10px] font-mono text-slate-400 block mb-1">Recipient Phone Number</label>
-                        <input
-                          id="input-airtime-phone"
-                          type="tel"
-                          placeholder="e.g. 08034567890"
-                          required
-                          value={airtimePhone}
-                          onChange={(e) => setAirtimePhone(e.target.value)}
-                          className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono"
-                        />
+                        <label className="text-[10px] font-mono text-slate-400 block mb-1 uppercase tracking-wider">Recipient Phone Number</label>
+                        <div className="flex gap-2">
+                          <input
+                            id="input-airtime-phone"
+                            type="tel"
+                            placeholder="e.g. 08034567890"
+                            required
+                            value={airtimePhone}
+                            onChange={(e) => setAirtimePhone(e.target.value)}
+                            className="flex-1 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (airtimePhone.length < 10) {
+                                showToast('Please type a valid phone first.', 'error');
+                                return;
+                              }
+                              const nickname = prompt('Enter a nickname for this recipient:');
+                              if (nickname) {
+                                const newBen = { id: `pben-${Date.now()}`, name: nickname, phone: airtimePhone, network: airtimeNetwork };
+                                const updated = [newBen, ...phoneBeneficiaries];
+                                setPhoneBeneficiaries(updated);
+                                localStorage.setItem('swiftpay_phone_beneficiaries', JSON.stringify(updated));
+                                showToast('Added to favourites!', 'success');
+                              }
+                            }}
+                            className="px-3 bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-400 rounded-xl text-xs font-bold flex items-center justify-center border border-indigo-500/20 active:scale-95 transition-all"
+                            title="Save as Favourite"
+                          >
+                            ⭐ Save
+                          </button>
+                        </div>
                       </div>
 
-                      {/* Recharge Amount */}
+                      {/* Recharge Amount and Quick Selection */}
                       <div>
-                        <label className="text-[10px] font-mono text-slate-400 block mb-1">Recharge Amount (₦)</label>
+                        <label className="text-[10px] font-mono text-slate-400 block mb-1 uppercase tracking-wider">Recharge Amount (₦)</label>
                         <input
                           id="input-airtime-amount"
                           type="number"
@@ -2388,12 +2696,26 @@ export default function App() {
                           onChange={(e) => setAirtimeAmount(e.target.value)}
                           className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono"
                         />
+                        
+                        {/* Quick Selection Pills */}
+                        <div className="flex gap-2 mt-2 flex-wrap">
+                          {[100, 200, 500, 1000, 2000, 5000].map((amt) => (
+                            <button
+                              key={amt}
+                              type="button"
+                              onClick={() => setAirtimeAmount(amt.toString())}
+                              className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 text-[10px] font-mono font-bold active:scale-95 transition-all"
+                            >
+                              ₦{amt}
+                            </button>
+                          ))}
+                        </div>
                       </div>
 
                       {/* Optional BPC Code input */}
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <label className="text-[10px] font-mono text-slate-400">Redeem BPC Code (Optional)</label>
+                          <label className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">Redeem BPC Code (Optional)</label>
                           <button
                             id="btn-goto-buy-bpc-airtime"
                             type="button"
@@ -2419,44 +2741,28 @@ export default function App() {
                       <button
                         id="btn-purchase-airtime"
                         type="submit"
-                        className="w-full text-xs font-bold uppercase tracking-widest py-3.5 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 active:scale-95 transition-all mt-2"
+                        disabled={isSubmitting}
+                        className={`w-full text-xs font-bold uppercase tracking-widest py-3.5 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 active:scale-95 transition-all mt-2 flex items-center justify-center gap-2 ${
+                          isSubmitting ? 'opacity-60 cursor-not-allowed' : ''
+                        }`}
                       >
-                        Purchase Airtime
+                        {isSubmitting ? (
+                          <>
+                            <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            <span>Processing Securely...</span>
+                          </>
+                        ) : (
+                          'Purchase Airtime'
+                        )}
                       </button>
                     </form>
                   </GlassCard>
-
-                  {/* Hot Packages */}
-                  <div>
-                    <h5 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Discounted Data Bundles</h5>
-                    <div className="grid grid-cols-2 gap-2">
-                      {DATA_PLANS.filter(p => p.network === airtimeNetwork).map((plan) => (
-                        <div
-                          key={plan.id}
-                          onClick={() => {
-                            setAirtimeAmount(plan.price.toString());
-                            setAirtimePlanSelected(plan.id);
-                            showToast(`Selected ${plan.size} Data plan`, 'info');
-                          }}
-                          className={`p-3 rounded-xl border transition-all cursor-pointer text-left ${
-                            airtimePlanSelected === plan.id
-                              ? 'bg-indigo-500/10 border-indigo-500 text-slate-800 dark:text-white'
-                              : 'bg-white/40 border-slate-150 text-slate-500 dark:bg-slate-900/40 dark:border-slate-800 hover:border-slate-200'
-                          }`}
-                        >
-                          <span className="text-xs font-bold text-slate-800 dark:text-slate-100 block">{plan.size}</span>
-                          <span className="text-[9px] text-slate-400 block font-mono">{plan.validity}</span>
-                          <span className="text-xs font-mono font-bold text-indigo-600 dark:text-teal-400 block mt-2">{nairaFormat(plan.price)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
                 </div>
               )}
 
               {/* -------------------- FLOW 5.1: POLISHED DEDICATED DATA PURCHASE SCREEN (Point 12) -------------------- */}
               {currentScreen === 'buy_data' && (
-                <div className="p-5 space-y-5 animate-[fadeIn_0.2s_ease-out]">
+                <div className="p-5 space-y-4 animate-[fadeIn_0.2s_ease-out] overflow-y-auto h-[600px] no-scrollbar">
                   <div className="flex items-center gap-3">
                     <button
                       id="btn-data-back"
@@ -2479,6 +2785,34 @@ export default function App() {
                       BPC Discount active
                     </span>
                   </div>
+
+                  {/* Saved Phone Beneficiaries */}
+                  {phoneBeneficiaries.length > 0 && (
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-mono text-slate-400 block uppercase tracking-wider">Favourite Numbers</label>
+                      <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                        {phoneBeneficiaries.map((ben) => (
+                          <button
+                            key={ben.id}
+                            type="button"
+                            onClick={() => {
+                              setDataPhone(ben.phone);
+                              setDataNetwork(ben.network);
+                              setSelectedDataPlan(null);
+                              showToast(`Selected ${ben.name} (${ben.phone})`, 'info');
+                            }}
+                            className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-left shrink-0 active:scale-95 transition-all flex items-center gap-2"
+                          >
+                            <div className="h-2 w-2 rounded-full bg-teal-400 animate-pulse" />
+                            <div>
+                              <span className="text-[10px] font-bold block text-slate-800 dark:text-white leading-none">{ben.name}</span>
+                              <span className="text-[8px] text-slate-400 font-mono block mt-0.5">{ben.phone}</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   <GlassCard className="p-5">
                     <form onSubmit={handlePurchaseData} className="space-y-4">
@@ -2510,22 +2844,83 @@ export default function App() {
                       {/* Recipient Phone Number */}
                       <div>
                         <label className="text-[10px] font-mono text-slate-400 block mb-1 uppercase tracking-wider">Recipient Phone Number</label>
-                        <input
-                          id="input-data-phone"
-                          type="tel"
-                          placeholder="e.g. 08034567890"
-                          required
-                          value={dataPhone}
-                          onChange={(e) => setDataPhone(e.target.value)}
-                          className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono"
-                        />
+                        <div className="flex gap-2">
+                          <input
+                            id="input-data-phone"
+                            type="tel"
+                            placeholder="e.g. 08034567890"
+                            required
+                            value={dataPhone}
+                            onChange={(e) => setDataPhone(e.target.value)}
+                            className="flex-1 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (dataPhone.length < 10) {
+                                showToast('Please type a valid phone first.', 'error');
+                                return;
+                              }
+                              const nickname = prompt('Enter a nickname for this recipient:');
+                              if (nickname) {
+                                const newBen = { id: `pben-${Date.now()}`, name: nickname, phone: dataPhone, network: dataNetwork };
+                                const updated = [newBen, ...phoneBeneficiaries];
+                                setPhoneBeneficiaries(updated);
+                                localStorage.setItem('swiftpay_phone_beneficiaries', JSON.stringify(updated));
+                                showToast('Added to favourites!', 'success');
+                              }
+                            }}
+                            className="px-3 bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-400 rounded-xl text-xs font-bold flex items-center justify-center border border-indigo-500/20 active:scale-95 transition-all"
+                            title="Save as Favourite"
+                          >
+                            ⭐ Save
+                          </button>
+                        </div>
                       </div>
 
-                      {/* Data Plans Dynamic Selection */}
+                      {/* Professional Categorized Data Plans */}
                       <div>
-                        <label className="text-[10px] font-mono text-slate-400 block mb-2 uppercase tracking-wider">Select Data Package</label>
-                        <div className="grid grid-cols-2 gap-2 max-h-[180px] overflow-y-auto pr-1 no-scrollbar animate-[fadeIn_0.15s_ease-out]">
-                          {DATA_PLANS.filter(p => p.network === dataNetwork).map((plan) => (
+                        <label className="text-[10px] font-mono text-slate-400 block mb-2 uppercase tracking-wider">Data Categories</label>
+                        
+                        {/* Categorization Tabs */}
+                        <div className="flex border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden mb-3.5 bg-slate-50 dark:bg-slate-950/50 p-0.5">
+                          {(['daily', 'weekly', 'monthly', 'sme'] as const).map((tab) => (
+                            <button
+                              key={tab}
+                              type="button"
+                              onClick={() => {
+                                setActiveDataTab(tab);
+                                setSelectedDataPlan(null);
+                              }}
+                              className={`flex-1 text-center py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
+                                activeDataTab === tab
+                                  ? 'bg-gradient-to-r from-indigo-600 to-teal-500 text-white shadow-sm font-extrabold'
+                                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white'
+                              }`}
+                            >
+                              {tab}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Filtered Data Plans Grid */}
+                        <div className="grid grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1 no-scrollbar animate-[fadeIn_0.15s_ease-out]">
+                          {DATA_PLANS.filter(p => {
+                            if (p.network !== dataNetwork) return false;
+                            const sizeInt = parseInt(p.size);
+                            const isGB = p.size.toLowerCase().includes('gb');
+                            
+                            if (activeDataTab === 'daily') {
+                              return !isGB || sizeInt === 1;
+                            } else if (activeDataTab === 'weekly') {
+                              return isGB && (sizeInt >= 2 && sizeInt <= 3);
+                            } else if (activeDataTab === 'monthly') {
+                              return isGB && (sizeInt >= 5 && sizeInt <= 20);
+                            } else if (activeDataTab === 'sme') {
+                              return isGB && sizeInt >= 50;
+                            }
+                            return true;
+                          }).map((plan) => (
                             <div
                               id={`data-plan-option-${plan.id}`}
                               key={plan.id}
@@ -2580,9 +2975,21 @@ export default function App() {
                       <button
                         id="btn-purchase-data"
                         type="submit"
-                        className="w-full text-xs font-extrabold uppercase tracking-widest py-3.5 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 active:scale-95 transition-all mt-2"
+                        disabled={isSubmitting}
+                        className={`w-full text-xs font-extrabold uppercase tracking-widest py-3.5 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 active:scale-95 transition-all mt-2 flex items-center justify-center gap-2 ${
+                          isSubmitting ? 'opacity-60 cursor-not-allowed' : ''
+                        }`}
                       >
-                        {selectedDataPlan ? `Purchase ${selectedDataPlan.size} (${nairaFormat(selectedDataPlan.price)})` : 'Select Data Package'}
+                        {isSubmitting ? (
+                          <>
+                            <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            <span>Processing Securely...</span>
+                          </>
+                        ) : selectedDataPlan ? (
+                          `Purchase ${selectedDataPlan.size} (${nairaFormat(selectedDataPlan.price)})`
+                        ) : (
+                          'Select Data Package'
+                        )}
                       </button>
                     </form>
                   </GlassCard>
@@ -2706,9 +3113,19 @@ export default function App() {
                       <button
                         id="btn-submit-transfer"
                         type="submit"
-                        className="w-full text-xs font-bold uppercase tracking-widest py-3.5 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 active:scale-95 transition-all mt-2"
+                        disabled={isSubmitting}
+                        className={`w-full text-xs font-bold uppercase tracking-widest py-3.5 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 active:scale-95 transition-all mt-2 flex items-center justify-center gap-2 ${
+                          isSubmitting ? 'opacity-60 cursor-not-allowed' : ''
+                        }`}
                       >
-                        Submit Cashout
+                        {isSubmitting ? (
+                          <>
+                            <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            <span>Processing Securely...</span>
+                          </>
+                        ) : (
+                          'Submit Cashout'
+                        )}
                       </button>
                     </form>
                   </GlassCard>
@@ -2735,6 +3152,7 @@ export default function App() {
                   <TransactionList
                     transactions={transactions}
                     showFilters={true}
+                    onViewDetails={setSelectedReceiptTx}
                   />
                 </div>
               )}
@@ -2942,6 +3360,56 @@ export default function App() {
                 }} />
               )}
 
+              {/* -------------------- VIEW 3.7: SECURITY AUDITS / DEVICES (Point 1) -------------------- */}
+              {currentScreen === 'security_audits' && (
+                <div className="animate-[fadeIn_0.2s_ease-out] overflow-y-auto h-[600px] no-scrollbar">
+                  <DevicesHistory
+                    devices={devices}
+                    onLogoutDevice={(id) => {
+                      setDevices(devices.filter(d => d.id !== id));
+                      showToast('Device session revoked successfully.', 'success');
+                    }}
+                    onLogoutAllOtherDevices={() => {
+                      setDevices(devices.filter(d => d.isCurrent));
+                      showToast('All other sessions revoked.', 'success');
+                    }}
+                    loginHistory={loginHistory}
+                    onBack={() => {
+                      setCurrentScreen('dashboard');
+                      setActiveTab('profile');
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* -------------------- VIEW 3.8: ADMIN PANEL (Point 10) -------------------- */}
+              {(currentScreen === 'admin' || currentScreen === 'admin_dashboard') && (
+                <div className="animate-[fadeIn_0.2s_ease-out] overflow-y-auto h-[600px] no-scrollbar">
+                  <AdminPanel
+                    currentUserEmail={user?.email || 'admin@swiftpay.com'}
+                    transactions={transactions}
+                    onBack={() => {
+                      setCurrentScreen('dashboard');
+                      setActiveTab('profile');
+                    }}
+                    onToast={(msg, type) => showToast(msg, type)}
+                    onAddGlobalNotification={(title, body, type) => {
+                      const newNotif = {
+                        id: 'notif-' + Date.now(),
+                        title,
+                        body,
+                        date: new Date().toISOString(),
+                        unread: true
+                      };
+                      const updated = [newNotif, ...notifications];
+                      setNotifications(updated);
+                      localStorage.setItem('swiftpay_notifications', JSON.stringify(updated));
+                    }}
+                    onSendSimulatedEmail={(to, subject, body) => sendSimulatedEmail(to, subject, body)}
+                  />
+                </div>
+              )}
+
             </div>
 
             {/* Bottom floating menus & Navigation sheets */}
@@ -3108,9 +3576,19 @@ export default function App() {
                     <button
                       id="btn-withdraw-submit"
                       type="submit"
-                      className="w-full text-xs font-bold uppercase tracking-widest py-3.5 bg-gradient-to-r from-red-600 to-indigo-600 hover:from-red-500 hover:to-indigo-500 text-white rounded-xl shadow-lg transition-all"
+                      disabled={isSubmitting}
+                      className={`w-full text-xs font-bold uppercase tracking-widest py-3.5 bg-gradient-to-r from-red-600 to-indigo-600 hover:from-red-500 hover:to-indigo-500 text-white rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 ${
+                        isSubmitting ? 'opacity-60 cursor-not-allowed' : ''
+                      }`}
                     >
-                      Authorize Cashout
+                      {isSubmitting ? (
+                        <>
+                          <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Processing Securely...</span>
+                        </>
+                      ) : (
+                        'Authorize Cashout'
+                      )}
                     </button>
                   </form>
                 </div>
@@ -3153,6 +3631,132 @@ export default function App() {
                   >
                     Got It, Thank You!
                   </button>
+                </div>
+              </div>
+            )}
+
+            {/* Professional Transaction Receipt Modal */}
+            {selectedReceiptTx && (
+              <TransactionReceipt
+                transaction={selectedReceiptTx}
+                onClose={() => setSelectedReceiptTx(null)}
+                onShare={(summary) => {
+                  navigator.clipboard.writeText(summary);
+                  showToast('Receipt details copied to clipboard!', 'success');
+                }}
+                onToast={(msg, type) => showToast(msg, type)}
+              />
+            )}
+
+            {/* Inactivity Timeout Warning modal */}
+            {inactivityCountdown !== null && (
+              <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-6 animate-[fadeIn_0.2s_ease-out]">
+                <div className="bg-slate-900 border border-red-500/30 rounded-3xl p-6 w-full max-w-sm shadow-2xl text-center space-y-4">
+                  <div className="h-12 w-12 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center mx-auto animate-pulse">
+                    <Clock className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h5 className="text-sm font-bold text-white font-display uppercase">Session Expiring</h5>
+                    <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+                      You will be automatically logged out in <span className="text-red-400 font-bold font-mono">{inactivityCountdown}</span> seconds due to inactivity.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setInactivityCountdown(null);
+                      showToast('Session extended successfully!', 'success');
+                    }}
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-teal-500 text-white text-xs font-bold uppercase tracking-wider active:scale-95 transition-all"
+                  >
+                    Extend Session
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Two-Factor Authentication (OTP verification overlay) */}
+            {securityOtpSession && (
+              <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-sm z-50 flex items-center justify-center p-6 animate-[fadeIn_0.2s_ease-out]">
+                <div className="w-full max-w-sm bg-slate-900 border border-white/10 rounded-3xl p-6 space-y-5 shadow-2xl">
+                  <div className="text-center">
+                    <div className="h-12 w-12 rounded-2xl bg-teal-500/10 text-teal-400 flex items-center justify-center mx-auto mb-3">
+                      <ShieldCheck className="h-6 w-6" />
+                    </div>
+                    <h4 className="text-base font-bold font-display text-white">Two-Factor Authentication</h4>
+                    <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+                      A secure verification code has been dispatched to your email. Enter it below to proceed with this action.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-mono text-slate-400 block mb-1.5 uppercase tracking-wider">6-Digit Code</label>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      placeholder="e.g. 123456"
+                      value={securityOtp}
+                      onChange={(e) => setSecurityOtp(e.target.value)}
+                      className="w-full text-center text-sm tracking-widest bg-slate-950 border border-white/10 rounded-xl py-3 text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono"
+                    />
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => {
+                        if (securityOtp.trim() === securityOtpSession.otp) {
+                          const { purpose, data } = securityOtpSession;
+                          setSecurityOtpSession(null);
+                          setSecurityOtp('');
+                          showToast('Action authorized successfully!', 'success');
+                          
+                          if (purpose === 'password_change') {
+                            handleConfirmPasswordChange(data);
+                          } else if (purpose === 'email_change') {
+                            handleConfirmEmailChange(data);
+                          } else if (purpose === 'pin_change') {
+                            handleConfirmPinChange(data);
+                          } else if (purpose === 'transfer') {
+                            handleConfirmTransferSubmit(data);
+                          }
+                        } else {
+                          showToast('Incorrect authorization code. Check the simulated inbox.', 'error');
+                        }
+                      }}
+                      className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 text-white rounded-xl text-xs font-bold uppercase tracking-wider"
+                    >
+                      Authorize
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSecurityOtpSession(null);
+                        setSecurityOtp('');
+                      }}
+                      className="px-5 py-3 bg-white/5 hover:bg-white/10 text-slate-300 rounded-xl text-xs font-bold"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Simulated Email Client Overlay Tray */}
+            {isEmailSimulatorOpen && (
+              <div className="absolute inset-x-0 bottom-0 top-12 bg-slate-950/95 backdrop-blur-md z-50 flex flex-col animate-[slideUp_0.25s_ease-out]">
+                <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0 bg-slate-900">
+                  <span className="text-xs font-bold font-mono tracking-wider text-teal-400 uppercase">Simulated Email Inbox</span>
+                  <button
+                    onClick={() => setIsEmailSimulatorOpen(false)}
+                    className="p-1.5 bg-white/5 hover:bg-white/10 rounded-full text-slate-400"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 no-scrollbar">
+                  <EmailSimulator
+                    emails={emails}
+                    onMarkAsRead={(id) => setEmails(emails.map(e => e.id === id ? { ...e, read: true } : e))}
+                    onDeleteEmail={(id) => setEmails(emails.filter(e => e.id !== id))}
+                    onClearAll={() => setEmails([])}
+                  />
                 </div>
               </div>
             )}

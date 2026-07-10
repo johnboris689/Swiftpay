@@ -171,6 +171,8 @@ export default function App() {
   const [transferAmount, setTransferAmount] = useState('');
   const [transferBpcCode, setTransferBpcCode] = useState('');
   const [isVerifyingAccount, setIsVerifyingAccount] = useState(false);
+  const [transferVerified, setTransferVerified] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Direct Withdraw flow - Redesigned into dedicated screen with Real-time Account Verification
@@ -180,6 +182,11 @@ export default function App() {
   const [withdrawAccName, setWithdrawAccName] = useState('');
   const [withdrawBpcCode, setWithdrawBpcCode] = useState('');
   const [isVerifyingWithdrawAccount, setIsVerifyingWithdrawAccount] = useState(false);
+  const [withdrawVerified, setWithdrawVerified] = useState(false);
+  const [withdrawError, setWithdrawError] = useState<string | null>(null);
+
+  // Cache for account verifications (Session Cache)
+  const verificationCacheRef = useRef<Record<string, { success: boolean; accountName?: string; error?: string }>>({});
 
   // Mandatory BPC Voucher missing overlay config
   const [voucherErrorModal, setVoucherErrorModal] = useState<{ open: boolean; message: string } | null>(null);
@@ -781,7 +788,28 @@ export default function App() {
   useEffect(() => {
     let active = true;
     if (transferAccNum.length === 10 && transferBank) {
+      // Check cache first
+      const cacheKey = `${transferBank}_${transferAccNum}`;
+      const cached = verificationCacheRef.current[cacheKey];
+      if (cached) {
+        if (cached.success) {
+          setTransferAccName(cached.accountName || '');
+          setTransferVerified(true);
+          setTransferError(null);
+        } else {
+          setTransferAccName('');
+          setTransferVerified(false);
+          setTransferError(cached.error || 'Unable to verify account details.');
+          showToast(cached.error || 'Unable to verify account details.', 'error');
+        }
+        return;
+      }
+
       setIsVerifyingAccount(true);
+      setTransferVerified(false);
+      setTransferError(null);
+      setTransferAccName('');
+
       fetch('/api/auth/verify-account', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -793,19 +821,35 @@ export default function App() {
         setIsVerifyingAccount(false);
         if (ok && data.success) {
           setTransferAccName(data.accountName);
+          setTransferVerified(true);
+          setTransferError(null);
+          // Cache successful verification
+          verificationCacheRef.current[cacheKey] = { success: true, accountName: data.accountName };
         } else {
           setTransferAccName('');
-          showToast(data.error || 'Unable to verify account details.', 'error');
+          setTransferVerified(false);
+          const errMsg = data.error || 'Unable to verify account details.';
+          setTransferError(errMsg);
+          showToast(errMsg, 'error');
+          // Cache failed verification
+          verificationCacheRef.current[cacheKey] = { success: false, error: errMsg };
         }
       })
       .catch(err => {
         if (!active) return;
         setIsVerifyingAccount(false);
         setTransferAccName('');
-        showToast('Unable to verify account details.', 'error');
+        setTransferVerified(false);
+        const errMsg = 'Unable to verify account details.';
+        setTransferError(errMsg);
+        showToast(errMsg, 'error');
+        // Cache failed verification
+        verificationCacheRef.current[cacheKey] = { success: false, error: errMsg };
       });
     } else {
       setTransferAccName('');
+      setTransferVerified(false);
+      setTransferError(null);
     }
     return () => { active = false; };
   }, [transferAccNum, transferBank]);
@@ -814,7 +858,28 @@ export default function App() {
   useEffect(() => {
     let active = true;
     if (withdrawAccount.length === 10 && withdrawBank) {
+      // Check cache first
+      const cacheKey = `${withdrawBank}_${withdrawAccount}`;
+      const cached = verificationCacheRef.current[cacheKey];
+      if (cached) {
+        if (cached.success) {
+          setWithdrawAccName(cached.accountName || '');
+          setWithdrawVerified(true);
+          setWithdrawError(null);
+        } else {
+          setWithdrawAccName('');
+          setWithdrawVerified(false);
+          setWithdrawError(cached.error || 'Unable to verify account details.');
+          showToast(cached.error || 'Unable to verify account details.', 'error');
+        }
+        return;
+      }
+
       setIsVerifyingWithdrawAccount(true);
+      setWithdrawVerified(false);
+      setWithdrawError(null);
+      setWithdrawAccName('');
+
       fetch('/api/auth/verify-account', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -826,19 +891,35 @@ export default function App() {
         setIsVerifyingWithdrawAccount(false);
         if (ok && data.success) {
           setWithdrawAccName(data.accountName);
+          setWithdrawVerified(true);
+          setWithdrawError(null);
+          // Cache successful verification
+          verificationCacheRef.current[cacheKey] = { success: true, accountName: data.accountName };
         } else {
           setWithdrawAccName('');
-          showToast(data.error || 'Unable to verify account details.', 'error');
+          setWithdrawVerified(false);
+          const errMsg = data.error || 'Unable to verify account details.';
+          setWithdrawError(errMsg);
+          showToast(errMsg, 'error');
+          // Cache failed verification
+          verificationCacheRef.current[cacheKey] = { success: false, error: errMsg };
         }
       })
       .catch(err => {
         if (!active) return;
         setIsVerifyingWithdrawAccount(false);
         setWithdrawAccName('');
-        showToast('Unable to verify account details.', 'error');
+        setWithdrawVerified(false);
+        const errMsg = 'Unable to verify account details.';
+        setWithdrawError(errMsg);
+        showToast(errMsg, 'error');
+        // Cache failed verification
+        verificationCacheRef.current[cacheKey] = { success: false, error: errMsg };
       });
     } else {
       setWithdrawAccName('');
+      setWithdrawVerified(false);
+      setWithdrawError(null);
     }
     return () => { active = false; };
   }, [withdrawAccount, withdrawBank]);
@@ -3087,8 +3168,14 @@ export default function App() {
                         <select
                           id="transfer-select-bank"
                           value={transferBank}
-                          onChange={(e) => setTransferBank(e.target.value)}
-                          className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400"
+                          onChange={(e) => {
+                            setTransferBank(e.target.value);
+                            setTransferVerified(false);
+                            setTransferError(null);
+                            setTransferAccName('');
+                          }}
+                          disabled={isVerifyingAccount}
+                          className={`w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400 ${isVerifyingAccount ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                           {SUPPORTED_BANKS.map((b) => (
                             <option key={b} value={b}>
@@ -3110,23 +3197,36 @@ export default function App() {
                           onChange={(e) => {
                             if (e.target.value.length <= 10) {
                               setTransferAccNum(e.target.value);
+                              setTransferVerified(false);
+                              setTransferError(null);
+                              setTransferAccName('');
                             }
                           }}
-                          className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono"
+                          disabled={isVerifyingAccount}
+                          className={`w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono ${isVerifyingAccount ? 'opacity-50 cursor-not-allowed' : ''}`}
                         />
                       </div>
 
                       {/* Account Name Indicator */}
-                      {isVerifyingAccount ? (
-                        <div className="py-2 px-3 rounded-lg bg-indigo-500/5 text-[10px] font-mono text-indigo-400 animate-pulse">
-                          Resolving bank node... verifying credentials
+                      {isVerifyingAccount && (
+                        <div className="py-3 px-4 rounded-xl bg-indigo-500/5 border border-indigo-500/10 text-xs font-mono text-indigo-400 flex items-center gap-2.5 animate-pulse">
+                          <div className="h-4 w-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                          <span>Verifying account...</span>
                         </div>
-                      ) : (
-                        transferAccName && (
-                          <div className="py-2 px-3 rounded-lg bg-emerald-500/10 border border-emerald-500/15 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 font-mono uppercase">
-                            Recipient: {transferAccName}
-                          </div>
-                        )
+                      )}
+
+                      {!isVerifyingAccount && transferVerified && transferAccName && (
+                        <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs font-mono text-emerald-600 dark:text-emerald-400 animate-[fadeIn_0.15s_ease-out]">
+                          <div className="font-extrabold flex items-center gap-1">✔ Account Verified</div>
+                          <div className="mt-1 font-bold text-sm text-slate-800 dark:text-white uppercase font-sans">Account Name: {transferAccName}</div>
+                        </div>
+                      )}
+
+                      {!isVerifyingAccount && transferError && (
+                        <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs font-mono text-rose-600 dark:text-rose-400 animate-[fadeIn_0.15s_ease-out]">
+                          <div className="font-extrabold flex items-center gap-1">❌ Account verification failed.</div>
+                          <div className="mt-1 text-[11px] leading-normal text-rose-500 font-sans">Unable to verify account details.</div>
+                        </div>
                       )}
 
                       {/* Amount */}
@@ -3139,18 +3239,20 @@ export default function App() {
                           required
                           value={transferAmount}
                           onChange={(e) => setTransferAmount(e.target.value)}
-                          className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono"
+                          disabled={!transferVerified || isVerifyingAccount}
+                          className={`w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono ${(!transferVerified || isVerifyingAccount) ? 'opacity-40 cursor-not-allowed select-none' : ''}`}
                         />
                       </div>
 
                       {/* BPC Code field */}
-                      <div>
+                      <div className={(!transferVerified || isVerifyingAccount) ? 'opacity-40 pointer-events-none select-none' : ''}>
                         <div className="flex items-center justify-between mb-1">
                           <label className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-bold text-rose-500">Apply BPC Code (MANDATORY)</label>
                           <button
                             id="btn-goto-buy-bpc-transfer"
                             type="button"
                             onClick={() => setCurrentScreen('buy_bpc')}
+                            disabled={!transferVerified || isVerifyingAccount}
                             className="text-[9px] font-bold text-indigo-600 dark:text-teal-400 hover:underline inline-flex items-center gap-1"
                           >
                             Buy BPC code <ExternalLink className="h-2.5 w-2.5" />
@@ -3162,10 +3264,11 @@ export default function App() {
                           placeholder="e.g. BPC-7674-2206-6501"
                           value={transferBpcCode}
                           onChange={(e) => setTransferBpcCode(e.target.value)}
+                          disabled={!transferVerified || isVerifyingAccount}
                           className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-rose-500 font-mono tracking-widest uppercase"
                         />
                         {!transferBpcCode ? (
-                          <div className="mt-1.5 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[10px] text-amber-600 dark:text-amber-400 leading-normal">
+                          <div className="mt-1.5 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[10px] text-amber-600 dark:text-amber-400 leading-normal font-sans">
                             BPC voucher is required. If you don't have one, tap{' '}
                             <button
                               type="button"
@@ -3176,11 +3279,11 @@ export default function App() {
                             </button>.
                           </div>
                         ) : !isVoucherValid(transferBpcCode) ? (
-                          <div className="mt-1.5 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[10px] text-rose-600 dark:text-rose-400 font-medium">
+                          <div className="mt-1.5 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[10px] text-rose-600 dark:text-rose-400 font-medium font-sans">
                             Invalid BPC voucher.
                           </div>
                         ) : (
-                          <div className="mt-1.5 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                          <div className="mt-1.5 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] text-emerald-600 dark:text-emerald-400 font-medium font-sans">
                             ✓ Voucher valid: BPC-7674-2206-6501
                           </div>
                         )}
@@ -3192,6 +3295,7 @@ export default function App() {
                         disabled={
                           !transferAccNum ||
                           transferAccNum.length !== 10 ||
+                          !transferVerified ||
                           !transferAccName ||
                           !transferAmount ||
                           parseInt(transferAmount) <= 0 ||
@@ -3199,7 +3303,7 @@ export default function App() {
                           isSubmitting
                         }
                         className={`w-full text-xs font-bold uppercase tracking-widest py-3.5 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 active:scale-95 transition-all mt-2 flex items-center justify-center gap-2 ${
-                          (!transferAccNum || transferAccNum.length !== 10 || !transferAccName || !transferAmount || parseInt(transferAmount) <= 0 || !isVoucherValid(transferBpcCode) || isSubmitting) ? 'opacity-50 cursor-not-allowed' : ''
+                          (!transferAccNum || transferAccNum.length !== 10 || !transferVerified || !transferAccName || !transferAmount || parseInt(transferAmount) <= 0 || !isVoucherValid(transferBpcCode) || isSubmitting) ? 'opacity-50 cursor-not-allowed' : ''
                         }`}
                       >
                         {isSubmitting ? (
@@ -3620,8 +3724,14 @@ export default function App() {
                       <select
                         id="withdraw-select-bank"
                         value={withdrawBank}
-                        onChange={(e) => setWithdrawBank(e.target.value)}
-                        className="w-full text-xs bg-slate-100 dark:bg-slate-950 border border-transparent dark:border-slate-800 rounded-xl px-4 py-3 text-slate-800 dark:text-white"
+                        onChange={(e) => {
+                          setWithdrawBank(e.target.value);
+                          setWithdrawVerified(false);
+                          setWithdrawError(null);
+                          setWithdrawAccName('');
+                        }}
+                        disabled={isVerifyingWithdrawAccount}
+                        className={`w-full text-xs bg-slate-100 dark:bg-slate-950 border border-transparent dark:border-slate-800 rounded-xl px-4 py-3 text-slate-800 dark:text-white ${isVerifyingWithdrawAccount ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                         {SUPPORTED_BANKS.map((b) => (
                           <option key={b} value={b}>
@@ -3642,23 +3752,36 @@ export default function App() {
                         onChange={(e) => {
                           if (e.target.value.length <= 10) {
                             setWithdrawAccount(e.target.value);
+                            setWithdrawVerified(false);
+                            setWithdrawError(null);
+                            setWithdrawAccName('');
                           }
                         }}
-                        className="w-full text-xs bg-slate-100 dark:bg-slate-950 border border-transparent dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white font-mono"
+                        disabled={isVerifyingWithdrawAccount}
+                        className={`w-full text-xs bg-slate-100 dark:bg-slate-950 border border-transparent dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white font-mono ${isVerifyingWithdrawAccount ? 'opacity-50 cursor-not-allowed' : ''}`}
                       />
                     </div>
 
                     {/* Account Name Indicator */}
-                    {isVerifyingWithdrawAccount ? (
-                      <div className="py-2 px-3 rounded-lg bg-indigo-500/5 text-[10px] font-mono text-indigo-400 animate-pulse">
-                        Resolving bank node... verifying credentials
+                    {isVerifyingWithdrawAccount && (
+                      <div className="py-3 px-4 rounded-xl bg-indigo-500/5 border border-indigo-500/10 text-xs font-mono text-indigo-400 flex items-center gap-2.5 animate-pulse">
+                        <div className="h-4 w-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                        <span>Verifying account...</span>
                       </div>
-                    ) : (
-                      withdrawAccName && (
-                        <div className="py-2 px-3 rounded-lg bg-emerald-500/10 border border-emerald-500/15 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 font-mono uppercase animate-[fadeIn_0.15s_ease-out]">
-                          Recipient: {withdrawAccName}
-                        </div>
-                      )
+                    )}
+
+                    {!isVerifyingWithdrawAccount && withdrawVerified && withdrawAccName && (
+                      <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs font-mono text-emerald-600 dark:text-emerald-400 animate-[fadeIn_0.15s_ease-out]">
+                        <div className="font-extrabold flex items-center gap-1">✔ Account Verified</div>
+                        <div className="mt-1 font-bold text-sm text-slate-800 dark:text-white uppercase font-sans">Account Name: {withdrawAccName}</div>
+                      </div>
+                    )}
+
+                    {!isVerifyingWithdrawAccount && withdrawError && (
+                      <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs font-mono text-rose-600 dark:text-rose-400 animate-[fadeIn_0.15s_ease-out]">
+                        <div className="font-extrabold flex items-center gap-1">❌ Account verification failed.</div>
+                        <div className="mt-1 text-[11px] leading-normal text-rose-500 font-sans">Unable to verify account details.</div>
+                      </div>
                     )}
 
                     <div>
@@ -3670,12 +3793,13 @@ export default function App() {
                         required
                         value={withdrawAmount}
                         onChange={(e) => setWithdrawAmount(e.target.value)}
-                        className="w-full text-xs bg-slate-100 dark:bg-slate-950 border border-transparent dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white font-mono font-bold"
+                        disabled={!withdrawVerified || isVerifyingWithdrawAccount}
+                        className={`w-full text-xs bg-slate-100 dark:bg-slate-950 border border-transparent dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white font-mono font-bold ${(!withdrawVerified || isVerifyingWithdrawAccount) ? 'opacity-40 cursor-not-allowed select-none' : ''}`}
                       />
                     </div>
 
                     {/* Mandatory BPC Voucher */}
-                    <div>
+                    <div className={(!withdrawVerified || isVerifyingWithdrawAccount) ? 'opacity-40 pointer-events-none select-none' : ''}>
                       <div className="flex items-center justify-between mb-1">
                         <label className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-bold text-rose-500">BPC Voucher Code (MANDATORY)</label>
                         <button
@@ -3685,6 +3809,7 @@ export default function App() {
                             setIsWithdrawOpen(false);
                             setCurrentScreen('buy_bpc');
                           }}
+                          disabled={!withdrawVerified || isVerifyingWithdrawAccount}
                           className="text-[9px] font-bold text-indigo-600 dark:text-teal-400 hover:underline"
                         >
                           Buy BPC Voucher
@@ -3696,10 +3821,11 @@ export default function App() {
                         placeholder="e.g. BPC-7674-2206-6501"
                         value={withdrawBpcCode}
                         onChange={(e) => setWithdrawBpcCode(e.target.value)}
+                        disabled={!withdrawVerified || isVerifyingWithdrawAccount}
                         className="w-full text-xs bg-slate-100 dark:bg-slate-950 border border-transparent dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-rose-500 font-mono tracking-widest uppercase"
                       />
                       {!withdrawBpcCode ? (
-                        <div className="mt-1.5 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[10px] text-amber-600 dark:text-amber-400 leading-normal">
+                        <div className="mt-1.5 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[10px] text-amber-600 dark:text-amber-400 leading-normal font-sans">
                           BPC voucher is required. If you don't have one, tap{' '}
                           <button
                             type="button"
@@ -3713,11 +3839,11 @@ export default function App() {
                           </button>.
                         </div>
                       ) : !isVoucherValid(withdrawBpcCode) ? (
-                        <div className="mt-1.5 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[10px] text-rose-600 dark:text-rose-400 font-medium">
+                        <div className="mt-1.5 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[10px] text-rose-600 dark:text-rose-400 font-medium font-sans">
                           Invalid BPC voucher.
                         </div>
                       ) : (
-                        <div className="mt-1.5 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                        <div className="mt-1.5 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] text-emerald-600 dark:text-emerald-400 font-medium font-sans">
                           ✓ Voucher valid: BPC-7674-2206-6501
                         </div>
                       )}
@@ -3729,6 +3855,7 @@ export default function App() {
                       disabled={
                         !withdrawAccount ||
                         withdrawAccount.length !== 10 ||
+                        !withdrawVerified ||
                         !withdrawAccName ||
                         !withdrawAmount ||
                         parseInt(withdrawAmount) <= 0 ||
@@ -3736,7 +3863,7 @@ export default function App() {
                         isSubmitting
                       }
                       className={`w-full text-xs font-bold uppercase tracking-widest py-3.5 bg-gradient-to-r from-red-600 to-indigo-600 hover:from-red-500 hover:to-indigo-500 text-white rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 ${
-                        (!withdrawAccount || withdrawAccount.length !== 10 || !withdrawAccName || !withdrawAmount || parseInt(withdrawAmount) <= 0 || !isVoucherValid(withdrawBpcCode) || isSubmitting) ? 'opacity-50 cursor-not-allowed' : ''
+                        (!withdrawAccount || withdrawAccount.length !== 10 || !withdrawVerified || !withdrawAccName || !withdrawAmount || parseInt(withdrawAmount) <= 0 || !isVoucherValid(withdrawBpcCode) || isSubmitting) ? 'opacity-50 cursor-not-allowed' : ''
                       }`}
                     >
                       {isSubmitting ? (

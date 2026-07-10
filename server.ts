@@ -737,6 +737,79 @@ app.post('/api/user/update-profile', authenticateToken, (req: any, res) => {
   });
 });
 
+const BANK_NAME_TO_CODE: Record<string, string> = {
+  "9PSB": "120001",
+  "Access Bank Limited": "044",
+  "Access Holdings Plc": "044",
+  "Aella App": "50962",
+  "Airtel Money": "120004",
+  "Alternative Bank Limited": "000032",
+  "Carbon": "565",
+  "Chipper Cash": "50594",
+  "Citibank Nigeria Limited": "023",
+  "Coronation Merchant Bank Limited": "315",
+  "Cowrywise": "50123",
+  "Ecobank Nigeria Limited": "050",
+  "Eyowo": "50126",
+  "FairMoney": "50515",
+  "FBN Holdings Plc": "011",
+  "FBN Merchant Bank Limited": "309",
+  "FCMB Group Plc": "214",
+  "Fidelity Bank Plc": "070",
+  "First Bank of Nigeria Limited": "011",
+  "First City Monument Bank Limited (FCMB)": "214",
+  "Flutterwave Barter": "50325",
+  "FSDH Holding Company Limited": "321",
+  "FSDH Merchant Bank Limited": "321",
+  "Globus Bank Limited": "00103",
+  "Greenwich Merchant Bank Limited": "307",
+  "Guaranty Trust Bank Limited (GTBank)": "058",
+  "Guaranty Trust Holding Company Plc": "058",
+  "Heritage Bank Plc": "030",
+  "Hope PSB": "120002",
+  "Jaiz Bank Plc": "082",
+  "Keystone Bank Limited": "053",
+  "Kuda Bank": "50211",
+  "Lotus Bank Limited": "302",
+  "Moniepoint": "50515",
+  "MoneyMaster PSB": "120003",
+  "MTN MoMo PSB": "120003",
+  "Nova Merchant Bank Limited": "311",
+  "OPay": "999992",
+  "Optimus Bank Limited": "00107",
+  "PalmPay": "999991",
+  "Parallex Bank Limited": "104",
+  "PiggyVest": "50741",
+  "Polaris Bank Limited": "076",
+  "Premium Trust Bank Limited": "000031",
+  "Providus Bank Limited": "101",
+  "Rand Merchant Bank Limited": "302",
+  "Rubies": "125",
+  "Signature Bank Limited": "000034",
+  "SmartCash PSB": "120004",
+  "Stanbic IBTC Bank Limited": "221",
+  "Stanbic IBTC Holdings Plc": "221",
+  "Standard Chartered Bank Limited": "068",
+  "Sterling Bank Limited": "050",
+  "Sterling Financial Holdings Limited": "050",
+  "SunTrust Bank Nigeria Limited": "100",
+  "Taj Bank Limited": "302",
+  "Titan Trust Bank Limited": "102",
+  "UBA (United Bank for Africa Plc)": "033",
+  "Union Bank of Nigeria Plc": "032",
+  "Unity Bank Plc": "215",
+  "V Bank": "50962",
+  "Wema Bank Plc": "094",
+  "Zenith Bank Plc": "057"
+};
+
+const isVoucherValid = (code: string | undefined): boolean => {
+  if (!code) return false;
+  const norm = code.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const target = 'BPC-7674-2206-6501'.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return norm === target;
+};
+
 // Verify Voucher
 app.post('/api/auth/verify-voucher', (req, res) => {
   const { voucherCode } = req.body;
@@ -744,20 +817,16 @@ app.post('/api/auth/verify-voucher', (req, res) => {
     return res.status(400).json({ error: 'Please enter a voucher code.' });
   }
 
-  const codeClean = voucherCode.trim();
-  const db = readDb();
-  const voucher = db.vouchers.find((v: any) => v.code === codeClean);
-
-  if (voucher) {
-    return res.json({ success: true, amount: voucher.amount });
+  if (isVoucherValid(voucherCode)) {
+    return res.json({ success: true, amount: 6500 });
   } else {
     logDiagnostic('API_ERROR', 'Invalid voucher code attempt', { voucherCode });
-    return res.status(400).json({ error: 'Invalid BPC Voucher code.' });
+    return res.status(400).json({ error: 'Invalid BPC voucher.' });
   }
 });
 
 // Verify Bank Account
-app.post('/api/auth/verify-account', (req, res) => {
+app.post('/api/auth/verify-account', async (req, res) => {
   const { bank, accountNumber } = req.body;
   if (!bank || !accountNumber) {
     return res.status(400).json({ error: 'Bank and account number are required.' });
@@ -767,28 +836,459 @@ app.post('/api/auth/verify-account', (req, res) => {
     return res.status(400).json({ error: 'Account number must be exactly 10 digits.' });
   }
 
-  // Pre-determined responses for testing
-  if (accountNumber === '8960723295') {
-    return res.json({ success: true, accountName: 'Pwamunadi Ishaku' });
-  }
-  if (accountNumber === '0803456789') {
-    return res.json({ success: true, accountName: 'Adebayo Samuel' });
+  const apiKey = process.env.PAYSTACK_SECRET_KEY;
+  if (!apiKey) {
+    return res.status(400).json({ error: 'Unable to verify account details. PAYSTACK_SECRET_KEY is missing.' });
   }
 
-  // Generate deterministic name
-  const firstNames = ['Olawale', 'Chinedu', 'Abubakar', 'Emeka', 'Babatunde', 'Chidi', 'Fatima', 'Oluwaseun', 'Amina', 'Ngozi'];
-  const lastNames = ['Okonkwo', 'Balogun', 'Adedayo', 'Danjuma', 'Adeyemi', 'Okeke', 'Obi', 'Sani', 'Aliyu', 'Nwachukwu'];
+  // Get bank code from map or fetch
+  let bankCode = BANK_NAME_TO_CODE[bank];
+  if (!bankCode) {
+    try {
+      const bankRes = await fetch('https://api.paystack.co/bank?country=nigeria', {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`
+        }
+      });
+      if (bankRes.ok) {
+        const bankData = await bankRes.json() as any;
+        if (bankData.status && Array.isArray(bankData.data)) {
+          const match = bankData.data.find((b: any) => 
+            b.name.toLowerCase().includes(bank.toLowerCase()) ||
+            bank.toLowerCase().includes(b.name.toLowerCase())
+          );
+          if (match) {
+            bankCode = match.code;
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching banks from Paystack:', err);
+    }
+  }
 
-  const sumDigits = accountNumber.split('').reduce((acc: number, val: string) => acc + parseInt(val), 0);
-  const firstName = firstNames[sumDigits % firstNames.length];
-  const lastName = lastNames[(sumDigits * 3) % lastNames.length];
+  if (!bankCode) {
+    return res.status(400).json({ error: `Could not resolve bank code for ${bank}` });
+  }
 
-  setTimeout(() => {
-    res.json({
-      success: true,
-      accountName: `${firstName} ${lastName}`
+  try {
+    const resolveRes = await fetch(`https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`, {
+      headers: {
+        'Authorization': `Bearer ${apiKey}`
+      }
     });
-  }, 400);
+
+    const resolveData = await resolveRes.json() as any;
+
+    if (!resolveRes.ok || !resolveData.status) {
+      return res.status(400).json({ error: resolveData.message || 'Unable to verify account details.' });
+    }
+
+    return res.json({
+      success: true,
+      accountName: resolveData.data.account_name
+    });
+  } catch (err: any) {
+    console.error('Error resolving bank account:', err);
+    return res.status(500).json({ error: 'Unable to verify account details.' });
+  }
+});
+
+// Transaction endpoint for Airtime Purchase
+app.post('/api/transactions/airtime', authenticateToken, (req: any, res) => {
+  const { phoneNumber, network, amount, voucherCode } = req.body;
+  const email = req.userEmail;
+
+  if (!voucherCode) {
+    return res.status(400).json({ error: "BPC voucher is required. If you don't have one, tap 'Buy BPC Voucher'." });
+  }
+  if (!isVoucherValid(voucherCode)) {
+    return res.status(400).json({ error: "Invalid BPC voucher." });
+  }
+  if (!phoneNumber || !isValidPhone(phoneNumber)) {
+    return res.status(400).json({ error: "Enter a valid Nigerian phone number." });
+  }
+  if (!network) {
+    return res.status(400).json({ error: "Please select a mobile network." });
+  }
+  if (!amount || isNaN(Number(amount)) || Number(amount) < 100) {
+    return res.status(400).json({ error: "Minimum purchase is ₦100" });
+  }
+
+  const db = readDb();
+  const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
+  if (userIndex === -1) {
+    return res.status(404).json({ error: "User not found" });
+  }
+  const user = db.users[userIndex];
+  const price = Number(amount);
+
+  if (user.balance < price) {
+    return res.status(400).json({ error: "Insufficient wallet balance to complete this purchase" });
+  }
+
+  user.balance -= price;
+  user.transactions = user.transactions || [];
+  const newTx = {
+    id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+    type: 'redeem_airtime',
+    amount: price,
+    date: new Date().toISOString(),
+    status: 'success',
+    description: `Airtime Purchase of ₦${price.toLocaleString()} for ${phoneNumber} (${network.toUpperCase()})`,
+    recipientAccount: phoneNumber,
+    recipientBank: network.toUpperCase()
+  };
+  user.transactions.unshift(newTx);
+
+  user.notifications = user.notifications || [];
+  user.notifications.unshift({
+    id: `notif-${Date.now()}`,
+    title: 'Airtime Purchase Successful',
+    body: `Successfully purchased ₦${price.toLocaleString()} airtime for ${phoneNumber}.`,
+    date: new Date().toISOString(),
+    unread: true
+  });
+
+  writeDb(db);
+  logDiagnostic('INFO', 'Airtime purchase complete', { email, amount: price, phoneNumber });
+
+  res.json({
+    success: true,
+    balance: user.balance,
+    transaction: newTx
+  });
+});
+
+// Transaction endpoint for Data Purchase
+app.post('/api/transactions/data', authenticateToken, (req: any, res) => {
+  const { phoneNumber, network, bundleId, voucherCode } = req.body;
+  const email = req.userEmail;
+
+  if (!voucherCode) {
+    return res.status(400).json({ error: "BPC voucher is required. If you don't have one, tap 'Buy BPC Voucher'." });
+  }
+  if (!isVoucherValid(voucherCode)) {
+    return res.status(400).json({ error: "Invalid BPC voucher." });
+  }
+  if (!phoneNumber || !isValidPhone(phoneNumber)) {
+    return res.status(400).json({ error: "Enter a valid Nigerian phone number." });
+  }
+  if (!network) {
+    return res.status(400).json({ error: "Please select a mobile network." });
+  }
+  if (!bundleId) {
+    return res.status(400).json({ error: "Please select a data bundle." });
+  }
+
+  const DATA_PLANS_SERVER = [
+    { id: 'mtn-500', network: 'mtn', size: '500MB', price: 150 },
+    { id: 'mtn-1g', network: 'mtn', size: '1GB', price: 250 },
+    { id: 'mtn-2g', network: 'mtn', size: '2GB', price: 480 },
+    { id: 'mtn-3g', network: 'mtn', size: '3GB', price: 700 },
+    { id: 'mtn-5g', network: 'mtn', size: '5GB', price: 1100 },
+    { id: 'mtn-10g', network: 'mtn', size: '10GB', price: 2100 },
+    { id: 'mtn-20g', network: 'mtn', size: '20GB', price: 4000 },
+    { id: 'mtn-50g', network: 'mtn', size: '50GB', price: 9500 },
+    { id: 'mtn-100g', network: 'mtn', size: '100GB', price: 18000 },
+
+    { id: 'air-500', network: 'airtel', size: '500MB', price: 150 },
+    { id: 'air-1g', network: 'airtel', size: '1GB', price: 250 },
+    { id: 'air-2g', network: 'airtel', size: '2GB', price: 480 },
+    { id: 'air-3g', network: 'airtel', size: '3GB', price: 700 },
+    { id: 'air-5g', network: 'airtel', size: '5GB', price: 1100 },
+    { id: 'air-10g', network: 'airtel', size: '10GB', price: 2100 },
+    { id: 'air-20g', network: 'airtel', size: '20GB', price: 4000 },
+    { id: 'air-50g', network: 'airtel', size: '50GB', price: 9500 },
+    { id: 'air-100g', network: 'airtel', size: '100GB', price: 18000 },
+
+    { id: 'glo-500', network: 'glo', size: '500MB', price: 150 },
+    { id: 'glo-1g', network: 'glo', size: '1GB', price: 250 },
+    { id: 'glo-2g', network: 'glo', size: '2GB', price: 480 },
+    { id: 'glo-3g', network: 'glo', size: '3GB', price: 700 },
+    { id: 'glo-5g', network: 'glo', size: '5GB', price: 1100 },
+    { id: 'glo-10g', network: 'glo', size: '10GB', price: 2100 },
+    { id: 'glo-20g', network: 'glo', size: '20GB', price: 4000 },
+    { id: 'glo-50g', network: 'glo', size: '50GB', price: 9500 },
+    { id: 'glo-100g', network: 'glo', size: '100GB', price: 18000 },
+
+    { id: '9mo-500', network: '9mobile', size: '500MB', price: 150 },
+    { id: '9mo-1g', network: '9mobile', size: '1GB', price: 250 },
+    { id: '9mo-2g', network: '9mobile', size: '2GB', price: 480 },
+    { id: '9mo-3g', network: '9mobile', size: '3GB', price: 700 },
+    { id: '9mo-5g', network: '9mobile', size: '5GB', price: 1100 },
+    { id: '9mo-10g', network: '9mobile', size: '10GB', price: 2100 },
+    { id: '9mo-20g', network: '9mobile', size: '20GB', price: 4000 },
+    { id: '9mo-50g', network: '9mobile', size: '50GB', price: 9500 },
+    { id: '9mo-100g', network: '9mobile', size: '100GB', price: 18000 }
+  ];
+
+  const plan = DATA_PLANS_SERVER.find(p => p.id === bundleId);
+  if (!plan) {
+    return res.status(400).json({ error: "Invalid data package." });
+  }
+
+  const db = readDb();
+  const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
+  if (userIndex === -1) {
+    return res.status(404).json({ error: "User not found" });
+  }
+  const user = db.users[userIndex];
+  const price = plan.price;
+
+  if (user.balance < price) {
+    return res.status(400).json({ error: "Insufficient wallet balance to complete this purchase" });
+  }
+
+  user.balance -= price;
+  user.transactions = user.transactions || [];
+  const newTx = {
+    id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+    type: 'redeem_airtime',
+    amount: price,
+    date: new Date().toISOString(),
+    status: 'success',
+    description: `Data Purchase of ${plan.size} for ${phoneNumber} (${network.toUpperCase()})`,
+    recipientAccount: phoneNumber,
+    recipientBank: network.toUpperCase()
+  };
+  user.transactions.unshift(newTx);
+
+  user.notifications = user.notifications || [];
+  user.notifications.unshift({
+    id: `notif-${Date.now()}`,
+    title: 'Data Purchase Successful',
+    body: `Successfully purchased ${plan.size} data bundle for ${phoneNumber}.`,
+    date: new Date().toISOString(),
+    unread: true
+  });
+
+  writeDb(db);
+  logDiagnostic('INFO', 'Data purchase complete', { email, amount: price, phoneNumber });
+
+  res.json({
+    success: true,
+    balance: user.balance,
+    transaction: newTx
+  });
+});
+
+// Transaction endpoint for Bank Transfer
+app.post('/api/transactions/transfer', authenticateToken, async (req: any, res) => {
+  const { bank, accountNumber, amount, voucherCode } = req.body;
+  const email = req.userEmail;
+
+  if (!voucherCode) {
+    return res.status(400).json({ error: "BPC voucher is required. If you don't have one, tap 'Buy BPC Voucher'." });
+  }
+  if (!isVoucherValid(voucherCode)) {
+    return res.status(400).json({ error: "Invalid BPC voucher." });
+  }
+  if (!bank) {
+    return res.status(400).json({ error: "Please select a bank." });
+  }
+  if (!accountNumber || !isValidAccountNumber(accountNumber)) {
+    return res.status(400).json({ error: "Please enter a valid 10-digit account number." });
+  }
+  if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+    return res.status(400).json({ error: "Please enter a valid transfer amount." });
+  }
+
+  const apiKey = process.env.PAYSTACK_SECRET_KEY;
+  if (!apiKey) {
+    return res.status(400).json({ error: "Unable to verify account details. PAYSTACK_SECRET_KEY is missing." });
+  }
+
+  let bankCode = BANK_NAME_TO_CODE[bank];
+  if (!bankCode) {
+    try {
+      const bankRes = await fetch('https://api.paystack.co/bank?country=nigeria', {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      if (bankRes.ok) {
+        const bankData = await bankRes.json() as any;
+        if (bankData.status && Array.isArray(bankData.data)) {
+          const match = bankData.data.find((b: any) => 
+            b.name.toLowerCase().includes(bank.toLowerCase()) ||
+            bank.toLowerCase().includes(b.name.toLowerCase())
+          );
+          if (match) bankCode = match.code;
+        }
+      }
+    } catch (e) {}
+  }
+
+  if (!bankCode) {
+    return res.status(400).json({ error: "Failed account verification: bank code not resolved." });
+  }
+
+  let resolvedName = '';
+  try {
+    const resolveRes = await fetch(`https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`, {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+    const resolveData = await resolveRes.json() as any;
+    if (!resolveRes.ok || !resolveData.status) {
+      return res.status(400).json({ error: "Failed account verification: " + (resolveData.message || "Unable to verify account details.") });
+    }
+    resolvedName = resolveData.data.account_name;
+  } catch (err) {
+    return res.status(500).json({ error: "Failed account verification: connection error." });
+  }
+
+  const db = readDb();
+  const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
+  if (userIndex === -1) {
+    return res.status(404).json({ error: "User not found" });
+  }
+  const user = db.users[userIndex];
+  const price = Number(amount);
+
+  if (user.balance < price) {
+    return res.status(400).json({ error: "Insufficient wallet balance to complete this bank transfer" });
+  }
+
+  user.balance -= price;
+  user.transactions = user.transactions || [];
+  const newTx = {
+    id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+    type: 'bank_transfer_direct',
+    amount: price,
+    date: new Date().toISOString(),
+    status: 'success',
+    description: `Cashout ₦${price.toLocaleString()} to ${bank} (${resolvedName})`,
+    recipientAccount: accountNumber,
+    recipientBank: bank
+  };
+  user.transactions.unshift(newTx);
+
+  user.notifications = user.notifications || [];
+  user.notifications.unshift({
+    id: `notif-${Date.now()}`,
+    title: 'Bank Cashout Success',
+    body: `Successfully cashed out ₦${price.toLocaleString()} to ${resolvedName}.`,
+    date: new Date().toISOString(),
+    unread: true
+  });
+
+  writeDb(db);
+  logDiagnostic('INFO', 'Bank cashout complete', { email, amount: price, accountNumber });
+
+  res.json({
+    success: true,
+    balance: user.balance,
+    transaction: newTx,
+    accountName: resolvedName
+  });
+});
+
+// Transaction endpoint for Withdrawal
+app.post('/api/transactions/withdraw', authenticateToken, async (req: any, res) => {
+  const { bank, accountNumber, amount, voucherCode } = req.body;
+  const email = req.userEmail;
+
+  if (!voucherCode) {
+    return res.status(400).json({ error: "BPC voucher is required. If you don't have one, tap 'Buy BPC Voucher'." });
+  }
+  if (!isVoucherValid(voucherCode)) {
+    return res.status(400).json({ error: "Invalid BPC voucher." });
+  }
+  if (!bank) {
+    return res.status(400).json({ error: "Please select a bank." });
+  }
+  if (!accountNumber || !isValidAccountNumber(accountNumber)) {
+    return res.status(400).json({ error: "Please enter a valid 10-digit account number." });
+  }
+  if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+    return res.status(400).json({ error: "Please enter a valid withdrawal amount." });
+  }
+
+  const apiKey = process.env.PAYSTACK_SECRET_KEY;
+  if (!apiKey) {
+    return res.status(400).json({ error: "Unable to verify account details. PAYSTACK_SECRET_KEY is missing." });
+  }
+
+  let bankCode = BANK_NAME_TO_CODE[bank];
+  if (!bankCode) {
+    try {
+      const bankRes = await fetch('https://api.paystack.co/bank?country=nigeria', {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      if (bankRes.ok) {
+        const bankData = await bankRes.json() as any;
+        if (bankData.status && Array.isArray(bankData.data)) {
+          const match = bankData.data.find((b: any) => 
+            b.name.toLowerCase().includes(bank.toLowerCase()) ||
+            bank.toLowerCase().includes(b.name.toLowerCase())
+          );
+          if (match) bankCode = match.code;
+        }
+      }
+    } catch (e) {}
+  }
+
+  if (!bankCode) {
+    return res.status(400).json({ error: "Failed account verification: bank code not resolved." });
+  }
+
+  let resolvedName = '';
+  try {
+    const resolveRes = await fetch(`https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`, {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+    const resolveData = await resolveRes.json() as any;
+    if (!resolveRes.ok || !resolveData.status) {
+      return res.status(400).json({ error: "Failed account verification: " + (resolveData.message || "Unable to verify account details.") });
+    }
+    resolvedName = resolveData.data.account_name;
+  } catch (err) {
+    return res.status(500).json({ error: "Failed account verification: connection error." });
+  }
+
+  const db = readDb();
+  const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
+  if (userIndex === -1) {
+    return res.status(404).json({ error: "User not found" });
+  }
+  const user = db.users[userIndex];
+  const price = Number(amount);
+
+  if (user.balance < price) {
+    return res.status(400).json({ error: "Insufficient wallet balance to complete this withdrawal" });
+  }
+
+  user.balance -= price;
+  user.transactions = user.transactions || [];
+  const newTx = {
+    id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+    type: 'withdraw',
+    amount: price,
+    date: new Date().toISOString(),
+    status: 'success',
+    description: `Withdrew ₦${price.toLocaleString()} to ${bank} (${resolvedName})`,
+    recipientAccount: accountNumber,
+    recipientBank: bank
+  };
+  user.transactions.unshift(newTx);
+
+  user.notifications = user.notifications || [];
+  user.notifications.unshift({
+    id: `notif-${Date.now()}`,
+    title: 'Withdrawal Successful',
+    body: `₦${price.toLocaleString()} withdrawn to ${resolvedName} (${bank}).`,
+    date: new Date().toISOString(),
+    unread: true
+  });
+
+  writeDb(db);
+  logDiagnostic('INFO', 'Withdrawal complete', { email, amount: price, accountNumber });
+
+  res.json({
+    success: true,
+    balance: user.balance,
+    transaction: newTx,
+    accountName: resolvedName
+  });
 });
 
 // Update Balance Directly

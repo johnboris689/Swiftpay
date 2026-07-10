@@ -52,6 +52,12 @@ import NotificationsModal from './components/NotificationsModal';
 import TransactionList from './components/TransactionList';
 import { TermsOfService, PrivacyPolicy } from './components/LegalPages';
 
+const isVoucherValid = (code: string) => {
+  const norm = code.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const target = 'BPC-7674-2206-6501'.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return norm === target;
+};
+
 // Upgraded components
 import EmailSimulator from './components/EmailSimulator';
 import DevicesHistory from './components/DevicesHistory';
@@ -471,6 +477,7 @@ export default function App() {
       }
 
       setUser(data.user);
+      localStorage.setItem('swiftpay_token', data.token);
       localStorage.setItem('swiftpay_auth', 'true');
       setIsAuthenticated(true);
       setHasSetupPin(false);
@@ -506,6 +513,7 @@ export default function App() {
       }
 
       setUser(data.user);
+      localStorage.setItem('swiftpay_token', data.token);
       localStorage.setItem('swiftpay_auth', 'true');
       setIsAuthenticated(true);
 
@@ -769,28 +777,71 @@ export default function App() {
     }, 1800);
   };
 
-  // Verify Account Name when typing 10 digits
+  // Verify Account Name when typing 10 digits (Transfer Bank)
   useEffect(() => {
-    if (transferAccNum.length === 10) {
+    let active = true;
+    if (transferAccNum.length === 10 && transferBank) {
       setIsVerifyingAccount(true);
-      setTimeout(() => {
+      fetch('/api/auth/verify-account', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bank: transferBank, accountNumber: transferAccNum })
+      })
+      .then(res => res.json().then(data => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (!active) return;
         setIsVerifyingAccount(false);
-        // Realistic simulated account name based on account digit values
-        const seedNames = [
-          'Olanrewaju Kolawole',
-          'Chinedu Okeke',
-          'Blessing Nwachukwu',
-          'Aisha Yusuf',
-          'Emeka Nwosu',
-          'Ibrahim Danladi'
-        ];
-        const randomName = seedNames[parseInt(transferAccNum.slice(-1)) % seedNames.length];
-        setTransferAccName(randomName);
-      }, 1000);
+        if (ok && data.success) {
+          setTransferAccName(data.accountName);
+        } else {
+          setTransferAccName('');
+          showToast(data.error || 'Unable to verify account details.', 'error');
+        }
+      })
+      .catch(err => {
+        if (!active) return;
+        setIsVerifyingAccount(false);
+        setTransferAccName('');
+        showToast('Unable to verify account details.', 'error');
+      });
     } else {
       setTransferAccName('');
     }
-  }, [transferAccNum]);
+    return () => { active = false; };
+  }, [transferAccNum, transferBank]);
+
+  // Verify Account Name when typing 10 digits (Withdrawal Modal)
+  useEffect(() => {
+    let active = true;
+    if (withdrawAccount.length === 10 && withdrawBank) {
+      setIsVerifyingWithdrawAccount(true);
+      fetch('/api/auth/verify-account', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bank: withdrawBank, accountNumber: withdrawAccount })
+      })
+      .then(res => res.json().then(data => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (!active) return;
+        setIsVerifyingWithdrawAccount(false);
+        if (ok && data.success) {
+          setWithdrawAccName(data.accountName);
+        } else {
+          setWithdrawAccName('');
+          showToast(data.error || 'Unable to verify account details.', 'error');
+        }
+      })
+      .catch(err => {
+        if (!active) return;
+        setIsVerifyingWithdrawAccount(false);
+        setWithdrawAccName('');
+        showToast('Unable to verify account details.', 'error');
+      });
+    } else {
+      setWithdrawAccName('');
+    }
+    return () => { active = false; };
+  }, [withdrawAccount, withdrawBank]);
 
   // BPC Order Creation (Manual Bank Transfer flow)
   const handleInitiateBpc = (e: React.FormEvent) => {
@@ -899,43 +950,31 @@ export default function App() {
 
     setIsSubmitting(true);
     try {
-      // Verify voucher against server (Point 7)
-      const res = await fetch('/api/auth/verify-voucher', {
+      const res = await fetch('/api/transactions/airtime', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ voucherCode: codeToUse })
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('swiftpay_token')}`
+        },
+        body: JSON.stringify({
+          phoneNumber: airtimePhone,
+          network: airtimeNetwork,
+          amount: price,
+          voucherCode: codeToUse
+        })
       });
       const data = await res.json();
 
-      if (!res.ok || !data.success) {
-        showToast(data.error || 'Invalid BPC Voucher.', 'error');
+      if (!res.ok) {
+        showToast(data.error || 'Airtime purchase failed.', 'error');
         setIsSubmitting(false);
         return;
       }
 
-      // If voucher has an associated amount, we can bypass balance deduction or deduct balance accordingly.
-      // But according to prompt: "A valid BPC Voucher is required before a user can perform any of these actions: Withdrawal, Transfer, Airtime, Data. Only BPC-7674-2206-6501 should be accepted. Users cannot bypass this verification."
-      // Since it's verified, we deduct the purchase cost from user balance (Point 5 - Live Balance updates instantly).
-      if (!user || user.balance < price) {
-        showToast('Insufficient wallet balance to complete this purchase', 'error');
-        setIsSubmitting(false);
-        return;
-      }
-
-      const nextBalance = user.balance - price;
-      await updateBalanceOnServer(nextBalance);
-
-      // Create transaction logs
-      const newTx: Transaction = {
-        id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-        type: 'redeem_airtime',
-        amount: price,
-        date: new Date().toISOString(),
-        status: 'success',
-        description: `Airtime (${airtimeNetwork.toUpperCase()} ${airtimePhone}) purchased with BPC code`,
-        bpcCodeUsed: codeToUse
-      };
-      setTransactions([newTx, ...transactions]);
+      // Update user state and transactions list from returned data
+      setUser({ ...user, balance: data.balance } as any);
+      localStorage.setItem('swiftpay_user', JSON.stringify({ ...user, balance: data.balance }));
+      setTransactions([data.transaction, ...transactions]);
 
       // Automatically trigger notification update
       const newNotif: NotificationItem = {
@@ -956,7 +995,7 @@ export default function App() {
       setCurrentScreen('dashboard');
       setActiveTab('wallet');
     } catch (err) {
-      showToast('Error validating BPC voucher.', 'error');
+      showToast('Error purchasing airtime.', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -989,40 +1028,31 @@ export default function App() {
 
     setIsSubmitting(true);
     try {
-      // Verify voucher against server (Point 7)
-      const res = await fetch('/api/auth/verify-voucher', {
+      const res = await fetch('/api/transactions/data', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ voucherCode: codeToUse })
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('swiftpay_token')}`
+        },
+        body: JSON.stringify({
+          phoneNumber: dataPhone,
+          network: dataNetwork,
+          bundleId: selectedDataPlan.id,
+          voucherCode: codeToUse
+        })
       });
       const data = await res.json();
 
-      if (!res.ok || !data.success) {
-        showToast(data.error || 'Invalid BPC Voucher.', 'error');
+      if (!res.ok) {
+        showToast(data.error || 'Data purchase failed.', 'error');
         setIsSubmitting(false);
         return;
       }
 
-      if (!user || user.balance < price) {
-        showToast('Insufficient wallet balance to complete this purchase', 'error');
-        setIsSubmitting(false);
-        return;
-      }
-
-      const nextBalance = user.balance - price;
-      await updateBalanceOnServer(nextBalance);
-
-      // Create transaction logs
-      const newTx: Transaction = {
-        id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-        type: 'redeem_airtime', // logged in transaction system
-        amount: price,
-        date: new Date().toISOString(),
-        status: 'success',
-        description: `${selectedDataPlan.size} Data Bundle (${dataNetwork.toUpperCase()} ${dataPhone})`,
-        bpcCodeUsed: codeToUse
-      };
-      setTransactions([newTx, ...transactions]);
+      // Update user state and transactions list from returned data
+      setUser({ ...user, balance: data.balance } as any);
+      localStorage.setItem('swiftpay_user', JSON.stringify({ ...user, balance: data.balance }));
+      setTransactions([data.transaction, ...transactions]);
 
       // Trigger notification update
       const newNotif: NotificationItem = {
@@ -1043,7 +1073,7 @@ export default function App() {
       setCurrentScreen('dashboard');
       setActiveTab('wallet');
     } catch (err) {
-      showToast('Error validating BPC voucher.', 'error');
+      showToast('Error purchasing data bundle.', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -1076,40 +1106,31 @@ export default function App() {
 
     setIsSubmitting(true);
     try {
-      // Verify voucher against server (Point 7)
-      const res = await fetch('/api/auth/verify-voucher', {
+      const res = await fetch('/api/transactions/transfer', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ voucherCode: codeToUse })
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('swiftpay_token')}`
+        },
+        body: JSON.stringify({
+          bank: transferBank,
+          accountNumber: transferAccNum,
+          amount: price,
+          voucherCode: codeToUse
+        })
       });
       const data = await res.json();
 
-      if (!res.ok || !data.success) {
-        showToast(data.error || 'Invalid BPC Voucher.', 'error');
+      if (!res.ok) {
+        showToast(data.error || 'Bank transfer failed.', 'error');
         setIsSubmitting(false);
         return;
       }
 
-      // Deduct wallet balance (Limits are fully removed - Point 6)
-      if (!user || user.balance < price) {
-        showToast('Insufficient wallet balance to complete this bank transfer', 'error');
-        setIsSubmitting(false);
-        return;
-      }
-
-      const nextBalance = user.balance - price;
-      await updateBalanceOnServer(nextBalance);
-
-      const newTx: Transaction = {
-        id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-        type: 'bank_transfer_direct',
-        amount: price,
-        date: new Date().toISOString(),
-        status: 'success',
-        description: `Transfer of ₦${price.toLocaleString()} to ${transferBank} (${transferAccName})`,
-        bpcCodeUsed: codeToUse
-      };
-      setTransactions([newTx, ...transactions]);
+      // Update user state and transactions list from returned data
+      setUser({ ...user, balance: data.balance } as any);
+      localStorage.setItem('swiftpay_user', JSON.stringify({ ...user, balance: data.balance }));
+      setTransactions([data.transaction, ...transactions]);
 
       // Trigger notification update
       const newNotif: NotificationItem = {
@@ -1131,7 +1152,7 @@ export default function App() {
       setCurrentScreen('dashboard');
       setActiveTab('wallet');
     } catch (err) {
-      showToast('Error validating BPC voucher.', 'error');
+      showToast('Error performing bank transfer.', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -1164,40 +1185,31 @@ export default function App() {
 
     setIsSubmitting(true);
     try {
-      // Verify voucher against server (Point 7)
-      const res = await fetch('/api/auth/verify-voucher', {
+      const res = await fetch('/api/transactions/withdraw', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ voucherCode: codeToUse })
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('swiftpay_token')}`
+        },
+        body: JSON.stringify({
+          bank: withdrawBank,
+          accountNumber: withdrawAccount,
+          amount: price,
+          voucherCode: codeToUse
+        })
       });
       const data = await res.json();
 
-      if (!res.ok || !data.success) {
-        showToast(data.error || 'Invalid BPC Voucher.', 'error');
+      if (!res.ok) {
+        showToast(data.error || 'Withdrawal failed.', 'error');
         setIsSubmitting(false);
         return;
       }
 
-      // Deduct wallet balance (Limits are fully removed - Point 6)
-      if (!user || user.balance < price) {
-        showToast('Insufficient wallet balance to complete this withdrawal', 'error');
-        setIsSubmitting(false);
-        return;
-      }
-
-      const nextBalance = user.balance - price;
-      await updateBalanceOnServer(nextBalance);
-
-      const newTx: Transaction = {
-        id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-        type: 'withdraw',
-        amount: price,
-        date: new Date().toISOString(),
-        status: 'success',
-        description: `Withdrew ₦${price.toLocaleString()} to ${withdrawBank} (${withdrawAccName})`,
-        bpcCodeUsed: codeToUse
-      };
-      setTransactions([newTx, ...transactions]);
+      // Update user state and transactions list from returned data
+      setUser({ ...user, balance: data.balance } as any);
+      localStorage.setItem('swiftpay_user', JSON.stringify({ ...user, balance: data.balance }));
+      setTransactions([data.transaction, ...transactions]);
 
       // Trigger notification update
       const newNotif: NotificationItem = {
@@ -1219,7 +1231,7 @@ export default function App() {
       setCurrentScreen('dashboard');
       setActiveTab('wallet');
     } catch (err) {
-      showToast('Error validating BPC voucher.', 'error');
+      showToast('Error performing withdrawal.', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -2715,7 +2727,7 @@ export default function App() {
                       {/* Optional BPC Code input */}
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <label className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">Redeem BPC Code (Optional)</label>
+                          <label className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-bold text-rose-500">BPC Voucher Code (MANDATORY)</label>
                           <button
                             id="btn-goto-buy-bpc-airtime"
                             type="button"
@@ -2728,22 +2740,46 @@ export default function App() {
                         <input
                           id="input-airtime-bpc"
                           type="text"
-                          placeholder="e.g. BPC-8960-7232-9501"
+                          placeholder="e.g. BPC-7674-2206-6501"
                           value={airtimeBpcCode}
                           onChange={(e) => setAirtimeBpcCode(e.target.value)}
-                          className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono tracking-widest uppercase"
+                          className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-rose-500 font-mono tracking-widest uppercase"
                         />
-                        <span className="text-[9px] text-slate-400 mt-1 block leading-normal">
-                          Applying a valid BPC Voucher bypasses direct wallet balance deduction.
-                        </span>
+                        {!airtimeBpcCode ? (
+                          <div className="mt-1.5 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[10px] text-amber-600 dark:text-amber-400 leading-normal">
+                            BPC voucher is required. If you don't have one, tap{' '}
+                            <button
+                              type="button"
+                              onClick={() => setCurrentScreen('buy_bpc')}
+                              className="font-extrabold underline text-indigo-600 dark:text-teal-400"
+                            >
+                              'Buy BPC Voucher'
+                            </button>.
+                          </div>
+                        ) : !isVoucherValid(airtimeBpcCode) ? (
+                          <div className="mt-1.5 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[10px] text-rose-600 dark:text-rose-400 font-medium">
+                            Invalid BPC voucher.
+                          </div>
+                        ) : (
+                          <div className="mt-1.5 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                            ✓ Voucher valid: BPC-7674-2206-6501
+                          </div>
+                        )}
                       </div>
 
                       <button
                         id="btn-purchase-airtime"
                         type="submit"
-                        disabled={isSubmitting}
+                        disabled={
+                          !airtimePhone ||
+                          airtimePhone.length < 10 ||
+                          !airtimeAmount ||
+                          parseInt(airtimeAmount) < 100 ||
+                          !isVoucherValid(airtimeBpcCode) ||
+                          isSubmitting
+                        }
                         className={`w-full text-xs font-bold uppercase tracking-widest py-3.5 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 active:scale-95 transition-all mt-2 flex items-center justify-center gap-2 ${
-                          isSubmitting ? 'opacity-60 cursor-not-allowed' : ''
+                          (!airtimePhone || airtimePhone.length < 10 || !airtimeAmount || parseInt(airtimeAmount) < 100 || !isVoucherValid(airtimeBpcCode) || isSubmitting) ? 'opacity-50 cursor-not-allowed' : ''
                         }`}
                       >
                         {isSubmitting ? (
@@ -2949,7 +2985,7 @@ export default function App() {
                       {/* Optional BPC Code input */}
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <label className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">Redeem BPC Code (Optional)</label>
+                          <label className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-bold text-rose-500">BPC Voucher Code (MANDATORY)</label>
                           <button
                             id="btn-goto-buy-bpc-data"
                             type="button"
@@ -2962,22 +2998,45 @@ export default function App() {
                         <input
                           id="input-data-bpc"
                           type="text"
-                          placeholder="e.g. BPC-8960-7232-9501"
+                          placeholder="e.g. BPC-7674-2206-6501"
                           value={dataBpcCode}
                           onChange={(e) => setDataBpcCode(e.target.value)}
-                          className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono tracking-widest uppercase"
+                          className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-rose-500 font-mono tracking-widest uppercase"
                         />
-                        <span className="text-[9px] text-slate-400 mt-1 block leading-normal">
-                          Applying a valid BPC Voucher bypasses direct wallet balance deduction.
-                        </span>
+                        {!dataBpcCode ? (
+                          <div className="mt-1.5 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[10px] text-amber-600 dark:text-amber-400 leading-normal">
+                            BPC voucher is required. If you don't have one, tap{' '}
+                            <button
+                              type="button"
+                              onClick={() => setCurrentScreen('buy_bpc')}
+                              className="font-extrabold underline text-indigo-600 dark:text-teal-400"
+                            >
+                              'Buy BPC Voucher'
+                            </button>.
+                          </div>
+                        ) : !isVoucherValid(dataBpcCode) ? (
+                          <div className="mt-1.5 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[10px] text-rose-600 dark:text-rose-400 font-medium">
+                            Invalid BPC voucher.
+                          </div>
+                        ) : (
+                          <div className="mt-1.5 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                            ✓ Voucher valid: BPC-7674-2206-6501
+                          </div>
+                        )}
                       </div>
 
                       <button
                         id="btn-purchase-data"
                         type="submit"
-                        disabled={isSubmitting}
+                        disabled={
+                          !dataPhone ||
+                          dataPhone.length < 10 ||
+                          !selectedDataPlan ||
+                          !isVoucherValid(dataBpcCode) ||
+                          isSubmitting
+                        }
                         className={`w-full text-xs font-extrabold uppercase tracking-widest py-3.5 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 active:scale-95 transition-all mt-2 flex items-center justify-center gap-2 ${
-                          isSubmitting ? 'opacity-60 cursor-not-allowed' : ''
+                          (!dataPhone || dataPhone.length < 10 || !selectedDataPlan || !isVoucherValid(dataBpcCode) || isSubmitting) ? 'opacity-50 cursor-not-allowed' : ''
                         }`}
                       >
                         {isSubmitting ? (
@@ -3087,7 +3146,7 @@ export default function App() {
                       {/* BPC Code field */}
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <label className="text-[10px] font-mono text-slate-400">Apply BPC Code (Optional)</label>
+                          <label className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-bold text-rose-500">Apply BPC Code (MANDATORY)</label>
                           <button
                             id="btn-goto-buy-bpc-transfer"
                             type="button"
@@ -3100,22 +3159,47 @@ export default function App() {
                         <input
                           id="input-transfer-bpc"
                           type="text"
-                          placeholder="e.g. BPC-8960-7232-9501"
+                          placeholder="e.g. BPC-7674-2206-6501"
                           value={transferBpcCode}
                           onChange={(e) => setTransferBpcCode(e.target.value)}
-                          className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono tracking-widest uppercase"
+                          className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-rose-500 font-mono tracking-widest uppercase"
                         />
-                        <span className="text-[9px] text-slate-400 mt-1 block leading-normal">
-                          Pay instantly by redeeming a Bill Payment Code voucher code from PalmPay transfers.
-                        </span>
+                        {!transferBpcCode ? (
+                          <div className="mt-1.5 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[10px] text-amber-600 dark:text-amber-400 leading-normal">
+                            BPC voucher is required. If you don't have one, tap{' '}
+                            <button
+                              type="button"
+                              onClick={() => setCurrentScreen('buy_bpc')}
+                              className="font-extrabold underline text-indigo-600 dark:text-teal-400"
+                            >
+                              'Buy BPC Voucher'
+                            </button>.
+                          </div>
+                        ) : !isVoucherValid(transferBpcCode) ? (
+                          <div className="mt-1.5 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[10px] text-rose-600 dark:text-rose-400 font-medium">
+                            Invalid BPC voucher.
+                          </div>
+                        ) : (
+                          <div className="mt-1.5 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                            ✓ Voucher valid: BPC-7674-2206-6501
+                          </div>
+                        )}
                       </div>
 
                       <button
                         id="btn-submit-transfer"
                         type="submit"
-                        disabled={isSubmitting}
+                        disabled={
+                          !transferAccNum ||
+                          transferAccNum.length !== 10 ||
+                          !transferAccName ||
+                          !transferAmount ||
+                          parseInt(transferAmount) <= 0 ||
+                          !isVoucherValid(transferBpcCode) ||
+                          isSubmitting
+                        }
                         className={`w-full text-xs font-bold uppercase tracking-widest py-3.5 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 active:scale-95 transition-all mt-2 flex items-center justify-center gap-2 ${
-                          isSubmitting ? 'opacity-60 cursor-not-allowed' : ''
+                          (!transferAccNum || transferAccNum.length !== 10 || !transferAccName || !transferAmount || parseInt(transferAmount) <= 0 || !isVoucherValid(transferBpcCode) || isSubmitting) ? 'opacity-50 cursor-not-allowed' : ''
                         }`}
                       >
                         {isSubmitting ? (
@@ -3555,10 +3639,27 @@ export default function App() {
                         placeholder="10-digit number"
                         required
                         value={withdrawAccount}
-                        onChange={(e) => setWithdrawAccount(e.target.value)}
+                        onChange={(e) => {
+                          if (e.target.value.length <= 10) {
+                            setWithdrawAccount(e.target.value);
+                          }
+                        }}
                         className="w-full text-xs bg-slate-100 dark:bg-slate-950 border border-transparent dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white font-mono"
                       />
                     </div>
+
+                    {/* Account Name Indicator */}
+                    {isVerifyingWithdrawAccount ? (
+                      <div className="py-2 px-3 rounded-lg bg-indigo-500/5 text-[10px] font-mono text-indigo-400 animate-pulse">
+                        Resolving bank node... verifying credentials
+                      </div>
+                    ) : (
+                      withdrawAccName && (
+                        <div className="py-2 px-3 rounded-lg bg-emerald-500/10 border border-emerald-500/15 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 font-mono uppercase animate-[fadeIn_0.15s_ease-out]">
+                          Recipient: {withdrawAccName}
+                        </div>
+                      )
+                    )}
 
                     <div>
                       <label className="text-[10px] font-mono text-slate-400 block mb-1">Withdrawal Amount (₦)</label>
@@ -3573,12 +3674,69 @@ export default function App() {
                       />
                     </div>
 
+                    {/* Mandatory BPC Voucher */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-bold text-rose-500">BPC Voucher Code (MANDATORY)</label>
+                        <button
+                          id="btn-goto-buy-bpc-withdraw"
+                          type="button"
+                          onClick={() => {
+                            setIsWithdrawOpen(false);
+                            setCurrentScreen('buy_bpc');
+                          }}
+                          className="text-[9px] font-bold text-indigo-600 dark:text-teal-400 hover:underline"
+                        >
+                          Buy BPC Voucher
+                        </button>
+                      </div>
+                      <input
+                        id="input-withdraw-bpc"
+                        type="text"
+                        placeholder="e.g. BPC-7674-2206-6501"
+                        value={withdrawBpcCode}
+                        onChange={(e) => setWithdrawBpcCode(e.target.value)}
+                        className="w-full text-xs bg-slate-100 dark:bg-slate-950 border border-transparent dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-rose-500 font-mono tracking-widest uppercase"
+                      />
+                      {!withdrawBpcCode ? (
+                        <div className="mt-1.5 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[10px] text-amber-600 dark:text-amber-400 leading-normal">
+                          BPC voucher is required. If you don't have one, tap{' '}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsWithdrawOpen(false);
+                              setCurrentScreen('buy_bpc');
+                            }}
+                            className="font-extrabold underline text-indigo-600 dark:text-teal-400"
+                          >
+                            'Buy BPC Voucher'
+                          </button>.
+                        </div>
+                      ) : !isVoucherValid(withdrawBpcCode) ? (
+                        <div className="mt-1.5 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[10px] text-rose-600 dark:text-rose-400 font-medium">
+                          Invalid BPC voucher.
+                        </div>
+                      ) : (
+                        <div className="mt-1.5 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                          ✓ Voucher valid: BPC-7674-2206-6501
+                        </div>
+                      )}
+                    </div>
+
                     <button
                       id="btn-withdraw-submit"
                       type="submit"
-                      disabled={isSubmitting}
+                      disabled={
+                        !withdrawAccount ||
+                        withdrawAccount.length !== 10 ||
+                        !withdrawAccName ||
+                        !withdrawAmount ||
+                        parseInt(withdrawAmount) <= 0 ||
+                        !isVoucherValid(withdrawBpcCode) ||
+                        isSubmitting
+                      }
                       className={`w-full text-xs font-bold uppercase tracking-widest py-3.5 bg-gradient-to-r from-red-600 to-indigo-600 hover:from-red-500 hover:to-indigo-500 text-white rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 ${
-                        isSubmitting ? 'opacity-60 cursor-not-allowed' : ''
+                        (!withdrawAccount || withdrawAccount.length !== 10 || !withdrawAccName || !withdrawAmount || parseInt(withdrawAmount) <= 0 || !isVoucherValid(withdrawBpcCode) || isSubmitting) ? 'opacity-50 cursor-not-allowed' : ''
                       }`}
                     >
                       {isSubmitting ? (

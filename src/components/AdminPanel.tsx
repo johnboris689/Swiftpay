@@ -34,15 +34,36 @@ export default function AdminPanel({
   const [broadcastType, setBroadcastType] = useState('system');
   const [sendAsEmail, setSendAsEmail] = useState(true);
 
+  // BPC Payment Config fields
+  const [bpcBankName, setBpcBankName] = useState('PalmPay');
+  const [bpcAccountNumber, setBpcAccountNumber] = useState('8960723295');
+  const [bpcAccountName, setBpcAccountName] = useState('pwamunadi ishaku');
+  const [bpcWhatsappLink, setBpcWhatsappLink] = useState('https://wa.me/2349162845073');
+  const [bpcVoucherPrice, setBpcVoucherPrice] = useState('6500');
+  const [bpcInstructions, setBpcInstructions] = useState('');
+  const [bpcMaintenanceNotice, setBpcMaintenanceNotice] = useState('');
+  const [savingBpcConfig, setSavingBpcConfig] = useState(false);
+
   // Diagnostic Logs state
   const [logs, setLogs] = useState<any[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
+
+  const getAdminHeaders = (extraHeaders = {}) => {
+    const token = localStorage.getItem('swiftpay_admin_token') || '';
+    return {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...extraHeaders
+    };
+  };
 
   // Fetch users from server on mount
   const fetchAllUsers = async () => {
     setLoadingUsers(true);
     try {
-      const res = await fetch('/api/admin/users');
+      const res = await fetch('/api/admin/users', {
+        headers: getAdminHeaders()
+      });
       if (res.ok) {
         const data = await res.json();
         setUsers(data.users || []);
@@ -59,7 +80,9 @@ export default function AdminPanel({
   const fetchLogs = async () => {
     setLoadingLogs(true);
     try {
-      const res = await fetch('/api/admin/logs');
+      const res = await fetch('/api/admin/logs', {
+        headers: getAdminHeaders()
+      });
       if (res.ok) {
         const data = await res.json();
         setLogs(data.logs || []);
@@ -73,7 +96,10 @@ export default function AdminPanel({
 
   const handleClearLogs = async () => {
     try {
-      const res = await fetch('/api/admin/logs/clear', { method: 'POST' });
+      const res = await fetch('/api/admin/logs/clear', { 
+        method: 'POST',
+        headers: getAdminHeaders()
+      });
       if (res.ok) {
         setLogs([]);
         onToast('Diagnostic logs cleared successfully', 'success');
@@ -83,9 +109,60 @@ export default function AdminPanel({
     }
   };
 
+  const fetchBpcConfig = async () => {
+    try {
+      const res = await fetch('/api/config/bpc');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.config) {
+          setBpcBankName(data.config.bankName);
+          setBpcAccountNumber(data.config.accountNumber);
+          setBpcAccountName(data.config.accountName);
+          setBpcWhatsappLink(data.config.whatsappLink);
+          setBpcVoucherPrice(String(data.config.voucherPrice));
+          setBpcInstructions(data.config.instructions);
+          setBpcMaintenanceNotice(data.config.maintenanceNotice);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching BPC config:', err);
+    }
+  };
+
+  const handleSaveBpcConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingBpcConfig(true);
+    try {
+      const res = await fetch('/api/admin/config/bpc', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({
+          bankName: bpcBankName,
+          accountNumber: bpcAccountNumber,
+          accountName: bpcAccountName,
+          whatsappLink: bpcWhatsappLink,
+          voucherPrice: Number(bpcVoucherPrice),
+          instructions: bpcInstructions,
+          maintenanceNotice: bpcMaintenanceNotice
+        })
+      });
+      if (res.ok) {
+        onToast('BPC configuration saved and updated live!', 'success');
+        fetchBpcConfig();
+      } else {
+        onToast('Failed to save BPC configuration', 'error');
+      }
+    } catch (err) {
+      onToast('Network error saving configuration', 'error');
+    } finally {
+      setSavingBpcConfig(false);
+    }
+  };
+
   React.useEffect(() => {
     fetchAllUsers();
     fetchLogs();
+    fetchBpcConfig();
   }, []);
 
   // Filter users
@@ -121,7 +198,7 @@ export default function AdminPanel({
     try {
       const res = await fetch(`/api/admin/users/update-status`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAdminHeaders(),
         body: JSON.stringify({ email, field, value: val })
       });
       if (res.ok) {
@@ -153,7 +230,7 @@ export default function AdminPanel({
     try {
       const res = await fetch(`/api/admin/users/edit-balance`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAdminHeaders(),
         body: JSON.stringify({ email, balance: amt })
       });
       if (res.ok) {
@@ -181,7 +258,7 @@ export default function AdminPanel({
     try {
       const res = await fetch(`/api/admin/users/reset-password`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAdminHeaders(),
         body: JSON.stringify({ email })
       });
       if (res.ok) {
@@ -210,7 +287,7 @@ export default function AdminPanel({
     try {
       const res = await fetch(`/api/admin/users/delete`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAdminHeaders(),
         body: JSON.stringify({ email })
       });
       if (res.ok) {
@@ -630,6 +707,109 @@ export default function AdminPanel({
               className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 text-white text-[10px] font-bold uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center gap-1"
             >
               <Send className="h-3 w-3" /> Broadcast
+            </button>
+          </div>
+        </form>
+      </GlassCard>
+
+      {/* BPC Payment & System Configurations */}
+      <GlassCard className="p-4 border-white/5 space-y-4">
+        <div className="flex justify-between items-center pb-2 border-b border-white/5">
+          <div>
+            <h5 className="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center gap-1.5">
+              <ShoppingBag className="h-4 w-4 text-teal-400" />
+              BPC Payment details &amp; Pricing Config
+            </h5>
+            <p className="text-[10px] text-slate-400 mt-0.5">Control system bank transfer details, warning notices, and voucher pricing dynamically</p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSaveBpcConfig} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="text-[9px] font-mono text-slate-400 block mb-1">Payment Bank Name</label>
+              <input
+                type="text"
+                required
+                value={bpcBankName}
+                onChange={(e) => setBpcBankName(e.target.value)}
+                className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400"
+              />
+            </div>
+
+            <div>
+              <label className="text-[9px] font-mono text-slate-400 block mb-1">Payment Account Number</label>
+              <input
+                type="text"
+                required
+                value={bpcAccountNumber}
+                onChange={(e) => setBpcAccountNumber(e.target.value)}
+                className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400"
+              />
+            </div>
+
+            <div>
+              <label className="text-[9px] font-mono text-slate-400 block mb-1">Payment Account Name</label>
+              <input
+                type="text"
+                required
+                value={bpcAccountName}
+                onChange={(e) => setBpcAccountName(e.target.value)}
+                className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400"
+              />
+            </div>
+
+            <div>
+              <label className="text-[9px] font-mono text-slate-400 block mb-1">Support WhatsApp URL Link</label>
+              <input
+                type="url"
+                required
+                value={bpcWhatsappLink}
+                onChange={(e) => setBpcWhatsappLink(e.target.value)}
+                className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[9px] font-mono text-slate-400 block mb-1">Strict Locked Voucher Price (₦)</label>
+            <input
+              type="number"
+              required
+              value={bpcVoucherPrice}
+              onChange={(e) => setBpcVoucherPrice(e.target.value)}
+              className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono"
+            />
+          </div>
+
+          <div>
+            <label className="text-[9px] font-mono text-slate-400 block mb-1">Transfer Instructions Text</label>
+            <textarea
+              required
+              rows={3}
+              value={bpcInstructions}
+              onChange={(e) => setBpcInstructions(e.target.value)}
+              className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400 resize-none font-sans"
+            />
+          </div>
+
+          <div>
+            <label className="text-[9px] font-mono text-slate-400 block mb-1">System Warning / Bank Maintenance Notice (Leave blank to hide)</label>
+            <textarea
+              rows={2}
+              value={bpcMaintenanceNotice}
+              onChange={(e) => setBpcMaintenanceNotice(e.target.value)}
+              className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400 resize-none font-sans"
+            />
+          </div>
+
+          <div className="flex justify-end pt-1">
+            <button
+              type="submit"
+              disabled={savingBpcConfig}
+              className="px-5 py-2.5 bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 disabled:opacity-50 text-slate-950 font-bold text-[10px] uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              {savingBpcConfig ? 'Saving Settings...' : 'Save Configuration'}
             </button>
           </div>
         </form>

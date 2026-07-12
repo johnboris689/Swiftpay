@@ -167,7 +167,7 @@ export const INITIAL_NOTIFICATIONS: NotificationItem[] = [
   {
     id: 'notif-1',
     title: 'Welcome to SwiftPay!',
-    body: 'We have fully rebranded from BluePay to SwiftPay. Enjoy a faster, more secure, violet-to-teal digital experience!',
+    body: 'Welcome to SwiftPay. Enjoy a faster, more secure, violet-to-teal digital experience!',
     date: '2026-07-09T00:00:00Z',
     unread: true
   },

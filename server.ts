@@ -3,6 +3,9 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const app = express();
 const PORT = 3000;
@@ -444,6 +447,20 @@ app.post('/api/auth/login', (req, res) => {
   });
 });
 
+// Get Current Authenticated User Session
+app.get('/api/auth/me', authenticateToken, (req: any, res) => {
+  const email = req.userEmail;
+  const db = readDb();
+  const user = db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+  if (!user) {
+    return res.status(404).json({ error: 'User session not found.' });
+  }
+
+  // Return safe user details, excluding password and PIN
+  const { password, transactionPin, ...safeUser } = user as any;
+  res.json({ success: true, user: safeUser });
+});
+
 // Change Password Endpoint (Protected)
 app.post('/api/auth/change-password', authenticateToken, (req: any, res) => {
   const { currentPassword, newPassword } = req.body;
@@ -803,11 +820,12 @@ const BANK_NAME_TO_CODE: Record<string, string> = {
   "Zenith Bank Plc": "057"
 };
 
-const isVoucherValid = (code: string | undefined): boolean => {
+const isVoucherValid = (code: string | undefined, db: DBStructure): boolean => {
   if (!code) return false;
   const norm = code.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const target = 'BPC-7674-2206-6501'.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  return norm === target;
+  const voucher = db.vouchers.find((v: any) => v.code.toUpperCase().replace(/[^A-Z0-9]/g, '') === norm);
+  if (!voucher) return false;
+  return voucher.status === 'unused';
 };
 
 // Verify Voucher
@@ -817,11 +835,12 @@ app.post('/api/auth/verify-voucher', (req, res) => {
     return res.status(400).json({ error: 'Please enter a voucher code.' });
   }
 
-  if (isVoucherValid(voucherCode)) {
+  const db = readDb();
+  if (isVoucherValid(voucherCode, db)) {
     return res.json({ success: true, amount: 6500 });
   } else {
     logDiagnostic('API_ERROR', 'Invalid voucher code attempt', { voucherCode });
-    return res.status(400).json({ error: 'Invalid BPC voucher.' });
+    return res.status(400).json({ error: 'Invalid or already used BPC voucher.' });
   }
 });
 
@@ -902,9 +921,6 @@ app.post('/api/transactions/airtime', authenticateToken, (req: any, res) => {
   if (!voucherCode) {
     return res.status(400).json({ error: "BPC voucher is required. If you don't have one, tap 'Buy BPC Voucher'." });
   }
-  if (!isVoucherValid(voucherCode)) {
-    return res.status(400).json({ error: "Invalid BPC voucher." });
-  }
   if (!phoneNumber || !isValidPhone(phoneNumber)) {
     return res.status(400).json({ error: "Enter a valid Nigerian phone number." });
   }
@@ -916,6 +932,10 @@ app.post('/api/transactions/airtime', authenticateToken, (req: any, res) => {
   }
 
   const db = readDb();
+  if (!isVoucherValid(voucherCode, db)) {
+    return res.status(400).json({ error: "Invalid or already used BPC voucher." });
+  }
+
   const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
   if (userIndex === -1) {
     return res.status(404).json({ error: "User not found" });
@@ -927,17 +947,41 @@ app.post('/api/transactions/airtime', authenticateToken, (req: any, res) => {
     return res.status(400).json({ error: "Insufficient wallet balance to complete this purchase" });
   }
 
+  // Check for duplicate submission
+  const isDuplicate = user.transactions && user.transactions.some((tx: any) => {
+    const txTime = new Date(tx.date).getTime();
+    const nowTime = Date.now();
+    return (
+      tx.amount === price &&
+      tx.recipientAccount === phoneNumber &&
+      tx.type === 'redeem_airtime' &&
+      (nowTime - txTime) < 10000
+    );
+  });
+  if (isDuplicate) {
+    return res.status(400).json({ error: "Duplicate transaction detected. Please wait 10 seconds." });
+  }
+
+  const balanceBefore = user.balance;
   user.balance -= price;
+  const balanceAfter = user.balance;
+  const refNum = `REF-${Date.now()}-${Math.floor(100000 + Math.random() * 900000)}`;
+
   user.transactions = user.transactions || [];
   const newTx = {
     id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+    userId: email,
     type: 'redeem_airtime',
     amount: price,
     date: new Date().toISOString(),
     status: 'success',
     description: `Airtime Purchase of ₦${price.toLocaleString()} for ${phoneNumber} (${network.toUpperCase()})`,
     recipientAccount: phoneNumber,
-    recipientBank: network.toUpperCase()
+    recipientBank: network.toUpperCase(),
+    balanceBefore,
+    balanceAfter,
+    refNum,
+    voucherCode
   };
   user.transactions.unshift(newTx);
 
@@ -945,10 +989,17 @@ app.post('/api/transactions/airtime', authenticateToken, (req: any, res) => {
   user.notifications.unshift({
     id: `notif-${Date.now()}`,
     title: 'Airtime Purchase Successful',
-    body: `Successfully purchased ₦${price.toLocaleString()} airtime for ${phoneNumber}.`,
+    body: `Successfully purchased ₦${price.toLocaleString()} airtime for ${phoneNumber}. BPC voucher used.`,
     date: new Date().toISOString(),
     unread: true
   });
+
+  // Mark voucher as used
+  const normVoucher = voucherCode.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const vIndex = db.vouchers.findIndex((v: any) => v.code.toUpperCase().replace(/[^A-Z0-9]/g, '') === normVoucher);
+  if (vIndex !== -1) {
+    db.vouchers[vIndex].status = 'used';
+  }
 
   writeDb(db);
   logDiagnostic('INFO', 'Airtime purchase complete', { email, amount: price, phoneNumber });
@@ -967,9 +1018,6 @@ app.post('/api/transactions/data', authenticateToken, (req: any, res) => {
 
   if (!voucherCode) {
     return res.status(400).json({ error: "BPC voucher is required. If you don't have one, tap 'Buy BPC Voucher'." });
-  }
-  if (!isVoucherValid(voucherCode)) {
-    return res.status(400).json({ error: "Invalid BPC voucher." });
   }
   if (!phoneNumber || !isValidPhone(phoneNumber)) {
     return res.status(400).json({ error: "Enter a valid Nigerian phone number." });
@@ -1029,6 +1077,10 @@ app.post('/api/transactions/data', authenticateToken, (req: any, res) => {
   }
 
   const db = readDb();
+  if (!isVoucherValid(voucherCode, db)) {
+    return res.status(400).json({ error: "Invalid or already used BPC voucher." });
+  }
+
   const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
   if (userIndex === -1) {
     return res.status(404).json({ error: "User not found" });
@@ -1040,17 +1092,41 @@ app.post('/api/transactions/data', authenticateToken, (req: any, res) => {
     return res.status(400).json({ error: "Insufficient wallet balance to complete this purchase" });
   }
 
+  // Check for duplicate submission
+  const isDuplicate = user.transactions && user.transactions.some((tx: any) => {
+    const txTime = new Date(tx.date).getTime();
+    const nowTime = Date.now();
+    return (
+      tx.amount === price &&
+      tx.recipientAccount === phoneNumber &&
+      tx.type === 'redeem_data' &&
+      (nowTime - txTime) < 10000
+    );
+  });
+  if (isDuplicate) {
+    return res.status(400).json({ error: "Duplicate transaction detected. Please wait 10 seconds." });
+  }
+
+  const balanceBefore = user.balance;
   user.balance -= price;
+  const balanceAfter = user.balance;
+  const refNum = `REF-${Date.now()}-${Math.floor(100000 + Math.random() * 900000)}`;
+
   user.transactions = user.transactions || [];
   const newTx = {
     id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-    type: 'redeem_airtime',
+    userId: email,
+    type: 'redeem_data',
     amount: price,
     date: new Date().toISOString(),
     status: 'success',
     description: `Data Purchase of ${plan.size} for ${phoneNumber} (${network.toUpperCase()})`,
     recipientAccount: phoneNumber,
-    recipientBank: network.toUpperCase()
+    recipientBank: network.toUpperCase(),
+    balanceBefore,
+    balanceAfter,
+    refNum,
+    voucherCode
   };
   user.transactions.unshift(newTx);
 
@@ -1058,10 +1134,17 @@ app.post('/api/transactions/data', authenticateToken, (req: any, res) => {
   user.notifications.unshift({
     id: `notif-${Date.now()}`,
     title: 'Data Purchase Successful',
-    body: `Successfully purchased ${plan.size} data bundle for ${phoneNumber}.`,
+    body: `Successfully purchased ${plan.size} data bundle for ${phoneNumber}. BPC voucher used.`,
     date: new Date().toISOString(),
     unread: true
   });
+
+  // Mark voucher as used
+  const normVoucher = voucherCode.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const vIndex = db.vouchers.findIndex((v: any) => v.code.toUpperCase().replace(/[^A-Z0-9]/g, '') === normVoucher);
+  if (vIndex !== -1) {
+    db.vouchers[vIndex].status = 'used';
+  }
 
   writeDb(db);
   logDiagnostic('INFO', 'Data purchase complete', { email, amount: price, phoneNumber });
@@ -1081,9 +1164,6 @@ app.post('/api/transactions/transfer', authenticateToken, async (req: any, res) 
   if (!voucherCode) {
     return res.status(400).json({ error: "BPC voucher is required. If you don't have one, tap 'Buy BPC Voucher'." });
   }
-  if (!isVoucherValid(voucherCode)) {
-    return res.status(400).json({ error: "Invalid BPC voucher." });
-  }
   if (!bank) {
     return res.status(400).json({ error: "Please select a bank." });
   }
@@ -1092,6 +1172,11 @@ app.post('/api/transactions/transfer', authenticateToken, async (req: any, res) 
   }
   if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
     return res.status(400).json({ error: "Please enter a valid transfer amount." });
+  }
+
+  const db = readDb();
+  if (!isVoucherValid(voucherCode, db)) {
+    return res.status(400).json({ error: "Invalid or already used BPC voucher." });
   }
 
   const apiKey = process.env.PAYSTACK_SECRET_KEY;
@@ -1136,7 +1221,6 @@ app.post('/api/transactions/transfer', authenticateToken, async (req: any, res) 
     return res.status(500).json({ error: "Failed account verification: connection error." });
   }
 
-  const db = readDb();
   const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
   if (userIndex === -1) {
     return res.status(404).json({ error: "User not found" });
@@ -1148,17 +1232,42 @@ app.post('/api/transactions/transfer', authenticateToken, async (req: any, res) 
     return res.status(400).json({ error: "Insufficient wallet balance to complete this bank transfer" });
   }
 
+  // Check for duplicate submission
+  const isDuplicate = user.transactions && user.transactions.some((tx: any) => {
+    const txTime = new Date(tx.date).getTime();
+    const nowTime = Date.now();
+    return (
+      tx.amount === price &&
+      tx.recipientAccount === accountNumber &&
+      tx.type === 'bank_transfer_direct' &&
+      (nowTime - txTime) < 10000
+    );
+  });
+  if (isDuplicate) {
+    return res.status(400).json({ error: "Duplicate transaction detected. Please wait 10 seconds." });
+  }
+
+  const balanceBefore = user.balance;
   user.balance -= price;
+  const balanceAfter = user.balance;
+  const refNum = `REF-${Date.now()}-${Math.floor(100000 + Math.random() * 900000)}`;
+
   user.transactions = user.transactions || [];
   const newTx = {
     id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+    userId: email,
     type: 'bank_transfer_direct',
     amount: price,
     date: new Date().toISOString(),
     status: 'success',
     description: `Cashout ₦${price.toLocaleString()} to ${bank} (${resolvedName})`,
     recipientAccount: accountNumber,
-    recipientBank: bank
+    recipientBank: bank,
+    recipientName: resolvedName,
+    balanceBefore,
+    balanceAfter,
+    refNum,
+    voucherCode
   };
   user.transactions.unshift(newTx);
 
@@ -1166,10 +1275,17 @@ app.post('/api/transactions/transfer', authenticateToken, async (req: any, res) 
   user.notifications.unshift({
     id: `notif-${Date.now()}`,
     title: 'Bank Cashout Success',
-    body: `Successfully cashed out ₦${price.toLocaleString()} to ${resolvedName}.`,
+    body: `Successfully cashed out ₦${price.toLocaleString()} to ${resolvedName}. BPC voucher used.`,
     date: new Date().toISOString(),
     unread: true
   });
+
+  // Mark voucher as used
+  const normVoucher = voucherCode.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const vIndex = db.vouchers.findIndex((v: any) => v.code.toUpperCase().replace(/[^A-Z0-9]/g, '') === normVoucher);
+  if (vIndex !== -1) {
+    db.vouchers[vIndex].status = 'used';
+  }
 
   writeDb(db);
   logDiagnostic('INFO', 'Bank cashout complete', { email, amount: price, accountNumber });
@@ -1190,9 +1306,6 @@ app.post('/api/transactions/withdraw', authenticateToken, async (req: any, res) 
   if (!voucherCode) {
     return res.status(400).json({ error: "BPC voucher is required. If you don't have one, tap 'Buy BPC Voucher'." });
   }
-  if (!isVoucherValid(voucherCode)) {
-    return res.status(400).json({ error: "Invalid BPC voucher." });
-  }
   if (!bank) {
     return res.status(400).json({ error: "Please select a bank." });
   }
@@ -1201,6 +1314,11 @@ app.post('/api/transactions/withdraw', authenticateToken, async (req: any, res) 
   }
   if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
     return res.status(400).json({ error: "Please enter a valid withdrawal amount." });
+  }
+
+  const db = readDb();
+  if (!isVoucherValid(voucherCode, db)) {
+    return res.status(400).json({ error: "Invalid or already used BPC voucher." });
   }
 
   const apiKey = process.env.PAYSTACK_SECRET_KEY;
@@ -1245,7 +1363,6 @@ app.post('/api/transactions/withdraw', authenticateToken, async (req: any, res) 
     return res.status(500).json({ error: "Failed account verification: connection error." });
   }
 
-  const db = readDb();
   const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
   if (userIndex === -1) {
     return res.status(404).json({ error: "User not found" });
@@ -1257,17 +1374,42 @@ app.post('/api/transactions/withdraw', authenticateToken, async (req: any, res) 
     return res.status(400).json({ error: "Insufficient wallet balance to complete this withdrawal" });
   }
 
+  // Check for duplicate submission
+  const isDuplicate = user.transactions && user.transactions.some((tx: any) => {
+    const txTime = new Date(tx.date).getTime();
+    const nowTime = Date.now();
+    return (
+      tx.amount === price &&
+      tx.recipientAccount === accountNumber &&
+      tx.type === 'withdraw' &&
+      (nowTime - txTime) < 10000
+    );
+  });
+  if (isDuplicate) {
+    return res.status(400).json({ error: "Duplicate transaction detected. Please wait 10 seconds." });
+  }
+
+  const balanceBefore = user.balance;
   user.balance -= price;
+  const balanceAfter = user.balance;
+  const refNum = `REF-${Date.now()}-${Math.floor(100000 + Math.random() * 900000)}`;
+
   user.transactions = user.transactions || [];
   const newTx = {
     id: `tx-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+    userId: email,
     type: 'withdraw',
     amount: price,
     date: new Date().toISOString(),
     status: 'success',
     description: `Withdrew ₦${price.toLocaleString()} to ${bank} (${resolvedName})`,
     recipientAccount: accountNumber,
-    recipientBank: bank
+    recipientBank: bank,
+    recipientName: resolvedName,
+    balanceBefore,
+    balanceAfter,
+    refNum,
+    voucherCode
   };
   user.transactions.unshift(newTx);
 
@@ -1275,10 +1417,17 @@ app.post('/api/transactions/withdraw', authenticateToken, async (req: any, res) 
   user.notifications.unshift({
     id: `notif-${Date.now()}`,
     title: 'Withdrawal Successful',
-    body: `₦${price.toLocaleString()} withdrawn to ${resolvedName} (${bank}).`,
+    body: `₦${price.toLocaleString()} withdrawn to ${resolvedName} (${bank}). BPC voucher used.`,
     date: new Date().toISOString(),
     unread: true
   });
+
+  // Mark voucher as used
+  const normVoucher = voucherCode.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const vIndex = db.vouchers.findIndex((v: any) => v.code.toUpperCase().replace(/[^A-Z0-9]/g, '') === normVoucher);
+  if (vIndex !== -1) {
+    db.vouchers[vIndex].status = 'used';
+  }
 
   writeDb(db);
   logDiagnostic('INFO', 'Withdrawal complete', { email, amount: price, accountNumber });
@@ -1315,6 +1464,14 @@ app.post('/api/auth/update-balance', authenticateToken, (req: any, res) => {
   });
 });
 
+// Helper to generate a unique BPC voucher code
+function generateVoucherCode(): string {
+  const part1 = Math.floor(1000 + Math.random() * 9000);
+  const part2 = Math.floor(1000 + Math.random() * 9000);
+  const part3 = Math.floor(1000 + Math.random() * 9000);
+  return `BPC-${part1}-${part2}-${part3}`;
+}
+
 // Purchase BPC Voucher Price Lock API
 app.post('/api/vouchers/purchase', (req, res) => {
   const { email, amount } = req.body;
@@ -1327,9 +1484,36 @@ app.post('/api/vouchers/purchase', (req, res) => {
     return res.status(400).json({ error: 'BPC Voucher price is strictly fixed at ₦6,500' });
   }
 
+  const db = readDb();
+  const code = generateVoucherCode();
+  const newVoucher = {
+    code,
+    amount: 6500,
+    status: 'unused'
+  };
+  db.vouchers = db.vouchers || [];
+  db.vouchers.push(newVoucher);
+
+  // Add notification to user
+  const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
+  if (userIndex !== -1) {
+    db.users[userIndex].notifications = db.users[userIndex].notifications || [];
+    db.users[userIndex].notifications.unshift({
+      id: `notif-${Date.now()}`,
+      title: 'BPC Voucher Purchased',
+      body: `You successfully purchased a BPC Voucher. Code: ${code}. Copy and use it to complete transactions!`,
+      date: new Date().toISOString(),
+      unread: true
+    });
+  }
+
+  writeDb(db);
+  logDiagnostic('INFO', 'BPC Voucher purchased successfully', { email, code });
+
   res.json({
     success: true,
-    message: 'BPC Purchase payment initialized successfully!'
+    code,
+    message: 'BPC Purchase completed successfully! Voucher generated.'
   });
 });
 

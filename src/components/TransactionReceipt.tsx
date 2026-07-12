@@ -53,7 +53,8 @@ export default function TransactionReceipt({
   const totalDeduction = transaction.amount + charges;
 
   const handleDownload = () => {
-    // Generate text-based receipt and trigger download
+    // Elegant formatted receipt print/PDF save
+    const printWindow = window.open('', '_blank');
     const receiptText = `
 =========================================
             SWIFTPAY RECEIPT             
@@ -77,14 +78,69 @@ Security:        Fully verified & finalized
 =========================================
     `;
 
-    const element = document.createElement('a');
-    const file = new Blob([receiptText], { type: 'text/plain' });
-    element.href = URL.createObjectURL(file);
-    element.download = `SwiftPay_Receipt_${transaction.id}.txt`;
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
-    onToast('Receipt downloaded successfully as TXT/PDF alternative!', 'success');
+    if (printWindow) {
+      printWindow.document.write(`
+        <html>
+          <head>
+            <title>SwiftPay Receipt - ${transaction.id}</title>
+            <style>
+              body { font-family: 'Courier New', Courier, monospace; padding: 40px; color: #111; max-width: 500px; margin: 0 auto; line-height: 1.5; }
+              .header { text-align: center; margin-bottom: 30px; border-bottom: 2px dashed #ccc; padding-bottom: 20px; }
+              .amount { font-size: 24px; font-weight: bold; margin: 10px 0; }
+              .details { margin-bottom: 30px; }
+              .row { display: flex; justify-content: space-between; margin-bottom: 8px; }
+              .label { color: #555; }
+              .value { font-weight: bold; }
+              .footer { text-align: center; border-top: 2px dashed #ccc; padding-top: 20px; font-size: 12px; color: #777; margin-top: 30px; }
+              @media print {
+                body { padding: 20px; }
+              }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <h2>SWIFTPAY DIGITAL BANKING</h2>
+              <div class="amount">₦${transaction.amount.toLocaleString()}</div>
+              <div>Status: ${transaction.status.toUpperCase()}</div>
+            </div>
+            <div class="details">
+              <div class="row"><span class="label">Transaction ID:</span> <span class="value">${transaction.id}</span></div>
+              <div class="row"><span class="label">Date & Time:</span> <span class="value">${date} at ${time}</span></div>
+              <div class="row"><span class="label">Type:</span> <span class="value">${transaction.type.toUpperCase()}</span></div>
+              <div class="row"><span class="label">Sender:</span> <span class="value">${getSenderName(transaction)}</span></div>
+              <div class="row"><span class="label">Recipient:</span> <span class="value">${getRecipientName(transaction)}</span></div>
+              <div class="row"><span class="label">Principal Amount:</span> <span class="value">₦${transaction.amount.toLocaleString()}</span></div>
+              <div class="row"><span class="label">Charges:</span> <span class="value">₦${charges.toLocaleString()}</span></div>
+              <div class="row" style="font-size: 18px; font-weight: bold; border-top: 1px solid #eee; padding-top: 8px; margin-top: 8px;">
+                <span class="label">Total Amount:</span> <span class="value" style="color: #4f46e5;">₦${totalDeduction.toLocaleString()}</span>
+              </div>
+            </div>
+            <div class="footer">
+              <p>Fully Encrypted & Verified Settlement Receipt</p>
+              <p>Thank you for choosing SwiftPay!</p>
+            </div>
+            <script>
+              window.onload = function() {
+                window.print();
+                setTimeout(function() { window.close(); }, 500);
+              }
+            </script>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+      onToast('Receipt print window opened! Select Save as PDF.', 'success');
+    } else {
+      // Fallback if popup blocked
+      const element = document.createElement('a');
+      const file = new Blob([receiptText], { type: 'text/plain' });
+      element.href = URL.createObjectURL(file);
+      element.download = `SwiftPay_Receipt_${transaction.id}.txt`;
+      document.body.appendChild(element);
+      element.click();
+      document.body.removeChild(element);
+      onToast('Popup was blocked. Downloaded receipt as text file!', 'success');
+    }
   };
 
   const handleShareClick = () => {

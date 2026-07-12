@@ -410,6 +410,51 @@ export default function App() {
     };
   }, [isAuthenticated, currentScreen]);
 
+  // Centralized Dynamic Backend State Sync Engine
+  const syncWithBackend = async () => {
+    const token = localStorage.getItem('swiftpay_token');
+    if (!token) return;
+
+    try {
+      const res = await fetch('/api/auth/me', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.user) {
+          setUser(data.user);
+          if (data.user.transactions) {
+            setTransactions(data.user.transactions);
+          }
+          if (data.user.notifications) {
+            setNotifications(data.user.notifications);
+          }
+          if (data.user.loginHistory) {
+            setLoginHistory(data.user.loginHistory);
+          }
+          if (data.user.beneficiaries) {
+            setBeneficiaries(data.user.beneficiaries);
+          }
+          if (data.user.phoneBeneficiaries) {
+            setPhoneBeneficiaries(data.user.phoneBeneficiaries);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error syncing with backend:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      syncWithBackend();
+      const interval = setInterval(syncWithBackend, 5000); // 5 seconds polling
+      return () => clearInterval(interval);
+    }
+  }, [isAuthenticated]);
+
   // Scroll live chat
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });

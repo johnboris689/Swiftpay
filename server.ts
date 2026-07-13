@@ -4,6 +4,8 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
+import { initDb, getRow, getAllRows, execute } from './db';
+import { sendEmail, sendSms } from './email_sms_service';
 
 dotenv.config();
 
@@ -62,6 +64,8 @@ interface UserState {
   tier?: number;
   isSuspended?: boolean;
   isFrozen?: boolean;
+  registrationDate?: string;
+  accountStatus?: string;
   transactions?: any[];
   notifications?: any[];
   beneficiaries?: any[];
@@ -103,133 +107,223 @@ interface DBStructure {
   admins?: AdminState[];
 }
 
-// Initialize Database with seed data if not exists
-function initDb() {
-  const defaultPasswordHash = crypto.createHash('sha256').update('password123').digest('hex');
-  const defaultAdminPasswordHash = crypto.createHash('sha256').update('adminpassword123').digest('hex');
-  
-  if (!fs.existsSync(DB_FILE)) {
-    const initialData: DBStructure = {
-      users: [
-        {
-          fullName: 'Adebayo Samuel',
-          email: 'user@example.com',
-          passwordHash: defaultPasswordHash,
-          balance: 200000,
-          dailyTarget: 50000,
-          dailySpent: 18400,
-          pinCreated: true,
-          pinCode: '1234',
-          biometricEnabled: true,
-          phone: '08034567890',
-          profilePic: '',
-          tier: 3,
-          isSuspended: false,
-          isFrozen: false,
-          transactions: [],
-          notifications: [],
-          beneficiaries: [],
-          phoneBeneficiaries: [],
-          loginHistory: []
-        }
-      ],
-      vouchers: [
-        {
-          code: 'BPC-7674-2206-6501',
-          amount: 6500,
-          status: 'unused'
-        }
-      ],
-      passwordResets: [],
-      logs: [],
-      bpcConfig: { ...DEFAULT_BPC_CONFIG },
+// -------------------- SQL DATABASE CACHE PRELOADER --------------------
+let dbCache: DBStructure = {
+  users: [],
+  vouchers: [],
+  passwordResets: [],
+  logs: [],
+  bpcConfig: { ...DEFAULT_BPC_CONFIG },
+  admins: []
+};
+
+async function loadDbCache() {
+  try {
+    console.log('[SwiftPay DB] Preloading database cache from SQL database...');
+    
+    // Fetch settings
+    const settingRows = await getAllRows(`SELECT key, value FROM admin_settings`);
+    const bpcConfig: any = { ...DEFAULT_BPC_CONFIG };
+    for (const r of settingRows) {
+      if (r.key === 'bpcBankName') bpcConfig.bankName = r.value;
+      if (r.key === 'bpcAccountNumber') bpcConfig.accountNumber = r.value;
+      if (r.key === 'bpcAccountName') bpcConfig.accountName = r.value;
+      if (r.key === 'bpcWhatsappLink') bpcConfig.whatsappLink = r.value;
+      if (r.key === 'bpcVoucherPrice') bpcConfig.voucherPrice = Number(r.value || 6500);
+      if (r.key === 'bpcInstructions') bpcConfig.instructions = r.value;
+      if (r.key === 'bpcMaintenanceNotice') bpcConfig.maintenanceNotice = r.value;
+    }
+
+    // Fetch users
+    const userRows = await getAllRows(`SELECT * FROM users`);
+    const users: UserState[] = userRows.map(row => ({
+      fullName: row.fullname || '',
+      email: row.email || '',
+      passwordHash: row.passwordhash || '',
+      balance: Number(row.balance ?? 0),
+      dailyTarget: Number(row.dailytarget ?? 50000),
+      dailySpent: Number(row.dailyspent ?? 0),
+      pinCreated: row.pincreated === 1,
+      pinCode: row.pincode || '',
+      biometricEnabled: row.biometricenabled === 1,
+      phone: row.phone || '',
+      profilePic: row.profilepic || '',
+      tier: Number(row.tier ?? 3),
+      isSuspended: row.issuspended === 1,
+      isFrozen: row.isfrozen === 1,
+      registrationDate: row.registrationdate || '',
+      accountStatus: row.accountstatus || 'active',
+      beneficiaries: JSON.parse(row.beneficiaries || '[]'),
+      phoneBeneficiaries: JSON.parse(row.phonebeneficiaries || '[]'),
+      loginHistory: JSON.parse(row.loginhistory || '[]'),
+      notifications: JSON.parse(row.notifications || '[]'),
+      transactions: JSON.parse(row.transactions || '[]')
+    }));
+
+    // Fetch vouchers
+    const voucherRows = await getAllRows(`SELECT * FROM vouchers`);
+    const vouchers = voucherRows.map(row => ({
+      code: row.code,
+      amount: Number(row.amount ?? 0),
+      status: row.status || 'unused',
+      usedBy: row.usedby || '',
+      usedAt: row.usedat || ''
+    }));
+
+    // Fetch password resets
+    const resetRows = await getAllRows(`SELECT * FROM password_resets`);
+    const passwordResets = resetRows.map(row => ({
+      email: row.emailorphone || '',
+      otp: row.otp || '',
+      token: row.id || '',
+      expiresAt: Number(row.expiresat || 0),
+      used: row.used === 1
+    }));
+
+    // Fetch logs
+    const logRows = await getAllRows(`SELECT * FROM logs ORDER BY timestamp DESC LIMIT 500`);
+    const logs = logRows.map(row => ({
+      id: row.id,
+      timestamp: row.timestamp,
+      message: row.message,
+      type: row.type
+    }));
+
+    const secureAdminPasswordHash = crypto.createHash('sha256').update('Boris$689').digest('hex');
+
+    dbCache = {
+      users,
+      vouchers,
+      passwordResets,
+      logs,
+      bpcConfig,
       admins: [
         {
-          email: 'admin@swiftpay.com',
-          passwordHash: defaultAdminPasswordHash
+          email: 'talkdavidjohn@gmail.com',
+          passwordHash: secureAdminPasswordHash
         }
       ]
     };
-    fs.writeFileSync(DB_FILE, JSON.stringify(initialData, null, 2));
-    console.log('Database initialized with default user user@example.com / password123 and admin admin@swiftpay.com / adminpassword123');
-  } else {
-    // Add missing root fields if needed
-    try {
-      const db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-      let dirty = false;
-      if (!db.logs) {
-        db.logs = [];
-        dirty = true;
-      }
-      if (!db.passwordResets) {
-        db.passwordResets = [];
-        dirty = true;
-      }
-      if (!db.bpcConfig) {
-        db.bpcConfig = { ...DEFAULT_BPC_CONFIG };
-        dirty = true;
-      }
-      if (!db.admins || db.admins.length === 0) {
-        db.admins = [
-          {
-            email: 'admin@swiftpay.com',
-            passwordHash: defaultAdminPasswordHash
-          }
-        ];
-        dirty = true;
-      }
-      if (dirty) {
-        fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
-      }
-    } catch (e) {
-      console.error('Error migrating DB keys on startup:', e);
-    }
+    console.log(`[SwiftPay DB] Successfully preloaded ${users.length} users, ${vouchers.length} vouchers, and ${logs.length} diagnostic logs.`);
+  } catch (err) {
+    console.error('[SwiftPay DB] Failed to preload database cache:', err);
   }
 }
 
-initDb();
+async function persistDbCache(data: DBStructure) {
+  try {
+    // 1. Save Users
+    for (const u of data.users) {
+      await execute(`
+        INSERT INTO users (
+          fullName, username, email, phone, passwordHash, balance, dailyTarget, dailySpent,
+          pinCreated, pinCode, biometricEnabled, profilePic, tier, isSuspended, isFrozen,
+          registrationDate, accountStatus, beneficiaries, phoneBeneficiaries, loginHistory,
+          notifications, transactions
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+        ON CONFLICT(email) DO UPDATE SET
+          fullName = EXCLUDED.fullName,
+          phone = EXCLUDED.phone,
+          passwordHash = EXCLUDED.passwordHash,
+          balance = EXCLUDED.balance,
+          dailyTarget = EXCLUDED.dailyTarget,
+          dailySpent = EXCLUDED.dailySpent,
+          pinCreated = EXCLUDED.pinCreated,
+          pinCode = EXCLUDED.pinCode,
+          biometricEnabled = EXCLUDED.biometricEnabled,
+          profilePic = EXCLUDED.profilePic,
+          tier = EXCLUDED.tier,
+          isSuspended = EXCLUDED.isSuspended,
+          isFrozen = EXCLUDED.isFrozen,
+          registrationDate = EXCLUDED.registrationDate,
+          accountStatus = EXCLUDED.accountStatus,
+          beneficiaries = EXCLUDED.beneficiaries,
+          phoneBeneficiaries = EXCLUDED.phoneBeneficiaries,
+          loginHistory = EXCLUDED.loginHistory,
+          notifications = EXCLUDED.notifications,
+          transactions = EXCLUDED.transactions
+      `, [
+        u.fullName,
+        u.email.split('@')[0],
+        u.email.toLowerCase(),
+        u.phone || '',
+        u.passwordHash,
+        u.balance,
+        u.dailyTarget,
+        u.dailySpent,
+        u.pinCreated ? 1 : 0,
+        u.pinCode || '',
+        u.biometricEnabled ? 1 : 0,
+        u.profilePic || '',
+        u.tier || 3,
+        u.isSuspended ? 1 : 0,
+        u.isFrozen ? 1 : 0,
+        u.registrationDate || new Date().toISOString(),
+        u.accountStatus || 'active',
+        JSON.stringify(u.beneficiaries || []),
+        JSON.stringify(u.phoneBeneficiaries || []),
+        JSON.stringify(u.loginHistory || []),
+        JSON.stringify(u.notifications || []),
+        JSON.stringify(u.transactions || [])
+      ]);
+    }
+
+    // 2. Save Vouchers
+    for (const v of data.vouchers) {
+      await execute(`
+        INSERT INTO vouchers (code, amount, status, usedBy, usedAt)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT(code) DO UPDATE SET
+          amount = EXCLUDED.amount,
+          status = EXCLUDED.status,
+          usedBy = EXCLUDED.usedBy,
+          usedAt = EXCLUDED.usedAt
+      `, [v.code, v.amount, v.status, v.usedBy || '', v.usedAt || '']);
+    }
+
+    // 3. Save Password Resets
+    for (const r of data.passwordResets || []) {
+      const id = r.token || `reset-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+      await execute(`
+        INSERT INTO password_resets (id, emailOrPhone, otp, expiresAt, used, createdAt)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT(id) DO UPDATE SET
+          used = EXCLUDED.used
+      `, [id, r.email.toLowerCase(), r.otp, r.expiresAt, r.used ? 1 : 0, Date.now()]);
+    }
+
+    // 4. Save Bpc Config Settings to admin_settings
+    if (data.bpcConfig) {
+      const c = data.bpcConfig;
+      const settingsMap = {
+        bpcBankName: c.bankName,
+        bpcAccountNumber: c.accountNumber,
+        bpcAccountName: c.accountName,
+        bpcVoucherPrice: String(c.voucherPrice),
+        bpcInstructions: c.instructions,
+        bpcMaintenanceNotice: c.maintenanceNotice
+      };
+      for (const [key, value] of Object.entries(settingsMap)) {
+        await execute(`
+          INSERT INTO admin_settings (key, value) VALUES ($1, $2)
+          ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
+        `, [key, value]);
+      }
+    }
+  } catch (err) {
+    console.error('[SwiftPay DB] Background persistence error:', err);
+  }
+}
 
 function readDb(): DBStructure {
-  try {
-    const data = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-    const defaultAdminPasswordHash = crypto.createHash('sha256').update('adminpassword123').digest('hex');
-    return {
-      users: data.users || [],
-      vouchers: data.vouchers || [],
-      passwordResets: data.passwordResets || [],
-      logs: data.logs || [],
-      bpcConfig: data.bpcConfig || { ...DEFAULT_BPC_CONFIG },
-      admins: data.admins || [
-        {
-          email: 'admin@swiftpay.com',
-          passwordHash: defaultAdminPasswordHash
-        }
-      ]
-    };
-  } catch (e) {
-    const defaultAdminPasswordHash = crypto.createHash('sha256').update('adminpassword123').digest('hex');
-    return {
-      users: [],
-      vouchers: [],
-      passwordResets: [],
-      logs: [],
-      bpcConfig: { ...DEFAULT_BPC_CONFIG },
-      admins: [
-        {
-          email: 'admin@swiftpay.com',
-          passwordHash: defaultAdminPasswordHash
-        }
-      ]
-    };
-  }
+  return dbCache;
 }
 
 function writeDb(data: DBStructure) {
-  try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
-  } catch (e) {
-    console.error('Database write error:', e);
-  }
+  dbCache = data;
+  persistDbCache(data).catch(err => {
+    console.error('[SwiftPay DB] Error during background database persistence:', err);
+  });
 }
 
 // -------------------- SECURE AUTHENTICATION TOKENS (JWT-like) --------------------
@@ -276,9 +370,11 @@ function authenticateToken(req: any, res: any, next: any) {
 function verifyAdminToken(token: string): string | null {
   const email = verifyToken(token);
   if (!email) return null;
-  const db = readDb();
-  const isAdmin = db.admins?.some(a => a.email.toLowerCase() === email.toLowerCase());
-  return isAdmin ? email : null;
+  // We check talkdavidjohn@gmail.com which is our secure admin account
+  if (email.toLowerCase() === 'talkdavidjohn@gmail.com') {
+    return email;
+  }
+  return null;
 }
 
 function authenticateAdminToken(req: any, res: any, next: any) {
@@ -301,20 +397,27 @@ function logDiagnostic(
   message: string,
   meta?: any
 ) {
-  const db = readDb();
-  const newLog = {
-    id: `log-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
-    timestamp: new Date().toISOString(),
-    type,
-    message,
-    meta: meta ? { ...meta, email: meta.email ? meta.email.replace(/(.{2}).*(@.*)/, '$1***$2') : undefined } : undefined // Sanitize email in diagnostic views
-  };
-  db.logs = db.logs || [];
-  db.logs.unshift(newLog);
-  if (db.logs.length > 500) { // Limit logs storage size
-    db.logs.pop();
+  const id = `log-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+  const timestamp = new Date().toISOString();
+  
+  // Format metadata for log string safely
+  let metaStr = '';
+  if (meta) {
+    try {
+      const cleanMeta = { ...meta };
+      if (cleanMeta.email) {
+        cleanMeta.email = cleanMeta.email.replace(/(.{2}).*(@.*)/, '$1***$2');
+      }
+      metaStr = ' - ' + JSON.stringify(cleanMeta);
+    } catch (e) {
+      metaStr = '';
+    }
   }
-  writeDb(db);
+
+  execute(
+    `INSERT INTO logs (id, timestamp, message, type) VALUES ($1, $2, $3, $4)`,
+    [id, timestamp, `${message}${metaStr}`, type]
+  ).catch(err => console.error('Error recording diagnostic log in database:', err));
 }
 
 // -------------------- INPUT VALIDATION UTILITIES --------------------
@@ -611,7 +714,7 @@ app.post('/api/auth/change-password', authenticateToken, (req: any, res) => {
 });
 
 // Forgot Password Flow
-app.post('/api/auth/forgot-password', (req, res) => {
+app.post('/api/auth/forgot-password', async (req, res) => {
   const { email } = req.body;
   if (!email || !isValidEmail(email)) {
     return res.status(400).json({ error: 'Please enter a valid email address.' });
@@ -640,9 +743,34 @@ app.post('/api/auth/forgot-password', (req, res) => {
 
   logDiagnostic('INFO', 'Password reset code dispatched', { email });
 
+  // Dispatch branded email & SMS notifications asynchronously
+  sendEmail(
+    user.email,
+    'SwiftPay Password Recovery OTP Code',
+    'Password Reset Security OTP Request',
+    `Hello, ${user.fullName || 'SwiftPay User'}`,
+    'We received a request to reset your SwiftPay password. Please use the secure 6-digit OTP code below to complete the verification step. If you did not request this, please disregard this email or contact support immediately.',
+    otp
+  ).then(success => {
+    console.log(`[SwiftPay Notify] Branded password recovery email dispatched: ${success}`);
+  }).catch(err => {
+    console.error('[SwiftPay Notify] Branded password recovery email dispatch failed:', err);
+  });
+
+  if (user.phone) {
+    sendSms(
+      user.phone,
+      `[SwiftPay Security Alert] Do not share! Your 6-digit password recovery OTP code is ${otp}. It expires in 10 minutes.`
+    ).then(success => {
+      console.log(`[SwiftPay Notify] Password recovery SMS dispatched: ${success}`);
+    }).catch(err => {
+      console.error('[SwiftPay Notify] Password recovery SMS dispatch failed:', err);
+    });
+  }
+
   res.json({
     success: true,
-    message: 'Reset instructions sent securely. Check simulated inbox.',
+    message: 'Verification OTP sent securely. Check your email or phone inbox.',
     otp,
     token
   });
@@ -937,75 +1065,6 @@ app.post('/api/auth/verify-voucher', (req, res) => {
   }
 });
 
-// Verify Bank Account
-app.post('/api/auth/verify-account', async (req, res) => {
-  const { bank, accountNumber } = req.body;
-  if (!bank || !accountNumber) {
-    return res.status(400).json({ error: 'Bank and account number are required.' });
-  }
-
-  if (!isValidAccountNumber(accountNumber)) {
-    return res.status(400).json({ error: 'Account number must be exactly 10 digits.' });
-  }
-
-  const apiKey = process.env.PAYSTACK_SECRET_KEY;
-  if (!apiKey) {
-    return res.status(400).json({ error: 'Account verification is temporarily unavailable. Please continue or try again later.' });
-  }
-
-  // Get bank code from map or fetch
-  let bankCode = BANK_NAME_TO_CODE[bank];
-  if (!bankCode) {
-    try {
-      const bankRes = await fetch('https://api.paystack.co/bank?country=nigeria', {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`
-        }
-      });
-      if (bankRes.ok) {
-        const bankData = await bankRes.json() as any;
-        if (bankData.status && Array.isArray(bankData.data)) {
-          const match = bankData.data.find((b: any) => 
-            b.name.toLowerCase().includes(bank.toLowerCase()) ||
-            bank.toLowerCase().includes(b.name.toLowerCase())
-          );
-          if (match) {
-            bankCode = match.code;
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Error fetching banks from Paystack:', err);
-    }
-  }
-
-  if (!bankCode) {
-    return res.status(400).json({ error: 'Account verification is temporarily unavailable. Please continue or try again later.' });
-  }
-
-  try {
-    const resolveRes = await fetch(`https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`, {
-      headers: {
-        'Authorization': `Bearer ${apiKey}`
-      }
-    });
-
-    const resolveData = await resolveRes.json() as any;
-
-    if (!resolveRes.ok || !resolveData.status) {
-      return res.status(400).json({ error: resolveData.message || 'Unable to verify account details.' });
-    }
-
-    return res.json({
-      success: true,
-      accountName: resolveData.data.account_name
-    });
-  } catch (err: any) {
-    console.error('Error resolving bank account:', err);
-    return res.status(500).json({ error: 'Unable to verify account details.' });
-  }
-});
-
 // Transaction endpoint for Airtime Purchase
 app.post('/api/transactions/airtime', authenticateToken, (req: any, res) => {
   const { phoneNumber, network, amount, voucherCode } = req.body;
@@ -1251,7 +1310,7 @@ app.post('/api/transactions/data', authenticateToken, (req: any, res) => {
 
 // Transaction endpoint for Bank Transfer
 app.post('/api/transactions/transfer', authenticateToken, async (req: any, res) => {
-  const { bank, accountNumber, amount, voucherCode } = req.body;
+  const { bank, accountNumber, amount, voucherCode, accountName } = req.body;
   const email = req.userEmail;
 
   if (!voucherCode) {
@@ -1266,53 +1325,16 @@ app.post('/api/transactions/transfer', authenticateToken, async (req: any, res) 
   if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
     return res.status(400).json({ error: "Please enter a valid transfer amount." });
   }
+  if (!accountName || accountName.trim().length < 3) {
+    return res.status(400).json({ error: "Please enter a valid recipient account name (minimum 3 characters)." });
+  }
 
   const db = readDb();
   if (!isVoucherValid(voucherCode, db)) {
     return res.status(400).json({ error: "Invalid or already used BPC voucher." });
   }
 
-  const apiKey = process.env.PAYSTACK_SECRET_KEY;
-  if (!apiKey) {
-    return res.status(400).json({ error: "Account verification is temporarily unavailable. Please continue or try again later." });
-  }
-
-  let bankCode = BANK_NAME_TO_CODE[bank];
-  if (!bankCode) {
-    try {
-      const bankRes = await fetch('https://api.paystack.co/bank?country=nigeria', {
-        headers: { 'Authorization': `Bearer ${apiKey}` }
-      });
-      if (bankRes.ok) {
-        const bankData = await bankRes.json() as any;
-        if (bankData.status && Array.isArray(bankData.data)) {
-          const match = bankData.data.find((b: any) => 
-            b.name.toLowerCase().includes(bank.toLowerCase()) ||
-            bank.toLowerCase().includes(b.name.toLowerCase())
-          );
-          if (match) bankCode = match.code;
-        }
-      }
-    } catch (e) {}
-  }
-
-  if (!bankCode) {
-    return res.status(400).json({ error: "Failed account verification: bank code not resolved." });
-  }
-
-  let resolvedName = '';
-  try {
-    const resolveRes = await fetch(`https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`, {
-      headers: { 'Authorization': `Bearer ${apiKey}` }
-    });
-    const resolveData = await resolveRes.json() as any;
-    if (!resolveRes.ok || !resolveData.status) {
-      return res.status(400).json({ error: "Failed account verification: " + (resolveData.message || "Unable to verify account details.") });
-    }
-    resolvedName = resolveData.data.account_name;
-  } catch (err) {
-    return res.status(500).json({ error: "Failed account verification: connection error." });
-  }
+  const resolvedName = accountName.trim();
 
   const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
   if (userIndex === -1) {
@@ -1393,7 +1415,7 @@ app.post('/api/transactions/transfer', authenticateToken, async (req: any, res) 
 
 // Transaction endpoint for Withdrawal
 app.post('/api/transactions/withdraw', authenticateToken, async (req: any, res) => {
-  const { bank, accountNumber, amount, voucherCode } = req.body;
+  const { bank, accountNumber, amount, voucherCode, accountName } = req.body;
   const email = req.userEmail;
 
   if (!voucherCode) {
@@ -1408,53 +1430,16 @@ app.post('/api/transactions/withdraw', authenticateToken, async (req: any, res) 
   if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
     return res.status(400).json({ error: "Please enter a valid withdrawal amount." });
   }
+  if (!accountName || accountName.trim().length < 3) {
+    return res.status(400).json({ error: "Please enter a valid recipient account name (minimum 3 characters)." });
+  }
 
   const db = readDb();
   if (!isVoucherValid(voucherCode, db)) {
     return res.status(400).json({ error: "Invalid or already used BPC voucher." });
   }
 
-  const apiKey = process.env.PAYSTACK_SECRET_KEY;
-  if (!apiKey) {
-    return res.status(400).json({ error: "Account verification is temporarily unavailable. Please continue or try again later." });
-  }
-
-  let bankCode = BANK_NAME_TO_CODE[bank];
-  if (!bankCode) {
-    try {
-      const bankRes = await fetch('https://api.paystack.co/bank?country=nigeria', {
-        headers: { 'Authorization': `Bearer ${apiKey}` }
-      });
-      if (bankRes.ok) {
-        const bankData = await bankRes.json() as any;
-        if (bankData.status && Array.isArray(bankData.data)) {
-          const match = bankData.data.find((b: any) => 
-            b.name.toLowerCase().includes(bank.toLowerCase()) ||
-            bank.toLowerCase().includes(b.name.toLowerCase())
-          );
-          if (match) bankCode = match.code;
-        }
-      }
-    } catch (e) {}
-  }
-
-  if (!bankCode) {
-    return res.status(400).json({ error: "Account verification is temporarily unavailable. Please continue or try again later." });
-  }
-
-  let resolvedName = '';
-  try {
-    const resolveRes = await fetch(`https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`, {
-      headers: { 'Authorization': `Bearer ${apiKey}` }
-    });
-    const resolveData = await resolveRes.json() as any;
-    if (!resolveRes.ok || !resolveData.status) {
-      return res.status(400).json({ error: "Account verification is temporarily unavailable. Please continue or try again later." });
-    }
-    resolvedName = resolveData.data.account_name;
-  } catch (err) {
-    return res.status(500).json({ error: "Account verification is temporarily unavailable. Please continue or try again later." });
-  }
+  const resolvedName = accountName.trim();
 
   const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
   if (userIndex === -1) {
@@ -1618,6 +1603,32 @@ app.get('/api/config/bpc', (req, res) => {
   res.json({ success: true, config: db.bpcConfig || DEFAULT_BPC_CONFIG });
 });
 
+// Get live video and recovery settings config for client
+app.get('/api/config/video', async (req, res) => {
+  try {
+    const settingRows = await getAllRows(`SELECT key, value FROM admin_settings`);
+    const settings: Record<string, string> = {};
+    for (const r of settingRows) {
+      settings[r.key] = r.value;
+    }
+    res.json({
+      success: true,
+      videoUrl: settings.videoUrl || "https://www.youtube.com/embed/dQw4w9WgXcQ",
+      videoEnabled: settings.videoEnabled !== 'false',
+      recoveryEnabled: settings.recoveryEnabled !== 'false',
+      smsRecoveryEnabled: settings.smsRecoveryEnabled !== 'false'
+    });
+  } catch (err) {
+    res.json({
+      success: true,
+      videoUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+      videoEnabled: true,
+      recoveryEnabled: true,
+      smsRecoveryEnabled: true
+    });
+  }
+});
+
 // -------------------- ADMINISTRATIVE PANEL ENDPOINTS --------------------
 
 // Admin Login
@@ -1640,6 +1651,46 @@ app.post('/api/admin/login', (req, res) => {
   const token = generateToken(email);
   logDiagnostic('INFO', `Admin logged in successfully: ${email}`);
   res.json({ success: true, token, email });
+});
+
+// Get Admin settings
+app.get('/api/admin/settings', authenticateAdminToken, async (req, res) => {
+  try {
+    const settingRows = await getAllRows(`SELECT key, value FROM admin_settings`);
+    const settings: Record<string, string> = {};
+    for (const r of settingRows) {
+      settings[r.key] = r.value;
+    }
+    res.json({ success: true, settings });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to retrieve admin settings' });
+  }
+});
+
+// Update Admin settings
+app.post('/api/admin/settings', authenticateAdminToken, async (req, res) => {
+  const { settings } = req.body;
+  if (!settings || typeof settings !== 'object') {
+    return res.status(400).json({ error: 'Invalid settings object payload.' });
+  }
+  
+  try {
+    for (const [key, val] of Object.entries(settings)) {
+      await execute(
+        `INSERT INTO admin_settings (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = $2`,
+        [key, String(val)]
+      );
+    }
+    
+    // Also reload the dbCache with updated values so the running application cache has it instantly
+    await loadDbCache();
+    
+    logDiagnostic('SECURITY_ALERT', 'Admin updated system-wide general settings', settings);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error saving admin settings:', err);
+    res.status(500).json({ error: 'Failed to save admin settings' });
+  }
 });
 
 // Update BPC Configuration (Admin)
@@ -1787,6 +1838,14 @@ app.post('/api/admin/logs/clear', authenticateAdminToken, (req, res) => {
 
 // -------------------- VITE STATIC SERVER HANDLER --------------------
 async function startServer() {
+  // Initialize and preload SQL database cache on startup
+  try {
+    await initDb();
+    await loadDbCache();
+  } catch (err) {
+    console.error('[SwiftPay DB] Critical failure during database initialization:', err);
+  }
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },

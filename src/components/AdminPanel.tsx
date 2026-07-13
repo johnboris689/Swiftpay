@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Users, Coins, ShoppingBag, ShieldAlert, ArrowLeft, Search, UserMinus, ToggleLeft, ToggleRight, Trash2, Edit2, Key, RefreshCw, Send, FileSpreadsheet, BarChart3, Database, MessageSquare, AlertCircle } from 'lucide-react';
+import { Users, Coins, ShoppingBag, ShieldAlert, ArrowLeft, Search, UserMinus, ToggleLeft, ToggleRight, Trash2, Edit2, Key, RefreshCw, Send, FileSpreadsheet, BarChart3, Database, MessageSquare, AlertCircle, Video, Settings } from 'lucide-react';
 import GlassCard from './GlassCard';
 
 interface AdminPanelProps {
@@ -43,6 +43,17 @@ export default function AdminPanel({
   const [bpcInstructions, setBpcInstructions] = useState('');
   const [bpcMaintenanceNotice, setBpcMaintenanceNotice] = useState('');
   const [savingBpcConfig, setSavingBpcConfig] = useState(false);
+
+  // Dynamic Admin & Recovery Settings
+  const [supportEmail, setSupportEmail] = useState('support@swiftpay.com');
+  const [supportPhone, setSupportPhone] = useState('+2349162845073');
+  const [whatsappNumber, setWhatsappNumber] = useState('+2349162845073');
+  const [senderName, setSenderName] = useState('SwiftPay');
+  const [videoUrl, setVideoUrl] = useState('');
+  const [videoEnabled, setVideoEnabled] = useState(true);
+  const [recoveryEnabled, setRecoveryEnabled] = useState(true);
+  const [smsRecoveryEnabled, setSmsRecoveryEnabled] = useState(true);
+  const [savingSettings, setSavingSettings] = useState(false);
 
   // Diagnostic Logs state
   const [logs, setLogs] = useState<any[]>([]);
@@ -159,10 +170,67 @@ export default function AdminPanel({
     }
   };
 
+  const fetchAdminSettings = async () => {
+    try {
+      const res = await fetch('/api/admin/settings', {
+        headers: getAdminHeaders()
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.settings) {
+          const s = data.settings;
+          if (s.supportEmail) setSupportEmail(s.supportEmail);
+          if (s.supportPhone) setSupportPhone(s.supportPhone);
+          if (s.whatsappNumber) setWhatsappNumber(s.whatsappNumber);
+          if (s.senderName) setSenderName(s.senderName);
+          if (s.videoUrl) setVideoUrl(s.videoUrl);
+          if (s.videoEnabled) setVideoEnabled(s.videoEnabled === 'true');
+          if (s.recoveryEnabled) setRecoveryEnabled(s.recoveryEnabled === 'true');
+          if (s.smsRecoveryEnabled) setSmsRecoveryEnabled(s.smsRecoveryEnabled === 'true');
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching admin settings:', err);
+    }
+  };
+
+  const handleSaveAdminSettings = async (e?: React.FormEvent, overrideSettings?: Record<string, string>) => {
+    if (e) e.preventDefault();
+    setSavingSettings(true);
+    try {
+      const settingsToSave = overrideSettings || {
+        supportEmail,
+        supportPhone,
+        whatsappNumber,
+        senderName,
+        videoUrl,
+        videoEnabled: String(videoEnabled),
+        recoveryEnabled: String(recoveryEnabled),
+        smsRecoveryEnabled: String(smsRecoveryEnabled)
+      };
+      const res = await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ settings: settingsToSave })
+      });
+      if (res.ok) {
+        onToast('Admin settings saved successfully!', 'success');
+        fetchAdminSettings();
+      } else {
+        onToast('Failed to save settings', 'error');
+      }
+    } catch (err) {
+      onToast('Network error saving settings', 'error');
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
   React.useEffect(() => {
     fetchAllUsers();
     fetchLogs();
     fetchBpcConfig();
+    fetchAdminSettings();
   }, []);
 
   // Filter users
@@ -810,6 +878,176 @@ export default function AdminPanel({
               className="px-5 py-2.5 bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 disabled:opacity-50 text-slate-950 font-bold text-[10px] uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
             >
               {savingBpcConfig ? 'Saving Settings...' : 'Save Configuration'}
+            </button>
+          </div>
+        </form>
+      </GlassCard>
+
+      {/* Video Management Section */}
+      <GlassCard className="p-4 border-white/5 space-y-4">
+        <div>
+          <h5 className="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center gap-1.5">
+            <Video className="h-4 w-4" />
+            Walkthrough Guide Video Management
+          </h5>
+          <p className="text-[10px] text-slate-400 mt-0.5">Configure, update, or completely suspend the YouTube walk-through tutorial shown to users</p>
+        </div>
+
+        <form onSubmit={(e) => handleSaveAdminSettings(e)} className="space-y-4">
+          <div>
+            <label className="text-[9px] font-mono text-slate-400 block mb-1">YouTube Video / Walkthrough URL</label>
+            <input
+              type="text"
+              placeholder="e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+              value={videoUrl}
+              onChange={(e) => setVideoUrl(e.target.value)}
+              className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono"
+            />
+          </div>
+
+          <div className="flex items-center gap-2 bg-slate-950/30 p-3 rounded-xl border border-white/5">
+            <input
+              type="checkbox"
+              id="video_enabled_box"
+              checked={videoEnabled}
+              onChange={(e) => setVideoEnabled(e.target.checked)}
+              className="rounded border-white/10 text-teal-500 focus:ring-0"
+            />
+            <label htmlFor="video_enabled_box" className="text-[9px] font-mono text-slate-400 select-none cursor-pointer">
+              Enable walk-through video guide overlay for users
+            </label>
+          </div>
+
+          <div className="flex justify-between items-center pt-1">
+            <button
+              type="button"
+              onClick={async () => {
+                if (window.confirm('Are you sure you want to completely remove the walkthrough video?')) {
+                  setVideoUrl('');
+                  setVideoEnabled(false);
+                  await handleSaveAdminSettings(undefined, {
+                    supportEmail,
+                    supportPhone,
+                    whatsappNumber,
+                    senderName,
+                    videoUrl: '',
+                    videoEnabled: 'false',
+                    recoveryEnabled: String(recoveryEnabled),
+                    smsRecoveryEnabled: String(smsRecoveryEnabled)
+                  });
+                  onToast('Video guide removed successfully', 'success');
+                }
+              }}
+              className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl text-[10px] font-bold uppercase tracking-wider border border-red-500/20"
+            >
+              Remove Video
+            </button>
+
+            <button
+              type="submit"
+              disabled={savingSettings}
+              className="px-5 py-2.5 bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 disabled:opacity-50 text-slate-950 font-bold text-[10px] uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              {savingSettings ? 'Saving Video...' : 'Save Video Settings'}
+            </button>
+          </div>
+        </form>
+      </GlassCard>
+
+      {/* Admin Settings & Support Configurations */}
+      <GlassCard className="p-4 border-white/5 space-y-4">
+        <div>
+          <h5 className="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center gap-1.5">
+            <Settings className="h-4 w-4" />
+            System Configurations &amp; Support Settings
+          </h5>
+          <p className="text-[10px] text-slate-400 mt-0.5">Manage support contact credentials, brand sender names, and recovery system parameters</p>
+        </div>
+
+        <form onSubmit={(e) => handleSaveAdminSettings(e)} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="text-[9px] font-mono text-slate-400 block mb-1">Support Email Address</label>
+              <input
+                type="email"
+                required
+                value={supportEmail}
+                onChange={(e) => setSupportEmail(e.target.value)}
+                className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400"
+              />
+            </div>
+
+            <div>
+              <label className="text-[9px] font-mono text-slate-400 block mb-1">Support Phone Number</label>
+              <input
+                type="text"
+                required
+                value={supportPhone}
+                onChange={(e) => setSupportPhone(e.target.value)}
+                className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="text-[9px] font-mono text-slate-400 block mb-1">WhatsApp URL / Number</label>
+              <input
+                type="text"
+                required
+                value={whatsappNumber}
+                onChange={(e) => setWhatsappNumber(e.target.value)}
+                className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="text-[9px] font-mono text-slate-400 block mb-1">Default Branded Sender Name</label>
+              <input
+                type="text"
+                required
+                value={senderName}
+                onChange={(e) => setSenderName(e.target.value)}
+                className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2 border-t border-white/5 pt-3">
+            <span className="text-[9px] font-mono text-slate-400 block">Security &amp; Password Recovery Options</span>
+            
+            <div className="flex items-center gap-2 bg-slate-950/30 p-2.5 rounded-xl border border-white/5">
+              <input
+                type="checkbox"
+                id="recovery_enabled_box"
+                checked={recoveryEnabled}
+                onChange={(e) => setRecoveryEnabled(e.target.checked)}
+                className="rounded border-white/10 text-teal-500 focus:ring-0"
+              />
+              <label htmlFor="recovery_enabled_box" className="text-[9px] font-mono text-slate-400 select-none cursor-pointer">
+                Enable Email OTP Password Recovery system
+              </label>
+            </div>
+
+            <div className="flex items-center gap-2 bg-slate-950/30 p-2.5 rounded-xl border border-white/5">
+              <input
+                type="checkbox"
+                id="sms_recovery_enabled_box"
+                checked={smsRecoveryEnabled}
+                onChange={(e) => setSmsRecoveryEnabled(e.target.checked)}
+                className="rounded border-white/10 text-teal-500 focus:ring-0"
+              />
+              <label htmlFor="sms_recovery_enabled_box" className="text-[9px] font-mono text-slate-400 select-none cursor-pointer">
+                Enable SMS Verification &amp; SMS OTP Password Recovery
+              </label>
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-1">
+            <button
+              type="submit"
+              disabled={savingSettings}
+              className="px-5 py-2.5 bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 disabled:opacity-50 text-slate-950 font-bold text-[10px] uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              {savingSettings ? 'Saving Settings...' : 'Save System Settings'}
             </button>
           </div>
         </form>

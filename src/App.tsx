@@ -52,6 +52,7 @@ import QuickFabMenu from './components/QuickFabMenu';
 import NotificationsModal from './components/NotificationsModal';
 import TransactionList from './components/TransactionList';
 import { TermsOfService, PrivacyPolicy } from './components/LegalPages';
+import LiveTicker from './components/LiveTicker';
 
 const isVoucherValid = (code: string) => {
   if (!code) return false;
@@ -87,12 +88,9 @@ export default function App() {
     return localStorage.getItem('swiftpay_auth') === 'true';
   });
 
-  const [hasSetupPin, setHasSetupPin] = useState<boolean>(() => {
-    const saved = localStorage.getItem('swiftpay_pin_setup');
-    return saved === 'true';
-  });
+  const [hasSetupPin, setHasSetupPin] = useState<boolean>(true);
 
-  const [isPinUnlocked, setIsPinUnlocked] = useState<boolean>(false);
+  const [isPinUnlocked, setIsPinUnlocked] = useState<boolean>(true);
 
   // Secure URL-driven Routing for Admin Dashboard (Point 1, 2, 3, 4)
   const [adminPath, setAdminPath] = useState(() => window.location.pathname);
@@ -305,6 +303,41 @@ export default function App() {
   const [liveChatInput, setLiveChatInput] = useState('');
   const [isAgentTyping, setIsAgentTyping] = useState(false);
   const [generatedBpc, setGeneratedBpc] = useState<BpcCode | null>(null);
+
+  // Dynamic system-wide configurations
+  const [videoUrl, setVideoUrl] = useState('');
+  const [videoEnabled, setVideoEnabled] = useState(true);
+  const [recoveryEnabled, setRecoveryEnabled] = useState(true);
+  const [smsRecoveryEnabled, setSmsRecoveryEnabled] = useState(true);
+
+  const getEmbedUrl = (url: string): string => {
+    if (!url) return '';
+    const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
+    if (match && match[1]) {
+      return `https://www.youtube.com/embed/${match[1]}?autoplay=1&rel=0`;
+    }
+    return url;
+  };
+
+  useEffect(() => {
+    const fetchSystemConfig = async () => {
+      try {
+        const res = await fetch('/api/config/video');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success) {
+            setVideoUrl(data.videoUrl || '');
+            setVideoEnabled(data.videoEnabled !== false);
+            setRecoveryEnabled(data.recoveryEnabled !== false);
+            setSmsRecoveryEnabled(data.smsRecoveryEnabled !== false);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching system config:', err);
+      }
+    };
+    fetchSystemConfig();
+  }, []);
 
   // New Upgraded States for Fintech Compliance
   const [isEmailSimulatorOpen, setIsEmailSimulatorOpen] = useState(false);
@@ -636,11 +669,9 @@ export default function App() {
       localStorage.setItem('swiftpay_token', data.token);
       localStorage.setItem('swiftpay_auth', 'true');
       setIsAuthenticated(true);
-      setHasSetupPin(false);
-      setPinEntry('');
-      setPinConfirm('');
-      setPinStep(1);
-      setCurrentScreen('pin_setup');
+      setHasSetupPin(true);
+      setIsPinUnlocked(true);
+      setCurrentScreen('dashboard');
       showToast('Account created successfully!', 'success');
     } catch (err) {
       console.error('Registration error:', err);
@@ -657,7 +688,7 @@ export default function App() {
     }
 
     try {
-      const res = await fetch('/api/auth/login', {
+       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
@@ -672,23 +703,10 @@ export default function App() {
       localStorage.setItem('swiftpay_token', data.token);
       localStorage.setItem('swiftpay_auth', 'true');
       setIsAuthenticated(true);
-
-      if (data.user.pinCreated) {
-        localStorage.setItem('swiftpay_pin_setup', 'true');
-        setHasSetupPin(true);
-        setIsPinUnlocked(false);
-        setCurrentScreen('pin_entry');
-        setPinEntry('');
-        showToast('Welcome back, enter your PIN to unlock', 'success');
-      } else {
-        localStorage.removeItem('swiftpay_pin_setup');
-        setHasSetupPin(false);
-        setPinEntry('');
-        setPinConfirm('');
-        setPinStep(1);
-        setCurrentScreen('pin_setup');
-        showToast('Create your 4-digit security PIN to get started', 'info');
-      }
+      setHasSetupPin(true);
+      setIsPinUnlocked(true);
+      setCurrentScreen('dashboard');
+      showToast('Welcome back to SwiftPay!', 'success');
     } catch (err) {
       console.error('Login error:', err);
       showToast('Network error during login.', 'error');
@@ -933,145 +951,25 @@ export default function App() {
     }, 1800);
   };
 
-  // Verify Account Name when typing 10 digits (Transfer Bank)
+  // Verify Account Name manually (Transfer Bank)
   useEffect(() => {
-    let active = true;
-    if (transferAccNum.length === 10 && transferBank) {
-      // Check cache first
-      const cacheKey = `${transferBank}_${transferAccNum}`;
-      const cached = verificationCacheRef.current[cacheKey];
-      if (cached) {
-        if (cached.success) {
-          setTransferAccName(cached.accountName || '');
-          setTransferVerified(true);
-          setTransferError(null);
-        } else {
-          setTransferAccName('');
-          setTransferVerified(false);
-          setTransferError(cached.error || 'Unable to verify account details.');
-          showToast(cached.error || 'Unable to verify account details.', 'error');
-        }
-        return;
-      }
-
-      setIsVerifyingAccount(true);
-      setTransferVerified(false);
+    if (transferBank && transferAccNum.length === 10 && transferAccName.trim().length >= 3) {
+      setTransferVerified(true);
       setTransferError(null);
-      setTransferAccName('');
-
-      fetch('/api/auth/verify-account', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bank: transferBank, accountNumber: transferAccNum })
-      })
-      .then(res => res.json().then(data => ({ ok: res.ok, data })))
-      .then(({ ok, data }) => {
-        if (!active) return;
-        setIsVerifyingAccount(false);
-        if (ok && data.success) {
-          setTransferAccName(data.accountName);
-          setTransferVerified(true);
-          setTransferError(null);
-          // Cache successful verification
-          verificationCacheRef.current[cacheKey] = { success: true, accountName: data.accountName };
-        } else {
-          setTransferAccName('');
-          setTransferVerified(false);
-          const errMsg = data.error || 'Unable to verify account details.';
-          setTransferError(errMsg);
-          showToast(errMsg, 'error');
-          // Cache failed verification
-          verificationCacheRef.current[cacheKey] = { success: false, error: errMsg };
-        }
-      })
-      .catch(err => {
-        if (!active) return;
-        setIsVerifyingAccount(false);
-        setTransferAccName('');
-        setTransferVerified(false);
-        const errMsg = 'Unable to verify account details.';
-        setTransferError(errMsg);
-        showToast(errMsg, 'error');
-        // Cache failed verification
-        verificationCacheRef.current[cacheKey] = { success: false, error: errMsg };
-      });
     } else {
-      setTransferAccName('');
       setTransferVerified(false);
-      setTransferError(null);
     }
-    return () => { active = false; };
-  }, [transferAccNum, transferBank]);
+  }, [transferBank, transferAccNum, transferAccName]);
 
-  // Verify Account Name when typing 10 digits (Withdrawal Modal)
+  // Verify Account Name manually (Withdrawal Modal)
   useEffect(() => {
-    let active = true;
-    if (withdrawAccount.length === 10 && withdrawBank) {
-      // Check cache first
-      const cacheKey = `${withdrawBank}_${withdrawAccount}`;
-      const cached = verificationCacheRef.current[cacheKey];
-      if (cached) {
-        if (cached.success) {
-          setWithdrawAccName(cached.accountName || '');
-          setWithdrawVerified(true);
-          setWithdrawError(null);
-        } else {
-          setWithdrawAccName('');
-          setWithdrawVerified(false);
-          setWithdrawError(cached.error || 'Unable to verify account details.');
-          showToast(cached.error || 'Unable to verify account details.', 'error');
-        }
-        return;
-      }
-
-      setIsVerifyingWithdrawAccount(true);
-      setWithdrawVerified(false);
+    if (withdrawBank && withdrawAccount.length === 10 && withdrawAccName.trim().length >= 3) {
+      setWithdrawVerified(true);
       setWithdrawError(null);
-      setWithdrawAccName('');
-
-      fetch('/api/auth/verify-account', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bank: withdrawBank, accountNumber: withdrawAccount })
-      })
-      .then(res => res.json().then(data => ({ ok: res.ok, data })))
-      .then(({ ok, data }) => {
-        if (!active) return;
-        setIsVerifyingWithdrawAccount(false);
-        if (ok && data.success) {
-          setWithdrawAccName(data.accountName);
-          setWithdrawVerified(true);
-          setWithdrawError(null);
-          // Cache successful verification
-          verificationCacheRef.current[cacheKey] = { success: true, accountName: data.accountName };
-        } else {
-          setWithdrawAccName('');
-          setWithdrawVerified(false);
-          const errMsg = data.error || 'Unable to verify account details.';
-          setWithdrawError(errMsg);
-          showToast(errMsg, 'error');
-          // Cache failed verification
-          verificationCacheRef.current[cacheKey] = { success: false, error: errMsg };
-        }
-      })
-      .catch(err => {
-        if (!active) return;
-        setIsVerifyingWithdrawAccount(false);
-        setWithdrawAccName('');
-        setWithdrawVerified(false);
-        const errMsg = 'Unable to verify account details.';
-        setWithdrawError(errMsg);
-        showToast(errMsg, 'error');
-        // Cache failed verification
-        verificationCacheRef.current[cacheKey] = { success: false, error: errMsg };
-      });
     } else {
-      setWithdrawAccName('');
       setWithdrawVerified(false);
-      setWithdrawError(null);
     }
-    return () => { active = false; };
-  }, [withdrawAccount, withdrawBank]);
+  }, [withdrawBank, withdrawAccount, withdrawAccName]);
 
   // BPC Order Creation (Manual Bank Transfer flow)
   const handleInitiateBpc = (e: React.FormEvent) => {
@@ -1346,7 +1244,8 @@ export default function App() {
           bank: transferBank,
           accountNumber: transferAccNum,
           amount: price,
-          voucherCode: codeToUse
+          voucherCode: codeToUse,
+          accountName: transferAccName
         })
       });
       const data = await res.json();
@@ -1425,7 +1324,8 @@ export default function App() {
           bank: withdrawBank,
           accountNumber: withdrawAccount,
           amount: price,
-          voucherCode: codeToUse
+          voucherCode: codeToUse,
+          accountName: withdrawAccName
         })
       });
       const data = await res.json();
@@ -1588,7 +1488,7 @@ export default function App() {
                 type="email"
                 value={adminEmailInput}
                 onChange={(e) => setAdminEmailInput(e.target.value)}
-                placeholder="admin@swiftpay.com"
+                placeholder="Enter Admin Email"
                 className="w-full px-4 py-3 rounded-xl bg-black/40 border border-white/10 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-[#818cf8] transition-colors"
                 required
               />
@@ -1620,9 +1520,6 @@ export default function App() {
           </form>
 
           <div className="mt-8 pt-6 border-t border-white/5 text-center flex flex-col gap-2">
-            <span className="text-[10px] text-slate-500 font-mono tracking-wide block">
-              Default Terminal Admin: admin@swiftpay.com / adminpassword123
-            </span>
             <button
               onClick={() => navigateTo('/')}
               className="text-xs text-[#2dd4bf] hover:underline"
@@ -2043,85 +1940,8 @@ export default function App() {
           </div>
         )}
 
-        {/* -------------------- VIEW 3: PIN / BIOMETRIC SETUP OR ENTRY SCREEN -------------------- */}
-        {isAuthenticated && (!hasSetupPin || !isPinUnlocked) && (
-          <div className="flex-1 flex flex-col justify-between p-6 bg-[#0c0c14] text-white overflow-y-auto no-scrollbar">
-            
-            {/* Header branding */}
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-mono font-bold text-[#2dd4bf]">SwiftPay Secure</span>
-              <button
-                id="btn-pin-logout"
-                onClick={handleLogout}
-                className="p-1.5 rounded-full hover:bg-white/5 text-slate-400 hover:text-red-500 transition-colors"
-                title="Logout"
-              >
-                <LogOut className="h-4 w-4" />
-              </button>
-            </div>
-
-            {/* Instruction Title */}
-            <div className="text-center my-6">
-              <div className="mx-auto h-12 w-12 rounded-full bg-teal-500/10 text-[#2dd4bf] flex items-center justify-center mb-3">
-                <UserCheck className="h-6 w-6" />
-              </div>
-              <h3 className="text-lg font-bold font-display text-white">
-                {currentScreen === 'pin_setup'
-                  ? pinStep === 1
-                    ? 'Create Your Passcode'
-                    : 'Confirm Your Passcode'
-                  : 'Enter Your Passcode'}
-              </h3>
-              <p className="text-xs text-slate-400 mt-1.5 px-6 leading-relaxed">
-                {currentScreen === 'pin_setup'
-                  ? 'Set a secure 4-digit PIN to authorise BPC purchases and wallet withdrawals'
-                  : 'Enter your 4-digit security code to access your digital wallet dashboard'}
-              </p>
-
-              {/* Dot Indicators */}
-              <div className="flex items-center justify-center gap-4 mt-6">
-                {[0, 1, 2, 3].map((idx) => {
-                  const currentPinLength = currentScreen === 'pin_setup'
-                    ? pinStep === 1 ? pinEntry.length : pinConfirm.length
-                    : pinEntry.length;
-                  const isActive = idx < currentPinLength;
-                  return (
-                    <div
-                      key={idx}
-                      className={`h-3 w-3 rounded-full transition-all duration-200 ${
-                        isActive
-                          ? 'bg-[#2dd4bf] scale-125 shadow-md shadow-teal-500/25'
-                          : 'bg-slate-800'
-                      }`}
-                    />
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Biometric Scan Verification Sequence */}
-            {biometricStatus !== 'idle' && (
-              <div className="my-2 p-4 rounded-xl bg-indigo-600/10 border border-indigo-600/20 text-center animate-pulse">
-                <span className="text-xs font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                  {biometricStatus === 'reading' ? 'Scanning fingerprint...' : 'Verified! Logging in...'}
-                </span>
-              </div>
-            )}
-
-            {/* Numerical Pad */}
-            <div className="mb-4">
-              <NumericPad
-                onKeyPress={handlePinKeyPress}
-                onBackspace={handlePinBackspace}
-                onBiometricClick={triggerFingerprintScan}
-                showBiometric={currentScreen === 'pin_entry' || (currentScreen === 'pin_setup' && pinStep === 1)}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* -------------------- MAIN DASHBOARD WRAPPER (ONCE UNLOCKED) -------------------- */}
-        {isAuthenticated && hasSetupPin && isPinUnlocked && (
+        {/* -------------------- MAIN DASHBOARD WRAPPER -------------------- */}
+        {isAuthenticated && (
           <div className="flex-1 flex flex-col justify-between h-full relative overflow-hidden bg-[#0c0c14] text-white">
             
             {/* Top Navigation Header */}
@@ -2562,33 +2382,7 @@ export default function App() {
                         )}
                       </div>
 
-                      {/* Biometric Enabled toggle */}
-                      <div className="p-4 flex items-center justify-between border-t border-slate-150 dark:border-slate-800/50">
-                        <div>
-                          <span className="text-xs text-slate-400 block font-mono">Fingerprint Logins</span>
-                          <span className="text-sm font-semibold text-slate-800 dark:text-white mt-0.5 block">
-                            {user?.biometricEnabled ? 'Configured & Active' : 'Not setup'}
-                          </span>
-                        </div>
-                        <button
-                          id="btn-biometric-toggle"
-                          type="button"
-                          onClick={() => {
-                            if (user) {
-                              setUser({ ...user, biometricEnabled: !user.biometricEnabled });
-                              showToast(user.biometricEnabled ? 'Fingerprint disabled' : 'Fingerprint activated', 'info');
-                            }
-                          }}
-                          className="h-7 w-12 rounded-full bg-slate-200 dark:bg-slate-800 p-1 transition-all duration-300 relative"
-                        >
-                          <div
-                            className={`h-5 w-5 rounded-full bg-indigo-600 dark:bg-teal-400 transition-all duration-300 absolute top-1 ${
-                              user?.biometricEnabled ? 'left-6' : 'left-1'
-                            }`}
-                          />
-                        </button>
-                      </div>
-                    </GlassCard>
+                     </GlassCard>
                   </div>
 
                   {/* Navigation redirects including Terms and Privacy links (Point 2) */}
@@ -3429,12 +3223,9 @@ export default function App() {
                           value={transferBank}
                           onChange={(e) => {
                             setTransferBank(e.target.value);
-                            setTransferVerified(false);
                             setTransferError(null);
-                            setTransferAccName('');
                           }}
-                          disabled={isVerifyingAccount}
-                          className={`w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400 ${isVerifyingAccount ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400"
                         >
                           {SUPPORTED_BANKS.map((b) => (
                             <option key={b} value={b}>
@@ -3456,37 +3247,29 @@ export default function App() {
                           onChange={(e) => {
                             if (e.target.value.length <= 10) {
                               setTransferAccNum(e.target.value);
-                              setTransferVerified(false);
                               setTransferError(null);
-                              setTransferAccName('');
                             }
                           }}
-                          disabled={isVerifyingAccount}
-                          className={`w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono ${isVerifyingAccount ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono"
                         />
                       </div>
 
-                      {/* Account Name Indicator */}
-                      {isVerifyingAccount && (
-                        <div className="py-3 px-4 rounded-xl bg-indigo-500/5 border border-indigo-500/10 text-xs font-mono text-indigo-400 flex items-center gap-2.5 animate-pulse">
-                          <div className="h-4 w-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
-                          <span>Verifying account...</span>
-                        </div>
-                      )}
-
-                      {!isVerifyingAccount && transferVerified && transferAccName && (
-                        <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs font-mono text-emerald-600 dark:text-emerald-400 animate-[fadeIn_0.15s_ease-out]">
-                          <div className="font-extrabold flex items-center gap-1">✔ Account Verified</div>
-                          <div className="mt-1 font-bold text-sm text-slate-800 dark:text-white uppercase font-sans">Account Name: {transferAccName}</div>
-                        </div>
-                      )}
-
-                      {!isVerifyingAccount && transferError && (
-                        <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs font-mono text-rose-600 dark:text-rose-400 animate-[fadeIn_0.15s_ease-out]">
-                          <div className="font-extrabold flex items-center gap-1">❌ Account verification failed.</div>
-                          <div className="mt-1 text-[11px] leading-normal text-rose-500 font-sans">Unable to verify account details.</div>
-                        </div>
-                      )}
+                      {/* Account Name */}
+                      <div>
+                        <label className="text-[10px] font-mono text-slate-400 block mb-1">Account Name (MANUAL ENTER)</label>
+                        <input
+                          id="input-transfer-acc-name-manual"
+                          type="text"
+                          placeholder="Enter account name manually"
+                          required
+                          value={transferAccName}
+                          onChange={(e) => {
+                            setTransferAccName(e.target.value);
+                            setTransferError(null);
+                          }}
+                          className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400"
+                        />
+                      </div>
 
                       {/* Amount */}
                       <div>
@@ -3985,12 +3768,9 @@ export default function App() {
                         value={withdrawBank}
                         onChange={(e) => {
                           setWithdrawBank(e.target.value);
-                          setWithdrawVerified(false);
                           setWithdrawError(null);
-                          setWithdrawAccName('');
                         }}
-                        disabled={isVerifyingWithdrawAccount}
-                        className={`w-full text-xs bg-slate-100 dark:bg-slate-950 border border-transparent dark:border-slate-800 rounded-xl px-4 py-3 text-slate-800 dark:text-white ${isVerifyingWithdrawAccount ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        className="w-full text-xs bg-slate-100 dark:bg-slate-950 border border-transparent dark:border-slate-800 rounded-xl px-4 py-3 text-slate-800 dark:text-white"
                       >
                         {SUPPORTED_BANKS.map((b) => (
                           <option key={b} value={b}>
@@ -4011,37 +3791,28 @@ export default function App() {
                         onChange={(e) => {
                           if (e.target.value.length <= 10) {
                             setWithdrawAccount(e.target.value);
-                            setWithdrawVerified(false);
                             setWithdrawError(null);
-                            setWithdrawAccName('');
                           }
                         }}
-                        disabled={isVerifyingWithdrawAccount}
-                        className={`w-full text-xs bg-slate-100 dark:bg-slate-950 border border-transparent dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white font-mono ${isVerifyingWithdrawAccount ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        className="w-full text-xs bg-slate-100 dark:bg-slate-950 border border-transparent dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white font-mono"
                       />
                     </div>
 
-                    {/* Account Name Indicator */}
-                    {isVerifyingWithdrawAccount && (
-                      <div className="py-3 px-4 rounded-xl bg-indigo-500/5 border border-indigo-500/10 text-xs font-mono text-indigo-400 flex items-center gap-2.5 animate-pulse">
-                        <div className="h-4 w-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
-                        <span>Verifying account...</span>
-                      </div>
-                    )}
-
-                    {!isVerifyingWithdrawAccount && withdrawVerified && withdrawAccName && (
-                      <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs font-mono text-emerald-600 dark:text-emerald-400 animate-[fadeIn_0.15s_ease-out]">
-                        <div className="font-extrabold flex items-center gap-1">✔ Account Verified</div>
-                        <div className="mt-1 font-bold text-sm text-slate-800 dark:text-white uppercase font-sans">Account Name: {withdrawAccName}</div>
-                      </div>
-                    )}
-
-                    {!isVerifyingWithdrawAccount && withdrawError && (
-                      <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs font-mono text-rose-600 dark:text-rose-400 animate-[fadeIn_0.15s_ease-out]">
-                        <div className="font-extrabold flex items-center gap-1">❌ Account verification failed.</div>
-                        <div className="mt-1 text-[11px] leading-normal text-rose-500 font-sans">Unable to verify account details.</div>
-                      </div>
-                    )}
+                    <div>
+                      <label className="text-[10px] font-mono text-slate-400 block mb-1">Account Name (MANUAL ENTER)</label>
+                      <input
+                        id="withdraw-acc-name-manual"
+                        type="text"
+                        placeholder="Enter account name manually"
+                        required
+                        value={withdrawAccName}
+                        onChange={(e) => {
+                          setWithdrawAccName(e.target.value);
+                          setWithdrawError(null);
+                        }}
+                        className="w-full text-xs bg-slate-100 dark:bg-slate-950 border border-transparent dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white"
+                      />
+                    </div>
 
                     <div>
                       <label className="text-[10px] font-mono text-slate-400 block mb-1">Withdrawal Amount (₦)</label>
@@ -4162,11 +3933,23 @@ export default function App() {
                     </p>
                   </div>
 
-                  {/* Video Mock aspect ratios */}
-                  <div className="h-32 bg-slate-950 border border-slate-800 rounded-2xl flex flex-col items-center justify-center gap-1.5 p-4 text-center">
-                    <span className="text-xs font-mono font-bold text-teal-400">REBRAND WALKTHROUGH DEMO</span>
-                    <span className="text-[10px] text-slate-500">Video tutorial active session - 1m 45s</span>
-                  </div>
+                  {/* Video Player */}
+                  {videoEnabled && videoUrl ? (
+                    <div className="aspect-video w-full rounded-2xl overflow-hidden border border-white/10 bg-black">
+                      <iframe
+                        src={getEmbedUrl(videoUrl)}
+                        title="Walkthrough Video"
+                        className="w-full h-full"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                      />
+                    </div>
+                  ) : (
+                    <div className="h-32 bg-slate-950 border border-slate-800 rounded-2xl flex flex-col items-center justify-center gap-1.5 p-4 text-center">
+                      <span className="text-xs font-mono font-bold text-teal-400">REBRAND WALKTHROUGH DEMO</span>
+                      <span className="text-[10px] text-slate-500">Video tutorial active session - 1m 45s</span>
+                    </div>
+                  )}
 
                   <button
                     id="btn-guide-dismiss"
@@ -4357,6 +4140,7 @@ export default function App() {
         SwiftPay © 2026. All transaction logs and BPC keys are fully persisted in secure localStorage.
       </div>
 
+      <LiveTicker />
     </div>
   );
 }

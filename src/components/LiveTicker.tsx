@@ -3,85 +3,104 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles } from 'lucide-react';
 
 const FIRST_NAMES = [
-  "Abdul", "Abraham", "Ibrahim", "Chinedu", "Fatima", 
+  "Abdul", "Abraham", "Musa", "Chinedu", "Fatima", 
   "Amina", "Ngozi", "Emeka", "Oluwaseun", "Chioma", 
-  "Musa", "Yusuf", "Adebayo", "Babajide", "Chinonso", 
+  "Yusuf", "Adebayo", "Babajide", "Chinonso", 
   "Olamide", "Zainab", "Uche", "Abiodun", "Tunde"
 ];
 
 const LAST_NAMES = [
-  "Adamu", "Adebayo", "Musa", "Okafor", "Bello", 
-  "Okonkwo", "Balogun", "Eze", "Sani", "Alabi", 
+  "Adamu", "Adebayo", "Ibrahim", "Alabi", "Okafor", 
+  "Bello", "Okonkwo", "Balogun", "Eze", "Sani", 
   "Nwachukwu", "Igwe", "Soyinka", "Owolabi", "Danladi", 
   "Mustapha", "Adeyemi"
-];
-
-const TRANSACTIONS = [
-  { type: 'withdrew', suffix: '' },
-  { type: 'purchased', suffix: 'airtime' },
-  { type: 'transferred', suffix: '' },
-  { type: 'purchased', suffix: 'data' }
 ];
 
 interface NotificationItem {
   id: string;
   name: string;
-  actionText: string;
   amount: string;
 }
 
 export default function LiveTicker() {
   const [notification, setNotification] = useState<NotificationItem | null>(null);
+  const [isVisible, setIsVisible] = useState(false);
 
-  const generateRandomNotification = (): NotificationItem => {
+  const generateRandomWithdrawal = (): NotificationItem => {
     const firstName = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
     const lastName = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)];
-    const tx = TRANSACTIONS[Math.floor(Math.random() * TRANSACTIONS.length)];
     
-    // Amount must be between 100k and 200k inclusive
-    const amountVal = Math.floor(Math.random() * 101) * 1000 + 100000;
+    // Amount must be between 100k and 200k inclusive (multiples of 5k or 10k look more natural)
+    const amountVal = Math.floor(Math.random() * 21) * 5000 + 100000;
     const formattedAmount = `₦${amountVal.toLocaleString()}`;
-
-    let actionText = '';
-    if (tx.type === 'transferred') {
-      actionText = `transferred ${formattedAmount}`;
-    } else if (tx.type === 'purchased') {
-      actionText = `purchased ${formattedAmount} ${tx.suffix}`;
-    } else {
-      actionText = `withdrew ${formattedAmount}`;
-    }
 
     return {
       id: Math.random().toString(36).substring(2),
       name: `${firstName} ${lastName}`,
-      actionText,
       amount: formattedAmount
     };
   };
 
   useEffect(() => {
-    // Generate initial notification on load
-    setNotification(generateRandomNotification());
+    // Show first notification after a short initial delay of 3 seconds
+    const initialTimer = setTimeout(() => {
+      const newNotif = generateRandomWithdrawal();
+      setNotification(newNotif);
+      setIsVisible(true);
 
-    // Cycle every 5 seconds
-    const interval = setInterval(() => {
-      setNotification(generateRandomNotification());
-    }, 5000);
+      // Hide after 4.5 seconds
+      const hideTimer = setTimeout(() => {
+        setIsVisible(false);
+      }, 4500);
 
-    return () => clearInterval(interval);
+      return () => clearTimeout(hideTimer);
+    }, 3000);
+
+    // Setup cyclic trigger with 20-40 seconds gap
+    let nextTimer: NodeJS.Timeout;
+    
+    const triggerNextCycle = () => {
+      // Random interval between 20 and 40 seconds
+      const delay = Math.floor(Math.random() * (40 - 20 + 1) + 20) * 1000;
+      
+      nextTimer = setTimeout(() => {
+        const newNotif = generateRandomWithdrawal();
+        setNotification(newNotif);
+        setIsVisible(true);
+
+        // Hide after 4.5 seconds
+        const hideTimer = setTimeout(() => {
+          setIsVisible(false);
+          triggerNextCycle(); // schedule next one after current one disappears
+        }, 4500);
+
+      }, delay);
+    };
+
+    // Start cycling scheduling
+    // Since we triggered the first one manually at 3 seconds, let's schedule next one 20-40s after the first disappears
+    const setupCycleTimer = setTimeout(() => {
+      triggerNextCycle();
+    }, 8000);
+
+    return () => {
+      clearTimeout(initialTimer);
+      clearTimeout(setupCycleTimer);
+      if (nextTimer) clearTimeout(nextTimer);
+    };
   }, []);
 
   return (
-    <div className="fixed bottom-4 right-4 z-[9999] pointer-events-none max-w-sm w-[calc(100%-2rem)]">
+    <div className="fixed top-18 right-4 z-[9999] pointer-events-none max-w-sm w-[calc(100%-2rem)] md:top-20 md:right-6">
       <AnimatePresence mode="wait">
-        {notification && (
+        {isVisible && notification && (
           <motion.div
             key={notification.id}
-            initial={{ opacity: 0, y: 30, scale: 0.95 }}
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            className="pointer-events-auto bg-slate-900/90 dark:bg-slate-950/95 border border-slate-800 dark:border-teal-500/30 backdrop-blur-md rounded-2xl p-3.5 shadow-2xl flex items-center gap-3.5"
+            exit={{ opacity: 0, y: -10, scale: 0.95 }}
+            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            className="pointer-events-auto bg-slate-900/95 dark:bg-slate-950/98 border border-slate-800 dark:border-teal-500/30 backdrop-blur-md rounded-2xl p-3.5 shadow-2xl flex items-center gap-3.5"
           >
             {/* Live Indicator Pulse */}
             <div className="relative flex h-3 w-3 shrink-0">
@@ -91,11 +110,11 @@ export default function LiveTicker() {
 
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5 text-[10px] font-bold font-mono tracking-wider text-teal-400 uppercase">
-                <Sparkles className="h-3 w-3" />
-                Live SwiftPay Feed
+                <Sparkles className="h-3 w-3 animate-pulse" />
+                Live Withdrawal Feed
               </div>
               <p className="text-xs text-slate-100 mt-1 leading-normal">
-                <span className="font-extrabold text-white">{notification.name}</span> just {notification.actionText}
+                <span className="font-extrabold text-white">{notification.name}</span> just withdrew <span className="font-bold text-teal-300">{notification.amount}</span>
               </p>
             </div>
           </motion.div>

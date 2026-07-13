@@ -34,15 +34,15 @@ export default function AdminPanel({
   const [broadcastType, setBroadcastType] = useState('system');
   const [sendAsEmail, setSendAsEmail] = useState(true);
 
-  // BPC Payment Config fields
-  const [bpcBankName, setBpcBankName] = useState('PalmPay');
-  const [bpcAccountNumber, setBpcAccountNumber] = useState('8960723295');
-  const [bpcAccountName, setBpcAccountName] = useState('pwamunadi ishaku');
-  const [bpcWhatsappLink, setBpcWhatsappLink] = useState('https://wa.me/2349162845073');
-  const [bpcVoucherPrice, setBpcVoucherPrice] = useState('6500');
-  const [bpcInstructions, setBpcInstructions] = useState('');
-  const [bpcMaintenanceNotice, setBpcMaintenanceNotice] = useState('');
-  const [savingBpcConfig, setSavingBpcConfig] = useState(false);
+  // WDV Payment Config fields
+  const [wdvBankName, setWdvBankName] = useState('PalmPay');
+  const [wdvAccountNumber, setWdvAccountNumber] = useState('8960723295');
+  const [wdvAccountName, setWdvAccountName] = useState('pwamunadi ishaku');
+  const [wdvWhatsappLink, setWdvWhatsappLink] = useState('https://wa.me/2349162845073');
+  const [wdvVoucherPrice, setWdvVoucherPrice] = useState('6500');
+  const [wdvInstructions, setWdvInstructions] = useState('');
+  const [wdvMaintenanceNotice, setWdvMaintenanceNotice] = useState('');
+  const [savingWdvConfig, setSavingWdvConfig] = useState(false);
 
   // Dynamic Admin & Recovery Settings
   const [supportEmail, setSupportEmail] = useState('support@swiftpay.com');
@@ -54,6 +54,8 @@ export default function AdminPanel({
   const [recoveryEnabled, setRecoveryEnabled] = useState(true);
   const [smsRecoveryEnabled, setSmsRecoveryEnabled] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [deletingVideo, setDeletingVideo] = useState(false);
 
   // Diagnostic Logs state
   const [logs, setLogs] = useState<any[]>([]);
@@ -120,53 +122,53 @@ export default function AdminPanel({
     }
   };
 
-  const fetchBpcConfig = async () => {
+  const fetchWdvConfig = async () => {
     try {
-      const res = await fetch('/api/config/bpc');
+      const res = await fetch('/api/config/wdv');
       if (res.ok) {
         const data = await res.json();
         if (data.success && data.config) {
-          setBpcBankName(data.config.bankName);
-          setBpcAccountNumber(data.config.accountNumber);
-          setBpcAccountName(data.config.accountName);
-          setBpcWhatsappLink(data.config.whatsappLink);
-          setBpcVoucherPrice(String(data.config.voucherPrice));
-          setBpcInstructions(data.config.instructions);
-          setBpcMaintenanceNotice(data.config.maintenanceNotice);
+          setWdvBankName(data.config.bankName);
+          setWdvAccountNumber(data.config.accountNumber);
+          setWdvAccountName(data.config.accountName);
+          setWdvWhatsappLink(data.config.whatsappLink);
+          setWdvVoucherPrice(String(data.config.voucherPrice));
+          setWdvInstructions(data.config.instructions);
+          setWdvMaintenanceNotice(data.config.maintenanceNotice);
         }
       }
     } catch (err) {
-      console.error('Error fetching BPC config:', err);
+      console.error('Error fetching WDV config:', err);
     }
   };
 
-  const handleSaveBpcConfig = async (e: React.FormEvent) => {
+  const handleSaveWdvConfig = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSavingBpcConfig(true);
+    setSavingWdvConfig(true);
     try {
-      const res = await fetch('/api/admin/config/bpc', {
+      const res = await fetch('/api/admin/config/wdv', {
         method: 'POST',
         headers: getAdminHeaders(),
         body: JSON.stringify({
-          bankName: bpcBankName,
-          accountNumber: bpcAccountNumber,
-          accountName: bpcAccountName,
-          whatsappLink: bpcWhatsappLink,
-          voucherPrice: Number(bpcVoucherPrice),
-          instructions: bpcInstructions,
-          maintenanceNotice: bpcMaintenanceNotice
+          bankName: wdvBankName,
+          accountNumber: wdvAccountNumber,
+          accountName: wdvAccountName,
+          whatsappLink: wdvWhatsappLink,
+          voucherPrice: Number(wdvVoucherPrice),
+          instructions: wdvInstructions,
+          maintenanceNotice: wdvMaintenanceNotice
         })
       });
       if (res.ok) {
-        onToast('BPC configuration saved and updated live!', 'success');
-        fetchBpcConfig();
+        onToast('WDV configuration saved and updated live!', 'success');
+        fetchWdvConfig();
       } else {
-        onToast('Failed to save BPC configuration', 'error');
+        onToast('Failed to save WDV configuration', 'error');
       }
     } catch (err) {
       onToast('Network error saving configuration', 'error');
     } finally {
-      setSavingBpcConfig(false);
+      setSavingWdvConfig(false);
     }
   };
 
@@ -226,10 +228,70 @@ export default function AdminPanel({
     }
   };
 
+  const handleVideoUpload = async (file: File) => {
+    setUploadingVideo(true);
+    try {
+      const formData = new FormData();
+      formData.append('video', file);
+
+      const res = await fetch('/api/admin/video/upload', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('swiftpay_admin_token') || ''}`
+        },
+        body: formData
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          onToast('Walkthrough video uploaded successfully!', 'success');
+          setVideoUrl(data.videoUrl);
+          fetchAdminSettings();
+        } else {
+          onToast(data.message || 'Failed to upload video', 'error');
+        }
+      } else {
+        onToast('Failed to upload video (Ensure it is MP4, under 100MB)', 'error');
+      }
+    } catch (err) {
+      console.error('Error uploading video:', err);
+      onToast('Network error uploading video', 'error');
+    } finally {
+      setUploadingVideo(false);
+    }
+  };
+
+  const handleVideoDelete = async () => {
+    if (!window.confirm('Are you sure you want to completely delete the video walkthrough guide?')) {
+      return;
+    }
+    setDeletingVideo(true);
+    try {
+      const res = await fetch('/api/admin/video/delete', {
+        method: 'POST',
+        headers: getAdminHeaders()
+      });
+
+      if (res.ok) {
+        onToast('Walkthrough video deleted from server', 'success');
+        setVideoUrl('');
+        fetchAdminSettings();
+      } else {
+        onToast('Failed to delete video', 'error');
+      }
+    } catch (err) {
+      console.error('Error deleting video:', err);
+      onToast('Network error deleting video', 'error');
+    } finally {
+      setDeletingVideo(false);
+    }
+  };
+
   React.useEffect(() => {
     fetchAllUsers();
     fetchLogs();
-    fetchBpcConfig();
+    fetchWdvConfig();
     fetchAdminSettings();
   }, []);
 
@@ -249,7 +311,7 @@ export default function AdminPanel({
   const totalTxsCount = transactions.length;
   const airtimeTxs = transactions.filter(t => t.type === 'redeem_airtime');
   const transferTxs = transactions.filter(t => t.type === 'bank_transfer_direct' || t.type === 'withdraw');
-  const bpcTxs = transactions.filter(t => t.type === 'buy_bpc');
+  const wdvTxs = transactions.filter(t => t.type === 'buy_wdv' || t.type === 'buy_bpc');
   
   const totalRevenue = transactions
     .filter(t => t.status === 'success')
@@ -780,27 +842,27 @@ export default function AdminPanel({
         </form>
       </GlassCard>
 
-      {/* BPC Payment & System Configurations */}
+      {/* WDV Payment & System Configurations */}
       <GlassCard className="p-4 border-white/5 space-y-4">
         <div className="flex justify-between items-center pb-2 border-b border-white/5">
           <div>
             <h5 className="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center gap-1.5">
               <ShoppingBag className="h-4 w-4 text-teal-400" />
-              BPC Payment details &amp; Pricing Config
+              WDV Payment details &amp; Pricing Config
             </h5>
             <p className="text-[10px] text-slate-400 mt-0.5">Control system bank transfer details, warning notices, and voucher pricing dynamically</p>
           </div>
         </div>
 
-        <form onSubmit={handleSaveBpcConfig} className="space-y-4">
+        <form onSubmit={handleSaveWdvConfig} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <label className="text-[9px] font-mono text-slate-400 block mb-1">Payment Bank Name</label>
               <input
                 type="text"
                 required
-                value={bpcBankName}
-                onChange={(e) => setBpcBankName(e.target.value)}
+                value={wdvBankName}
+                onChange={(e) => setWdvBankName(e.target.value)}
                 className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400"
               />
             </div>
@@ -810,8 +872,8 @@ export default function AdminPanel({
               <input
                 type="text"
                 required
-                value={bpcAccountNumber}
-                onChange={(e) => setBpcAccountNumber(e.target.value)}
+                value={wdvAccountNumber}
+                onChange={(e) => setWdvAccountNumber(e.target.value)}
                 className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400"
               />
             </div>
@@ -821,8 +883,8 @@ export default function AdminPanel({
               <input
                 type="text"
                 required
-                value={bpcAccountName}
-                onChange={(e) => setBpcAccountName(e.target.value)}
+                value={wdvAccountName}
+                onChange={(e) => setWdvAccountName(e.target.value)}
                 className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400"
               />
             </div>
@@ -832,8 +894,8 @@ export default function AdminPanel({
               <input
                 type="url"
                 required
-                value={bpcWhatsappLink}
-                onChange={(e) => setBpcWhatsappLink(e.target.value)}
+                value={wdvWhatsappLink}
+                onChange={(e) => setWdvWhatsappLink(e.target.value)}
                 className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono"
               />
             </div>
@@ -844,8 +906,8 @@ export default function AdminPanel({
             <input
               type="number"
               required
-              value={bpcVoucherPrice}
-              onChange={(e) => setBpcVoucherPrice(e.target.value)}
+              value={wdvVoucherPrice}
+              onChange={(e) => setWdvVoucherPrice(e.target.value)}
               className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono"
             />
           </div>
@@ -855,8 +917,8 @@ export default function AdminPanel({
             <textarea
               required
               rows={3}
-              value={bpcInstructions}
-              onChange={(e) => setBpcInstructions(e.target.value)}
+              value={wdvInstructions}
+              onChange={(e) => setWdvInstructions(e.target.value)}
               className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400 resize-none font-sans"
             />
           </div>
@@ -865,8 +927,8 @@ export default function AdminPanel({
             <label className="text-[9px] font-mono text-slate-400 block mb-1">System Warning / Bank Maintenance Notice (Leave blank to hide)</label>
             <textarea
               rows={2}
-              value={bpcMaintenanceNotice}
-              onChange={(e) => setBpcMaintenanceNotice(e.target.value)}
+              value={wdvMaintenanceNotice}
+              onChange={(e) => setWdvMaintenanceNotice(e.target.value)}
               className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400 resize-none font-sans"
             />
           </div>
@@ -874,10 +936,10 @@ export default function AdminPanel({
           <div className="flex justify-end pt-1">
             <button
               type="submit"
-              disabled={savingBpcConfig}
+              disabled={savingWdvConfig}
               className="px-5 py-2.5 bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 disabled:opacity-50 text-slate-950 font-bold text-[10px] uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
             >
-              {savingBpcConfig ? 'Saving Settings...' : 'Save Configuration'}
+              {savingWdvConfig ? 'Saving Settings...' : 'Save Configuration'}
             </button>
           </div>
         </form>
@@ -888,70 +950,91 @@ export default function AdminPanel({
         <div>
           <h5 className="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center gap-1.5">
             <Video className="h-4 w-4" />
-            Walkthrough Guide Video Management
+            Direct Video Walkthrough Guide Manager
           </h5>
-          <p className="text-[10px] text-slate-400 mt-0.5">Configure, update, or completely suspend the YouTube walk-through tutorial shown to users</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">Upload walkthrough MP4 guide directly to the SwiftPay server or delete existing guide videos. HTML5 native media players are used for rendering.</p>
         </div>
 
-        <form onSubmit={(e) => handleSaveAdminSettings(e)} className="space-y-4">
-          <div>
-            <label className="text-[9px] font-mono text-slate-400 block mb-1">YouTube Video / Walkthrough URL</label>
-            <input
-              type="text"
-              placeholder="e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-              value={videoUrl}
-              onChange={(e) => setVideoUrl(e.target.value)}
-              className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono"
-            />
-          </div>
+        <div className="space-y-4">
+          {videoUrl ? (
+            <div className="bg-slate-950/60 rounded-2xl border border-white/5 p-4 space-y-3">
+              <span className="text-[9px] font-mono text-teal-400 block font-bold uppercase tracking-wider">Active Walkthrough Guide Video:</span>
+              <div className="rounded-xl overflow-hidden border border-white/10 aspect-video max-w-sm mx-auto bg-slate-900">
+                <video src={videoUrl} controls className="w-full h-full object-contain" />
+              </div>
+              <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
+                <span className="truncate">URL: {videoUrl}</span>
+                <button
+                  type="button"
+                  disabled={deletingVideo}
+                  onClick={handleVideoDelete}
+                  className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-[9px] font-bold uppercase border border-red-500/20 transition-colors disabled:opacity-50"
+                >
+                  {deletingVideo ? 'Deleting...' : 'Delete Video'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="border border-dashed border-white/10 rounded-2xl p-6 text-center space-y-3 bg-slate-950/20">
+              <div className="p-3 bg-teal-500/10 text-teal-400 w-12 h-12 rounded-full flex items-center justify-center mx-auto">
+                <Video className="h-6 w-6" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-slate-200 font-bold">No active walkthrough video uploaded yet</p>
+                <p className="text-[10px] text-slate-400 max-w-xs mx-auto">Upload an MP4 video file (max 100MB) to show a guided walkthrough for users.</p>
+              </div>
+
+              <div className="pt-2 max-w-xs mx-auto">
+                <input
+                  type="file"
+                  id="direct-video-upload-input"
+                  accept="video/mp4,video/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleVideoUpload(file);
+                  }}
+                  disabled={uploadingVideo}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  disabled={uploadingVideo}
+                  onClick={() => document.getElementById('direct-video-upload-input')?.click()}
+                  className="w-full py-2.5 px-4 bg-teal-500 hover:bg-teal-600 disabled:bg-teal-500/50 text-slate-950 font-bold text-[10px] uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  {uploadingVideo ? 'Uploading Video...' : 'Upload MP4 Video File'}
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center gap-2 bg-slate-950/30 p-3 rounded-xl border border-white/5">
             <input
               type="checkbox"
               id="video_enabled_box"
               checked={videoEnabled}
-              onChange={(e) => setVideoEnabled(e.target.checked)}
+              disabled={savingSettings}
+              onChange={async (e) => {
+                const checked = e.target.checked;
+                setVideoEnabled(checked);
+                await handleSaveAdminSettings(undefined, {
+                  supportEmail,
+                  supportPhone,
+                  whatsappNumber,
+                  senderName,
+                  videoUrl,
+                  videoEnabled: String(checked),
+                  recoveryEnabled: String(recoveryEnabled),
+                  smsRecoveryEnabled: String(smsRecoveryEnabled)
+                });
+              }}
               className="rounded border-white/10 text-teal-500 focus:ring-0"
             />
             <label htmlFor="video_enabled_box" className="text-[9px] font-mono text-slate-400 select-none cursor-pointer">
-              Enable walk-through video guide overlay for users
+              Enable walkthrough video guide overlays for users
             </label>
           </div>
-
-          <div className="flex justify-between items-center pt-1">
-            <button
-              type="button"
-              onClick={async () => {
-                if (window.confirm('Are you sure you want to completely remove the walkthrough video?')) {
-                  setVideoUrl('');
-                  setVideoEnabled(false);
-                  await handleSaveAdminSettings(undefined, {
-                    supportEmail,
-                    supportPhone,
-                    whatsappNumber,
-                    senderName,
-                    videoUrl: '',
-                    videoEnabled: 'false',
-                    recoveryEnabled: String(recoveryEnabled),
-                    smsRecoveryEnabled: String(smsRecoveryEnabled)
-                  });
-                  onToast('Video guide removed successfully', 'success');
-                }
-              }}
-              className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl text-[10px] font-bold uppercase tracking-wider border border-red-500/20"
-            >
-              Remove Video
-            </button>
-
-            <button
-              type="submit"
-              disabled={savingSettings}
-              className="px-5 py-2.5 bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 disabled:opacity-50 text-slate-950 font-bold text-[10px] uppercase tracking-wider rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
-            >
-              {savingSettings ? 'Saving Video...' : 'Save Video Settings'}
-            </button>
-          </div>
-        </form>
+        </div>
       </GlassCard>
 
       {/* Admin Settings & Support Configurations */}

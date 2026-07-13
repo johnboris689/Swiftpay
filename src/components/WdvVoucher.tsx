@@ -1,15 +1,15 @@
 import React, { useState } from 'react';
 import { Copy, Check, Ticket, ArrowUpRight, Share2 } from 'lucide-react';
-import { BpcCode } from '../types';
+import { WdvCode } from '../types';
 
-interface BpcVoucherProps {
-  voucher: BpcCode;
+interface WdvVoucherProps {
+  voucher: WdvCode;
   onRedeemAirtime?: (code: string) => void;
   onRedeemTransfer?: (code: string) => void;
   key?: React.Key | string | number;
 }
 
-export default function BpcVoucher({ voucher, onRedeemAirtime, onRedeemTransfer }: BpcVoucherProps) {
+export default function WdvVoucher({ voucher, onRedeemAirtime, onRedeemTransfer }: WdvVoucherProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -42,7 +42,7 @@ export default function BpcVoucher({ voucher, onRedeemAirtime, onRedeemTransfer 
             <Ticket className="h-5 w-5" />
           </div>
           <div>
-            <span className="text-[10px] uppercase tracking-wider text-slate-400 font-mono">Bill Payment Code</span>
+            <span className="text-[10px] uppercase tracking-wider text-slate-400 font-mono">Voucher Code</span>
             <h4 className="text-xs font-semibold text-slate-800 dark:text-slate-100">{voucher.fullName}</h4>
           </div>
         </div>
@@ -78,11 +78,11 @@ export default function BpcVoucher({ voucher, onRedeemAirtime, onRedeemTransfer 
             {voucher.code}
           </span>
           <button
-            id={`btn-copy-bpc-${voucher.id}`}
+            id={`btn-copy-wdv-${voucher.id}`}
             type="button"
             onClick={handleCopy}
             className="p-1.5 rounded-lg hover:bg-slate-200/50 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white transition-all active:scale-90"
-            title="Copy BPC Code"
+            title="Copy WDV Code"
           >
             {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
           </button>

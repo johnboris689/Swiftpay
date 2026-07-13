@@ -12,9 +12,9 @@ export default function QuickFabMenu({ isOpen, onClose, onSelectAction }: QuickF
 
   const actions = [
     {
-      id: 'buy-bpc',
-      title: 'Buy BPC Voucher',
-      desc: 'Generate a Bill Payment Code code via manual bank transfer',
+      id: 'buy-wdv',
+      title: 'Buy WDV Voucher',
+      desc: 'Generate a Withdrawal Voucher code via manual bank transfer',
       icon: Ticket,
       color: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
       textColor: 'text-indigo-600 dark:text-indigo-400'
@@ -22,7 +22,7 @@ export default function QuickFabMenu({ isOpen, onClose, onSelectAction }: QuickF
     {
       id: 'buy-airtime',
       title: 'Purchase Airtime',
-      desc: 'Use wallet balance or redeem a previously purchased BPC code',
+      desc: 'Use wallet balance or redeem a previously purchased WDV code',
       icon: Smartphone,
       color: 'bg-violet-500/10 text-violet-400 border-violet-500/20',
       textColor: 'text-violet-600 dark:text-violet-400'
@@ -38,7 +38,7 @@ export default function QuickFabMenu({ isOpen, onClose, onSelectAction }: QuickF
     {
       id: 'transfer-bank',
       title: 'Transfer to Bank',
-      desc: 'Send money to a 10-digit Nigerian bank account using BPC or balance',
+      desc: 'Send money to a 10-digit Nigerian bank account using WDV or balance',
       icon: Landmark,
       color: 'bg-teal-500/10 text-teal-400 border-teal-500/20',
       textColor: 'text-teal-600 dark:text-teal-400'

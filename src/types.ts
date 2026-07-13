@@ -15,23 +15,23 @@ export interface User {
   is2faEnabled?: boolean;
 }
 
-export type BpcStatus = 'unused' | 'redeemed';
+export type WdvStatus = 'unused' | 'redeemed';
 
-export interface BpcCode {
+export interface WdvCode {
   id: string;
   code: string;
   amount: number;
   fullName: string;
   email: string;
   createdAt: string;
-  status: BpcStatus;
+  status: WdvStatus;
   redeemedFor?: string; // e.g. "Airtime to 08012345678" or "Bank Transfer"
 }
 
 export type TransactionType = 
   | 'deposit'
   | 'withdraw'
-  | 'buy_bpc'
+  | 'buy_wdv'
   | 'redeem_airtime'
   | 'redeem_transfer'
   | 'bank_transfer_direct';
@@ -44,6 +44,8 @@ export interface Transaction {
   status: 'pending' | 'success' | 'failed';
   description: string;
   reference?: string;
+  wdvCodeUsed?: string;
+  wdvCodeGenerated?: string;
   bpcCodeUsed?: string;
   bpcCodeGenerated?: string;
   narration?: string;

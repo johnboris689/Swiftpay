@@ -4,6 +4,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
+import multer from 'multer';
 import { initDb, getRow, getAllRows, execute } from './db';
 import { sendEmail, sendSms } from './email_sms_service';
 
@@ -14,6 +15,35 @@ const PORT = 3000;
 const DB_FILE = path.join(process.cwd(), 'swiftpay_db.json');
 
 app.use(express.json());
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
+// Set up multer disk storage
+const uploadsDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname) || '.mp4';
+    cb(null, `guide-${Date.now()}${ext}`);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB limit
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('video/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only video files are allowed.'));
+    }
+  }
+});
 
 // -------------------- SECURITY HEADERS MIDDLEWARE --------------------
 app.use((req, res, next) => {
@@ -21,7 +51,7 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('Content-Security-Policy', "default-src 'self' 'unsafe-inline' 'unsafe-eval' https:; img-src 'self' data: https:; font-src 'self' https: data:;");
+  res.setHeader('Content-Security-Policy', "default-src 'self' 'unsafe-inline' 'unsafe-eval' https:; img-src 'self' data: https:; font-src 'self' https: data:; media-src 'self' data: https:;");
   next();
 });
 
@@ -73,7 +103,7 @@ interface UserState {
   loginHistory?: any[];
 }
 
-interface BpcConfig {
+interface WdvConfig {
   bankName: string;
   accountNumber: string;
   accountName: string;
@@ -83,7 +113,7 @@ interface BpcConfig {
   maintenanceNotice: string;
 }
 
-const DEFAULT_BPC_CONFIG: BpcConfig = {
+const DEFAULT_WDV_CONFIG: WdvConfig = {
   bankName: "PalmPay",
   accountNumber: "8960723295",
   accountName: "pwamunadi ishaku",
@@ -103,7 +133,7 @@ interface DBStructure {
   vouchers: any[];
   passwordResets: any[];
   logs: any[];
-  bpcConfig?: BpcConfig;
+  wdvConfig?: WdvConfig;
   admins?: AdminState[];
 }
 
@@ -113,7 +143,7 @@ let dbCache: DBStructure = {
   vouchers: [],
   passwordResets: [],
   logs: [],
-  bpcConfig: { ...DEFAULT_BPC_CONFIG },
+  wdvConfig: { ...DEFAULT_WDV_CONFIG },
   admins: []
 };
 
@@ -123,15 +153,15 @@ async function loadDbCache() {
     
     // Fetch settings
     const settingRows = await getAllRows(`SELECT key, value FROM admin_settings`);
-    const bpcConfig: any = { ...DEFAULT_BPC_CONFIG };
+    const wdvConfig: any = { ...DEFAULT_WDV_CONFIG };
     for (const r of settingRows) {
-      if (r.key === 'bpcBankName') bpcConfig.bankName = r.value;
-      if (r.key === 'bpcAccountNumber') bpcConfig.accountNumber = r.value;
-      if (r.key === 'bpcAccountName') bpcConfig.accountName = r.value;
-      if (r.key === 'bpcWhatsappLink') bpcConfig.whatsappLink = r.value;
-      if (r.key === 'bpcVoucherPrice') bpcConfig.voucherPrice = Number(r.value || 6500);
-      if (r.key === 'bpcInstructions') bpcConfig.instructions = r.value;
-      if (r.key === 'bpcMaintenanceNotice') bpcConfig.maintenanceNotice = r.value;
+      if (r.key === 'wdvBankName' || r.key === 'bpcBankName') wdvConfig.bankName = r.value;
+      if (r.key === 'wdvAccountNumber' || r.key === 'bpcAccountNumber') wdvConfig.accountNumber = r.value;
+      if (r.key === 'wdvAccountName' || r.key === 'bpcAccountName') wdvConfig.accountName = r.value;
+      if (r.key === 'wdvWhatsappLink' || r.key === 'bpcWhatsappLink') wdvConfig.whatsappLink = r.value;
+      if (r.key === 'wdvVoucherPrice' || r.key === 'bpcVoucherPrice') wdvConfig.voucherPrice = Number(r.value || 6500);
+      if (r.key === 'wdvInstructions' || r.key === 'bpcInstructions') wdvConfig.instructions = r.value;
+      if (r.key === 'wdvMaintenanceNotice' || r.key === 'bpcMaintenanceNotice') wdvConfig.maintenanceNotice = r.value;
     }
 
     // Fetch users
@@ -196,7 +226,7 @@ async function loadDbCache() {
       vouchers,
       passwordResets,
       logs,
-      bpcConfig,
+      wdvConfig,
       admins: [
         {
           email: 'talkdavidjohn@gmail.com',
@@ -292,16 +322,16 @@ async function persistDbCache(data: DBStructure) {
       `, [id, r.email.toLowerCase(), r.otp, r.expiresAt, r.used ? 1 : 0, Date.now()]);
     }
 
-    // 4. Save Bpc Config Settings to admin_settings
-    if (data.bpcConfig) {
-      const c = data.bpcConfig;
+    // 4. Save Wdv Config Settings to admin_settings
+    if (data.wdvConfig) {
+      const c = data.wdvConfig;
       const settingsMap = {
-        bpcBankName: c.bankName,
-        bpcAccountNumber: c.accountNumber,
-        bpcAccountName: c.accountName,
-        bpcVoucherPrice: String(c.voucherPrice),
-        bpcInstructions: c.instructions,
-        bpcMaintenanceNotice: c.maintenanceNotice
+        wdvBankName: c.bankName,
+        wdvAccountNumber: c.accountNumber,
+        wdvAccountName: c.accountName,
+        wdvVoucherPrice: String(c.voucherPrice),
+        wdvInstructions: c.instructions,
+        wdvMaintenanceNotice: c.maintenanceNotice
       };
       for (const [key, value] of Object.entries(settingsMap)) {
         await execute(`
@@ -1057,11 +1087,11 @@ app.post('/api/auth/verify-voucher', (req, res) => {
 
   const db = readDb();
   if (isVoucherValid(voucherCode, db)) {
-    const config = db.bpcConfig || DEFAULT_BPC_CONFIG;
+    const config = db.wdvConfig || DEFAULT_WDV_CONFIG;
     return res.json({ success: true, amount: config.voucherPrice });
   } else {
     logDiagnostic('API_ERROR', 'Invalid voucher code attempt', { voucherCode });
-    return res.status(400).json({ error: 'Invalid or already used BPC voucher.' });
+    return res.status(400).json({ error: 'Invalid or already used WDV voucher.' });
   }
 });
 
@@ -1071,7 +1101,7 @@ app.post('/api/transactions/airtime', authenticateToken, (req: any, res) => {
   const email = req.userEmail;
 
   if (!voucherCode) {
-    return res.status(400).json({ error: "BPC voucher is required. If you don't have one, tap 'Buy BPC Voucher'." });
+    return res.status(400).json({ error: "WDV voucher is required. If you don't have one, tap 'Buy WDV Voucher'." });
   }
   if (!phoneNumber || !isValidPhone(phoneNumber)) {
     return res.status(400).json({ error: "Enter a valid Nigerian phone number." });
@@ -1085,7 +1115,7 @@ app.post('/api/transactions/airtime', authenticateToken, (req: any, res) => {
 
   const db = readDb();
   if (!isVoucherValid(voucherCode, db)) {
-    return res.status(400).json({ error: "Invalid or already used BPC voucher." });
+    return res.status(400).json({ error: "Invalid or already used WDV voucher." });
   }
 
   const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
@@ -1141,7 +1171,7 @@ app.post('/api/transactions/airtime', authenticateToken, (req: any, res) => {
   user.notifications.unshift({
     id: `notif-${Date.now()}`,
     title: 'Airtime Purchase Successful',
-    body: `Successfully purchased ₦${price.toLocaleString()} airtime for ${phoneNumber}. BPC voucher used.`,
+    body: `Successfully purchased ₦${price.toLocaleString()} airtime for ${phoneNumber}. WDV voucher used.`,
     date: new Date().toISOString(),
     unread: true
   });
@@ -1169,7 +1199,7 @@ app.post('/api/transactions/data', authenticateToken, (req: any, res) => {
   const email = req.userEmail;
 
   if (!voucherCode) {
-    return res.status(400).json({ error: "BPC voucher is required. If you don't have one, tap 'Buy BPC Voucher'." });
+    return res.status(400).json({ error: "WDV voucher is required. If you don't have one, tap 'Buy WDV Voucher'." });
   }
   if (!phoneNumber || !isValidPhone(phoneNumber)) {
     return res.status(400).json({ error: "Enter a valid Nigerian phone number." });
@@ -1230,7 +1260,7 @@ app.post('/api/transactions/data', authenticateToken, (req: any, res) => {
 
   const db = readDb();
   if (!isVoucherValid(voucherCode, db)) {
-    return res.status(400).json({ error: "Invalid or already used BPC voucher." });
+    return res.status(400).json({ error: "Invalid or already used WDV voucher." });
   }
 
   const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
@@ -1286,7 +1316,7 @@ app.post('/api/transactions/data', authenticateToken, (req: any, res) => {
   user.notifications.unshift({
     id: `notif-${Date.now()}`,
     title: 'Data Purchase Successful',
-    body: `Successfully purchased ${plan.size} data bundle for ${phoneNumber}. BPC voucher used.`,
+    body: `Successfully purchased ${plan.size} data bundle for ${phoneNumber}. WDV voucher used.`,
     date: new Date().toISOString(),
     unread: true
   });
@@ -1314,7 +1344,7 @@ app.post('/api/transactions/transfer', authenticateToken, async (req: any, res) 
   const email = req.userEmail;
 
   if (!voucherCode) {
-    return res.status(400).json({ error: "BPC voucher is required. If you don't have one, tap 'Buy BPC Voucher'." });
+    return res.status(400).json({ error: "WDV voucher is required. If you don't have one, tap 'Buy WDV Voucher'." });
   }
   if (!bank) {
     return res.status(400).json({ error: "Please select a bank." });
@@ -1331,7 +1361,7 @@ app.post('/api/transactions/transfer', authenticateToken, async (req: any, res) 
 
   const db = readDb();
   if (!isVoucherValid(voucherCode, db)) {
-    return res.status(400).json({ error: "Invalid or already used BPC voucher." });
+    return res.status(400).json({ error: "Invalid or already used WDV voucher." });
   }
 
   const resolvedName = accountName.trim();
@@ -1390,7 +1420,7 @@ app.post('/api/transactions/transfer', authenticateToken, async (req: any, res) 
   user.notifications.unshift({
     id: `notif-${Date.now()}`,
     title: 'Bank Cashout Success',
-    body: `Successfully cashed out ₦${price.toLocaleString()} to ${resolvedName}. BPC voucher used.`,
+    body: `Successfully cashed out ₦${price.toLocaleString()} to ${resolvedName}. WDV voucher used.`,
     date: new Date().toISOString(),
     unread: true
   });
@@ -1419,7 +1449,7 @@ app.post('/api/transactions/withdraw', authenticateToken, async (req: any, res) 
   const email = req.userEmail;
 
   if (!voucherCode) {
-    return res.status(400).json({ error: "BPC voucher is required. If you don't have one, tap 'Buy BPC Voucher'." });
+    return res.status(400).json({ error: "WDV voucher is required. If you don't have one, tap 'Buy WDV Voucher'." });
   }
   if (!bank) {
     return res.status(400).json({ error: "Please select a bank." });
@@ -1436,7 +1466,7 @@ app.post('/api/transactions/withdraw', authenticateToken, async (req: any, res) 
 
   const db = readDb();
   if (!isVoucherValid(voucherCode, db)) {
-    return res.status(400).json({ error: "Invalid or already used BPC voucher." });
+    return res.status(400).json({ error: "Invalid or already used WDV voucher." });
   }
 
   const resolvedName = accountName.trim();
@@ -1495,7 +1525,7 @@ app.post('/api/transactions/withdraw', authenticateToken, async (req: any, res) 
   user.notifications.unshift({
     id: `notif-${Date.now()}`,
     title: 'Withdrawal Successful',
-    body: `₦${price.toLocaleString()} withdrawn to ${resolvedName} (${bank}). BPC voucher used.`,
+    body: `₦${price.toLocaleString()} withdrawn to ${resolvedName} (${bank}). WDV voucher used.`,
     date: new Date().toISOString(),
     unread: true
   });
@@ -1542,15 +1572,15 @@ app.post('/api/auth/update-balance', authenticateToken, (req: any, res) => {
   });
 });
 
-// Helper to generate a unique BPC voucher code
+// Helper to generate a unique WDV voucher code
 function generateVoucherCode(): string {
   const part1 = Math.floor(1000 + Math.random() * 9000);
   const part2 = Math.floor(1000 + Math.random() * 9000);
   const part3 = Math.floor(1000 + Math.random() * 9000);
-  return `BPC-${part1}-${part2}-${part3}`;
+  return `WDV-${part1}-${part2}-${part3}`;
 }
 
-// Purchase BPC Voucher Price Lock API
+// Purchase WDV Voucher Price Lock API
 app.post('/api/vouchers/purchase', (req, res) => {
   const { email, amount } = req.body;
   if (!email || amount === undefined) {
@@ -1558,11 +1588,11 @@ app.post('/api/vouchers/purchase', (req, res) => {
   }
 
   const db = readDb();
-  const config = db.bpcConfig || DEFAULT_BPC_CONFIG;
+  const config = db.wdvConfig || DEFAULT_WDV_CONFIG;
 
   if (Number(amount) !== config.voucherPrice) {
     logDiagnostic('API_ERROR', 'Purchase voucher failed: Invalid amount lock bypass attempted', { email, amount });
-    return res.status(400).json({ error: `BPC Voucher price is strictly fixed at ₦${config.voucherPrice.toLocaleString()}` });
+    return res.status(400).json({ error: `WDV Voucher price is strictly fixed at ₦${config.voucherPrice.toLocaleString()}` });
   }
 
   const code = generateVoucherCode();
@@ -1580,27 +1610,32 @@ app.post('/api/vouchers/purchase', (req, res) => {
     db.users[userIndex].notifications = db.users[userIndex].notifications || [];
     db.users[userIndex].notifications.unshift({
       id: `notif-${Date.now()}`,
-      title: 'BPC Voucher Purchased',
-      body: `You successfully purchased a BPC Voucher. Code: ${code}. Copy and use it to complete transactions!`,
+      title: 'WDV Voucher Purchased',
+      body: `You successfully purchased a WDV Voucher. Code: ${code}. Copy and use it to complete transactions!`,
       date: new Date().toISOString(),
       unread: true
     });
   }
 
   writeDb(db);
-  logDiagnostic('INFO', 'BPC Voucher purchased successfully', { email, code });
+  logDiagnostic('INFO', 'WDV Voucher purchased successfully', { email, code });
 
   res.json({
     success: true,
     code,
-    message: 'BPC Purchase completed successfully! Voucher generated.'
+    message: 'WDV Purchase completed successfully! Voucher generated.'
   });
 });
 
-// Get BPC Configuration
+// Get WDV Configuration (supporting legacy bpc route as well)
+app.get('/api/config/wdv', (req, res) => {
+  const db = readDb();
+  res.json({ success: true, config: db.wdvConfig || DEFAULT_WDV_CONFIG });
+});
+
 app.get('/api/config/bpc', (req, res) => {
   const db = readDb();
-  res.json({ success: true, config: db.bpcConfig || DEFAULT_BPC_CONFIG });
+  res.json({ success: true, config: db.wdvConfig || DEFAULT_WDV_CONFIG });
 });
 
 // Get live video and recovery settings config for client
@@ -1693,26 +1728,73 @@ app.post('/api/admin/settings', authenticateAdminToken, async (req, res) => {
   }
 });
 
-// Update BPC Configuration (Admin)
-app.post('/api/admin/config/bpc', authenticateAdminToken, (req, res) => {
+// Update WDV Configuration (Admin) - support both wdv and legacy bpc paths
+const handleAdminConfigUpdate = (req: any, res: any) => {
   const { bankName, accountNumber, accountName, whatsappLink, voucherPrice, instructions, maintenanceNotice } = req.body;
   
   const db = readDb();
-  if (!db.bpcConfig) {
-    db.bpcConfig = { ...DEFAULT_BPC_CONFIG };
+  if (!db.wdvConfig) {
+    db.wdvConfig = { ...DEFAULT_WDV_CONFIG };
   }
   
-  if (bankName !== undefined) db.bpcConfig.bankName = bankName;
-  if (accountNumber !== undefined) db.bpcConfig.accountNumber = accountNumber;
-  if (accountName !== undefined) db.bpcConfig.accountName = accountName;
-  if (whatsappLink !== undefined) db.bpcConfig.whatsappLink = whatsappLink;
-  if (voucherPrice !== undefined && !isNaN(Number(voucherPrice))) db.bpcConfig.voucherPrice = Number(voucherPrice);
-  if (instructions !== undefined) db.bpcConfig.instructions = instructions;
-  if (maintenanceNotice !== undefined) db.bpcConfig.maintenanceNotice = maintenanceNotice;
+  if (bankName !== undefined) db.wdvConfig.bankName = bankName;
+  if (accountNumber !== undefined) db.wdvConfig.accountNumber = accountNumber;
+  if (accountName !== undefined) db.wdvConfig.accountName = accountName;
+  if (whatsappLink !== undefined) db.wdvConfig.whatsappLink = whatsappLink;
+  if (voucherPrice !== undefined && !isNaN(Number(voucherPrice))) db.wdvConfig.voucherPrice = Number(voucherPrice);
+  if (instructions !== undefined) db.wdvConfig.instructions = instructions;
+  if (maintenanceNotice !== undefined) db.wdvConfig.maintenanceNotice = maintenanceNotice;
   
   writeDb(db);
-  logDiagnostic('SECURITY_ALERT', 'Admin updated BPC configuration', db.bpcConfig);
-  res.json({ success: true, config: db.bpcConfig });
+  logDiagnostic('SECURITY_ALERT', 'Admin updated WDV configuration', db.wdvConfig);
+  res.json({ success: true, config: db.wdvConfig });
+};
+
+app.post('/api/admin/config/wdv', authenticateAdminToken, handleAdminConfigUpdate);
+app.post('/api/admin/config/bpc', authenticateAdminToken, handleAdminConfigUpdate);
+
+// Upload Video Guide (Admin)
+app.post('/api/admin/video/upload', authenticateAdminToken, upload.single('video'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Please upload an MP4 video file.' });
+    }
+    const videoPath = `/uploads/${req.file.filename}`;
+    
+    // Save to admin_settings
+    await execute(`
+      INSERT INTO admin_settings (key, value) VALUES ($1, $2)
+      ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
+    `, ['videoUrl', videoPath]);
+
+    logDiagnostic('SECURITY_ALERT', 'Admin uploaded new video guide', { videoPath });
+    res.json({ success: true, videoUrl: videoPath });
+  } catch (err: any) {
+    console.error('Error uploading video guide:', err);
+    res.status(500).json({ error: err.message || 'Failed to upload video.' });
+  }
+});
+
+// Delete Video Guide (Admin)
+app.post('/api/admin/video/delete', authenticateAdminToken, async (req, res) => {
+  try {
+    const settingRows = await getAllRows(`SELECT key, value FROM admin_settings WHERE key = $1`, ['videoUrl']);
+    if (settingRows.length > 0) {
+      const videoPath = settingRows[0].value;
+      if (videoPath.startsWith('/uploads/')) {
+        const fullPath = path.join(process.cwd(), videoPath);
+        if (fs.existsSync(fullPath)) {
+          fs.unlinkSync(fullPath);
+        }
+      }
+    }
+    await execute(`DELETE FROM admin_settings WHERE key = $1`, ['videoUrl']);
+    logDiagnostic('SECURITY_ALERT', 'Admin deleted video guide');
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error deleting video guide:', err);
+    res.status(500).json({ error: err.message || 'Failed to delete video.' });
+  }
 });
 
 // List all users

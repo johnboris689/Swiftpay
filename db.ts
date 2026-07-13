@@ -10,8 +10,8 @@ let pgPool: pg.Pool | null = null;
 
 const JSON_FILE = path.join(process.cwd(), 'swiftpay_db.json');
 
-// Default BPC config values
-const DEFAULT_BPC_CONFIG = {
+// Default WDV config values
+const DEFAULT_WDV_CONFIG = {
   bankName: "PalmPay",
   accountNumber: "8960723295",
   accountName: "pwamunadi ishaku",
@@ -38,15 +38,15 @@ function getJsonDb(): JsonData {
       supportPhone: "+2349162845073",
       whatsappNumber: "+2349162845073",
       senderName: "SwiftPay",
-      videoUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+      videoUrl: "",
       recoveryEnabled: "true",
       smsRecoveryEnabled: "true",
-      bpcBankName: "PalmPay",
-      bpcAccountNumber: "8960723295",
-      bpcAccountName: "pwamunadi ishaku",
-      bpcVoucherPrice: "6500",
-      bpcInstructions: "Copy the system account details below. Make a manual bank transfer of the exact locked amount. Return here and click 'I have made this bank Transfer' to trigger operator check.",
-      bpcMaintenanceNotice: "Wema Bank transfers are temporarily delayed. Please use other supported banks (like PalmPay or GTBank) for instant manual validation."
+      wdvBankName: "PalmPay",
+      wdvAccountNumber: "8960723295",
+      wdvAccountName: "pwamunadi ishaku",
+      wdvVoucherPrice: "6500",
+      wdvInstructions: "Copy the system account details below. Make a manual bank transfer of the exact locked amount. Return here and click 'I have made this bank Transfer' to trigger operator check.",
+      wdvMaintenanceNotice: "Wema Bank transfers are temporarily delayed. Please use other supported banks (like PalmPay or GTBank) for instant manual validation."
     };
     const defaultUserPasswordHash = crypto.createHash('sha256').update('password123').digest('hex');
     const secureAdminPasswordHash = crypto.createHash('sha256').update('Boris$689').digest('hex');
@@ -79,8 +79,8 @@ function getJsonDb(): JsonData {
         }
       ],
       vouchers: [
-        { code: 'BPC-7674-2206-6501', amount: 6500, status: 'unused', usedby: '', usedat: '' },
-        { code: 'BPC-9001-3029-8675', amount: 6500, status: 'unused', usedby: '', usedat: '' }
+        { code: 'WDV-7674-2206-6501', amount: 6500, status: 'unused', usedby: '', usedat: '' },
+        { code: 'WDV-9001-3029-8675', amount: 6500, status: 'unused', usedby: '', usedat: '' }
       ],
       password_resets: [],
       admin_settings: defaultSettings,
@@ -155,23 +155,36 @@ function getJsonDb(): JsonData {
     };
 
     // Migrations
-    if (Object.keys(data.admin_settings).length === 0 && parsed.bpcConfig) {
-      const c = parsed.bpcConfig;
+    if (Object.keys(data.admin_settings).length === 0 && (parsed.bpcConfig || parsed.wdvConfig)) {
+      const c = parsed.wdvConfig || parsed.bpcConfig;
       data.admin_settings = {
         supportEmail: "support@swiftpay.com",
         supportPhone: "+2349162845073",
         whatsappNumber: "+2349162845073",
         senderName: "SwiftPay",
-        videoUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+        videoUrl: "",
         recoveryEnabled: "true",
         smsRecoveryEnabled: "true",
-        bpcBankName: c.bankName,
-        bpcAccountNumber: c.accountNumber,
-        bpcAccountName: c.accountName,
-        bpcVoucherPrice: String(c.voucherPrice),
-        bpcInstructions: c.instructions,
-        bpcMaintenanceNotice: c.maintenanceNotice
+        wdvBankName: c.bankName,
+        wdvAccountNumber: c.accountNumber,
+        wdvAccountName: c.accountName,
+        wdvVoucherPrice: String(c.voucherPrice),
+        wdvInstructions: c.instructions,
+        wdvMaintenanceNotice: c.maintenanceNotice
       };
+    } else {
+      // Migrate bpc settings to wdv settings in database settings
+      if (data.admin_settings.bpcBankName && !data.admin_settings.wdvBankName) {
+        data.admin_settings.wdvBankName = data.admin_settings.bpcBankName;
+        data.admin_settings.wdvAccountNumber = data.admin_settings.bpcAccountNumber;
+        data.admin_settings.wdvAccountName = data.admin_settings.bpcAccountName;
+        data.admin_settings.wdvVoucherPrice = data.admin_settings.bpcVoucherPrice;
+        data.admin_settings.wdvInstructions = data.admin_settings.bpcInstructions;
+        data.admin_settings.wdvMaintenanceNotice = data.admin_settings.bpcMaintenanceNotice;
+      }
+      if (data.admin_settings.videoUrl && data.admin_settings.videoUrl.includes('youtube')) {
+        data.admin_settings.videoUrl = '';
+      }
     }
 
     return data;
@@ -422,13 +435,13 @@ export async function initDb() {
   const voucherCount = await getRow(`SELECT COUNT(*) as count FROM vouchers`);
   if (!voucherCount || Number(voucherCount.count || 0) === 0) {
     const defaultVouchers = [
-      { code: 'BPC-7674-2206-6501', amount: 6500 },
-      { code: 'BPC-9001-3029-8675', amount: 6500 }
+      { code: 'WDV-7674-2206-6501', amount: 6500 },
+      { code: 'WDV-9001-3029-8675', amount: 6500 }
     ];
     for (const v of defaultVouchers) {
       await execute(`INSERT INTO vouchers (code, amount, status) VALUES ($1, $2, $3)`, [v.code, v.amount, 'unused']);
     }
-    console.log('[SwiftPay DB] Default BPC vouchers seeded.');
+    console.log('[SwiftPay DB] Default WDV vouchers seeded.');
   }
 
   // Seed default admin settings if not present
@@ -439,15 +452,15 @@ export async function initDb() {
       supportPhone: "+2349162845073",
       whatsappNumber: "+2349162845073",
       senderName: "SwiftPay",
-      videoUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+      videoUrl: "",
       recoveryEnabled: "true",
       smsRecoveryEnabled: "true",
-      bpcBankName: "PalmPay",
-      bpcAccountNumber: "8960723295",
-      bpcAccountName: "pwamunadi ishaku",
-      bpcVoucherPrice: "6500",
-      bpcInstructions: "Copy the system account details below. Make a manual bank transfer of the exact locked amount. Return here and click 'I have made this bank Transfer' to trigger operator check.",
-      bpcMaintenanceNotice: "Wema Bank transfers are temporarily delayed. Please use other supported banks (like PalmPay or GTBank) for instant manual validation."
+      wdvBankName: "PalmPay",
+      wdvAccountNumber: "8960723295",
+      wdvAccountName: "pwamunadi ishaku",
+      wdvVoucherPrice: "6500",
+      wdvInstructions: "Copy the system account details below. Make a manual bank transfer of the exact locked amount. Return here and click 'I have made this bank Transfer' to trigger operator check.",
+      wdvMaintenanceNotice: "Wema Bank transfers are temporarily delayed. Please use other supported banks (like PalmPay or GTBank) for instant manual validation."
     };
 
     for (const [key, value] of Object.entries(defaultSettings)) {

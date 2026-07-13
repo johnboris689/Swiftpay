@@ -23,7 +23,7 @@ export default function TransactionReceipt({
     if (tx.type === 'bank_transfer_direct' || tx.type === 'withdraw') {
       return 10; // Standard ₦10 network charge
     }
-    return 0; // Airtime / Data / BPC has 0 charges
+    return 0; // Airtime / Data / WDV has 0 charges
   };
 
   const getSenderName = (tx: Transaction) => {

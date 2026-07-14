@@ -33,6 +33,7 @@ export type TransactionType =
   | 'withdraw'
   | 'buy_wdv'
   | 'redeem_airtime'
+  | 'redeem_data'
   | 'redeem_transfer'
   | 'bank_transfer_direct';
 
@@ -43,6 +44,7 @@ export interface Transaction {
   date: string;
   status: 'pending' | 'success' | 'failed';
   description: string;
+  refNum?: string;
   reference?: string;
   wdvCodeUsed?: string;
   wdvCodeGenerated?: string;
@@ -52,6 +54,10 @@ export interface Transaction {
   recipientBank?: string;
   recipientAccount?: string;
   charges?: number;
+  newBalance?: number;
+  network?: string;
+  phoneNumber?: string;
+  dataPlan?: string;
 }
 
 export interface BankAccount {

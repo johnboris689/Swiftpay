@@ -1972,6 +1972,8 @@ export default function App() {
               </button>
             </div>
 
+            <LiveTicker />
+
             {/* Main scrollable view containers based on Current Screen & Tab */}
             <div className="flex-1 overflow-y-auto no-scrollbar pb-6">
               
@@ -4137,10 +4139,8 @@ export default function App() {
 
       {/* Footer credits info (Hidden on mobile) */}
       <div className="hidden md:block text-center mt-6 text-[10px] text-slate-500">
-        SwiftPay © 2026. All transaction logs and WDV keys are fully persisted in secure localStorage.
+        SwiftPay © 2026. All transaction logs and WDV keys are fully persisted in secure database.
       </div>
-
-      <LiveTicker />
     </div>
   );
 }

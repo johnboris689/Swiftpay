@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Sparkles } from 'lucide-react';
 
 const FIRST_NAMES = [
   "Abdul", "Abraham", "Musa", "Chinedu", "Fatima", 
@@ -16,110 +14,60 @@ const LAST_NAMES = [
   "Mustapha", "Adeyemi"
 ];
 
-interface NotificationItem {
-  id: string;
-  name: string;
-  amount: string;
-}
-
 export default function LiveTicker() {
-  const [notification, setNotification] = useState<NotificationItem | null>(null);
-  const [isVisible, setIsVisible] = useState(false);
+  const [currentText, setCurrentText] = useState("");
 
-  const generateRandomWithdrawal = (): NotificationItem => {
+  const generateRandomWithdrawalText = () => {
     const firstName = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
     const lastName = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)];
-    
-    // Amount must be between 100k and 500k inclusive (multiples of 5k or 10k look more natural)
+    // Multiples of 5,000 between 100,000 and 500,000 inclusive
     const amountVal = Math.floor(Math.random() * 81) * 5000 + 100000;
     const formattedAmount = `₦${amountVal.toLocaleString()}`;
-
-    return {
-      id: Math.random().toString(36).substring(2),
-      name: `${firstName} ${lastName}`,
-      amount: formattedAmount
-    };
+    return `${firstName} ${lastName} withdrew ${formattedAmount}`;
   };
 
   useEffect(() => {
-    // Show first notification after a short initial delay of 3 seconds
-    const initialTimer = setTimeout(() => {
-      const newNotif = generateRandomWithdrawal();
-      setNotification(newNotif);
-      setIsVisible(true);
+    // Generate initial text
+    setCurrentText(generateRandomWithdrawalText());
 
-      // Hide after 4.5 seconds
-      const hideTimer = setTimeout(() => {
-        setIsVisible(false);
-      }, 4500);
+    // Periodically change text to simulate continuous feed
+    const interval = setInterval(() => {
+      setCurrentText(generateRandomWithdrawalText());
+    }, 15000); // changes every 15s (matching animation cycle)
 
-      return () => clearTimeout(hideTimer);
-    }, 3000);
-
-    // Setup cyclic trigger with 20-40 seconds gap
-    let nextTimer: NodeJS.Timeout;
-    
-    const triggerNextCycle = () => {
-      // Random interval between 20 and 40 seconds
-      const delay = Math.floor(Math.random() * (40 - 20 + 1) + 20) * 1000;
-      
-      nextTimer = setTimeout(() => {
-        const newNotif = generateRandomWithdrawal();
-        setNotification(newNotif);
-        setIsVisible(true);
-
-        // Hide after 4.5 seconds
-        const hideTimer = setTimeout(() => {
-          setIsVisible(false);
-          triggerNextCycle(); // schedule next one after current one disappears
-        }, 4500);
-
-      }, delay);
-    };
-
-    // Start cycling scheduling
-    // Since we triggered the first one manually at 3 seconds, let's schedule next one 20-40s after the first disappears
-    const setupCycleTimer = setTimeout(() => {
-      triggerNextCycle();
-    }, 8000);
-
-    return () => {
-      clearTimeout(initialTimer);
-      clearTimeout(setupCycleTimer);
-      if (nextTimer) clearTimeout(nextTimer);
-    };
+    return () => clearInterval(interval);
   }, []);
 
   return (
-    <div className="fixed top-18 right-4 z-[9999] pointer-events-none max-w-sm w-[calc(100%-2rem)] md:top-20 md:right-6">
-      <AnimatePresence mode="wait">
-        {isVisible && notification && (
-          <motion.div
-            key={notification.id}
-            initial={{ opacity: 0, y: -20, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -10, scale: 0.95 }}
-            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-            className="pointer-events-auto bg-slate-900/95 dark:bg-slate-950/98 border border-slate-800 dark:border-teal-500/30 backdrop-blur-md rounded-2xl p-3.5 shadow-2xl flex items-center gap-3.5"
-          >
-            {/* Live Indicator Pulse */}
-            <div className="relative flex h-3 w-3 shrink-0">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-teal-500"></span>
-            </div>
+    <div id="live-withdrawal-news-ticker" className="w-full bg-[#11111e]/90 border-b border-white/5 py-2 overflow-hidden flex items-center relative z-20 select-none shrink-0 font-sans">
+      <style>{`
+        @keyframes tickerMarquee {
+          0% { transform: translateX(100%); }
+          100% { transform: translateX(-100%); }
+        }
+        .animate-ticker {
+          display: inline-block;
+          white-space: nowrap;
+          padding-left: 100%;
+          animation: tickerMarquee 15s linear infinite;
+        }
+      `}</style>
+      
+      {/* Static "LIVE" Badge */}
+      <div className="bg-red-500/10 text-red-400 border-r border-white/5 px-3 flex items-center gap-1.5 shrink-0 z-30 text-[10px] font-bold font-mono tracking-wider uppercase bg-[#0c0c14] h-full">
+        <span className="relative flex h-2 w-2">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+        </span>
+        LIVE FEED
+      </div>
 
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5 text-[10px] font-bold font-mono tracking-wider text-teal-400 uppercase">
-                <Sparkles className="h-3 w-3 animate-pulse" />
-                Live Withdrawal Feed
-              </div>
-              <p className="text-xs text-slate-100 mt-1 leading-normal">
-                <span className="font-extrabold text-white">{notification.name}</span> just withdrew <span className="font-bold text-teal-300">{notification.amount}</span>
-              </p>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Scrolling Text Container */}
+      <div className="flex-1 overflow-hidden relative flex items-center">
+        <div className="animate-ticker text-xs font-mono text-teal-400 tracking-wide font-bold">
+          {currentText}
+        </div>
+      </div>
     </div>
   );
 }

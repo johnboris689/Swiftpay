@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import multer from 'multer';
+import bcrypt from 'bcryptjs';
 import { initDb, getRow, getAllRows, execute } from './db';
 import { sendEmail, sendSms } from './email_sms_service';
 
@@ -96,6 +97,7 @@ interface UserState {
   isFrozen?: boolean;
   registrationDate?: string;
   accountStatus?: string;
+  emailVerificationStatus?: string;
   transactions?: any[];
   notifications?: any[];
   beneficiaries?: any[];
@@ -496,7 +498,7 @@ app.post('/api/auth/register', (req, res) => {
     return res.status(400).json({ error: 'An account with this email address already exists.' });
   }
 
-  const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
+  const passwordHash = bcrypt.hashSync(password, 10);
 
   const newUser: UserState = {
     fullName: fullName.trim(),
@@ -512,6 +514,9 @@ app.post('/api/auth/register', (req, res) => {
     tier: 3,
     isSuspended: false,
     isFrozen: false,
+    registrationDate: new Date().toISOString(),
+    accountStatus: 'active',
+    emailVerificationStatus: 'verified',
     transactions: [],
     notifications: [
       {
@@ -598,8 +603,19 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(400).json({ error: 'This account has been suspended by the administrator.' });
   }
 
-  const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
-  if (user.passwordHash !== passwordHash) {
+  let isPasswordCorrect = false;
+  if (user.passwordHash.startsWith('$2a$') || user.passwordHash.startsWith('$2b$') || user.passwordHash.startsWith('$2y$')) {
+    isPasswordCorrect = bcrypt.compareSync(password, user.passwordHash);
+  } else {
+    const sha256Hash = crypto.createHash('sha256').update(password).digest('hex');
+    isPasswordCorrect = user.passwordHash === sha256Hash;
+    if (isPasswordCorrect) {
+      user.passwordHash = bcrypt.hashSync(password, 10);
+      writeDb(db);
+    }
+  }
+
+  if (!isPasswordCorrect) {
     failed.count += 1;
     if (failed.count >= 3) {
       failed.lockedUntil = Date.now() + 60 * 1000; // 1-minute lockout
@@ -705,13 +721,20 @@ app.post('/api/auth/change-password', authenticateToken, (req: any, res) => {
   }
 
   const user = db.users[userIndex];
-  const currentHash = crypto.createHash('sha256').update(currentPassword).digest('hex');
-  if (user.passwordHash !== currentHash) {
+  let isCurrentPasswordCorrect = false;
+  if (user.passwordHash.startsWith('$2a$') || user.passwordHash.startsWith('$2b$') || user.passwordHash.startsWith('$2y$')) {
+    isCurrentPasswordCorrect = bcrypt.compareSync(currentPassword, user.passwordHash);
+  } else {
+    const sha256Hash = crypto.createHash('sha256').update(currentPassword).digest('hex');
+    isCurrentPasswordCorrect = user.passwordHash === sha256Hash;
+  }
+
+  if (!isCurrentPasswordCorrect) {
     logDiagnostic('SECURITY_ALERT', 'Password change failure: Incorrect current password', { email });
     return res.status(400).json({ error: 'Current password provided is incorrect.' });
   }
 
-  const newHash = crypto.createHash('sha256').update(newPassword).digest('hex');
+  const newHash = bcrypt.hashSync(newPassword, 10);
   db.users[userIndex].passwordHash = newHash;
 
   // Track activity log in notifications/history
@@ -844,7 +867,7 @@ app.post('/api/auth/reset-password', (req, res) => {
     return res.status(400).json({ error: 'User account no longer exists.' });
   }
 
-  const newPasswordHash = crypto.createHash('sha256').update(password).digest('hex');
+  const newPasswordHash = bcrypt.hashSync(password, 10);
   db.users[userIndex].passwordHash = newPasswordHash;
   db.passwordResets[resetSessionIndex].used = true;
 
@@ -1678,8 +1701,19 @@ app.post('/api/admin/login', (req, res) => {
     logDiagnostic('FAILED_LOGIN', `Admin login failed (no admin found): ${email}`);
     return res.status(400).json({ error: 'Invalid admin credentials.' });
   }
-  const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
-  if (admin.passwordHash !== passwordHash) {
+  let isAdminPasswordCorrect = false;
+  if (admin.passwordHash.startsWith('$2a$') || admin.passwordHash.startsWith('$2b$') || admin.passwordHash.startsWith('$2y$')) {
+    isAdminPasswordCorrect = bcrypt.compareSync(password, admin.passwordHash);
+  } else {
+    const sha256Hash = crypto.createHash('sha256').update(password).digest('hex');
+    isAdminPasswordCorrect = admin.passwordHash === sha256Hash;
+    if (isAdminPasswordCorrect) {
+      admin.passwordHash = bcrypt.hashSync(password, 10);
+      writeDb(db);
+    }
+  }
+
+  if (!isAdminPasswordCorrect) {
     logDiagnostic('FAILED_LOGIN', `Admin login failed (incorrect password): ${email}`);
     return res.status(400).json({ error: 'Invalid admin credentials.' });
   }
@@ -1874,7 +1908,7 @@ app.post('/api/admin/users/reset-password', authenticateAdminToken, (req, res) =
   }
 
   const tempPass = 'SwiftPayAdmin99!';
-  const hash = crypto.createHash('sha256').update(tempPass).digest('hex');
+  const hash = bcrypt.hashSync(tempPass, 10);
   db.users[userIndex].passwordHash = hash;
   writeDb(db);
 

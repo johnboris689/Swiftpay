@@ -1,5 +1,5 @@
 import React from 'react';
-import { Download, Share2, CheckCircle2, AlertTriangle, X, Printer, ShieldCheck } from 'lucide-react';
+import { Download, Share2, CheckCircle2, X, ShieldCheck } from 'lucide-react';
 import { Transaction } from '../types';
 import GlassCard from './GlassCard';
 
@@ -18,28 +18,6 @@ export default function TransactionReceipt({
 }: TransactionReceiptProps) {
   if (!transaction) return null;
 
-  const getCharges = (tx: Transaction) => {
-    if (tx.charges !== undefined) return tx.charges;
-    if (tx.type === 'bank_transfer_direct' || tx.type === 'withdraw') {
-      return 10; // Standard ₦10 network charge
-    }
-    return 0; // Airtime / Data / WDV has 0 charges
-  };
-
-  const getSenderName = (tx: Transaction) => {
-    if (tx.senderName) return tx.senderName;
-    if (tx.type === 'deposit') return 'External Bank Transfer';
-    return 'Me (SwiftPay Wallet)';
-  };
-
-  const getRecipientName = (tx: Transaction) => {
-    if (tx.recipientName) return tx.recipientName;
-    if (tx.type === 'bank_transfer_direct' || tx.type === 'withdraw') {
-      return tx.description.replace(/^Transfer of ₦[\d,]+ to\s+/i, '').replace(/^Withdrew ₦[\d,]+ to\s+/i, '');
-    }
-    return tx.description;
-  };
-
   const getFormattedDate = (dateStr: string) => {
     const d = new Date(dateStr);
     return {
@@ -49,32 +27,92 @@ export default function TransactionReceipt({
   };
 
   const { date, time } = getFormattedDate(transaction.date);
-  const charges = getCharges(transaction);
-  const totalDeduction = transaction.amount + charges;
+  const refNum = transaction.reference || transaction.refNum || transaction.id;
+  const newBalanceVal = transaction.newBalance ?? (transaction as any).balanceAfter ?? 0;
+
+  let title = "Transaction Receipt";
+  let contentRows = [];
+
+  const type = transaction.type;
+
+  if (type === 'withdraw') {
+    title = "Withdrawal Successful";
+    contentRows = [
+      { label: "Status", value: "Successful", highlight: true },
+      { label: "Amount", value: `₦${transaction.amount.toLocaleString()}`, bold: true },
+      { label: "Destination Bank", value: transaction.recipientBank || 'PalmPay' },
+      { label: "Account Name", value: transaction.recipientName || 'Pwamunadi Ishaku' },
+      { label: "Account Number", value: transaction.recipientAccount || '8960723295' },
+      { label: "Date", value: date },
+      { label: "Time", value: time },
+      { label: "Transaction ID", value: transaction.id, selectAll: true },
+      { label: "New Wallet Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
+    ];
+  } else if (type === 'bank_transfer_direct') {
+    title = "Transfer Successful";
+    contentRows = [
+      { label: "Recipient Name", value: transaction.recipientName || 'N/A', bold: true },
+      { label: "Recipient Bank", value: transaction.recipientBank || 'N/A' },
+      { label: "Recipient Account Number", value: transaction.recipientAccount || 'N/A' },
+      { label: "Amount", value: `₦${transaction.amount.toLocaleString()}`, bold: true },
+      { label: "Date", value: date },
+      { label: "Time", value: time },
+      { label: "Reference Number", value: refNum, selectAll: true },
+      { label: "New Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
+    ];
+  } else if (type === 'redeem_airtime') {
+    title = "Airtime Purchase Successful";
+    contentRows = [
+      { label: "Network", value: transaction.recipientBank || transaction.network || 'MTN', bold: true },
+      { label: "Phone Number", value: transaction.recipientAccount || transaction.phoneNumber || 'N/A' },
+      { label: "Amount", value: `₦${transaction.amount.toLocaleString()}`, bold: true },
+      { label: "Reference", value: refNum, selectAll: true },
+      { label: "Date", value: date },
+      { label: "Time", value: time },
+      { label: "New Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
+    ];
+  } else if (type === 'redeem_data') {
+    let planSize = transaction.dataPlan;
+    if (!planSize && transaction.description) {
+      const match = transaction.description.match(/Data Purchase of\s+(\S+)/i);
+      if (match) planSize = match[1];
+    }
+    if (!planSize) planSize = "1.5GB";
+
+    title = "Data Purchase Successful";
+    contentRows = [
+      { label: "Network", value: transaction.recipientBank || transaction.network || 'MTN', bold: true },
+      { label: "Phone Number", value: transaction.recipientAccount || transaction.phoneNumber || 'N/A' },
+      { label: "Data Plan", value: planSize },
+      { label: "Amount", value: `₦${transaction.amount.toLocaleString()}`, bold: true },
+      { label: "Reference", value: refNum, selectAll: true },
+      { label: "Date", value: date },
+      { label: "Time", value: time },
+      { label: "New Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
+    ];
+  } else {
+    title = "Operation Successful";
+    contentRows = [
+      { label: "Transaction ID", value: transaction.id, selectAll: true },
+      { label: "Date & Time", value: `${date} ${time}` },
+      { label: "Type", value: transaction.type.toUpperCase() },
+      { label: "Amount", value: `₦${transaction.amount.toLocaleString()}`, bold: true },
+      { label: "Description", value: transaction.description },
+      { label: "New Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
+    ];
+  }
 
   const handleDownload = () => {
-    // Elegant formatted receipt print/PDF save
     const printWindow = window.open('', '_blank');
     const receiptText = `
 =========================================
             SWIFTPAY RECEIPT             
 =========================================
-Transaction ID:  ${transaction.id}
-Date & Time:     ${date} at ${time}
-Status:          ${transaction.status.toUpperCase()}
-Type:            ${transaction.type.toUpperCase()}
+${title.toUpperCase()}
 -----------------------------------------
-Sender:          ${getSenderName(transaction)}
-Recipient:       ${getRecipientName(transaction)}
+${contentRows.map(row => `${row.label.padEnd(25)}: ${row.value}`).join('\n')}
 -----------------------------------------
-Principal:       ₦${transaction.amount.toLocaleString()}
-Charges/Fees:    ₦${charges.toLocaleString()}
-Total Amount:    ₦${totalDeduction.toLocaleString()}
------------------------------------------
-Narration:       ${transaction.narration || 'SwiftPay digital settlement'}
-Security:        Fully verified & finalized
-=========================================
-   Thank you for choosing SwiftPay!      
+Thank you for choosing SwiftPay!
 =========================================
     `;
 
@@ -101,19 +139,15 @@ Security:        Fully verified & finalized
             <div class="header">
               <h2>SWIFTPAY DIGITAL BANKING</h2>
               <div class="amount">₦${transaction.amount.toLocaleString()}</div>
-              <div>Status: ${transaction.status.toUpperCase()}</div>
+              <div>${title}</div>
             </div>
             <div class="details">
-              <div class="row"><span class="label">Transaction ID:</span> <span class="value">${transaction.id}</span></div>
-              <div class="row"><span class="label">Date & Time:</span> <span class="value">${date} at ${time}</span></div>
-              <div class="row"><span class="label">Type:</span> <span class="value">${transaction.type.toUpperCase()}</span></div>
-              <div class="row"><span class="label">Sender:</span> <span class="value">${getSenderName(transaction)}</span></div>
-              <div class="row"><span class="label">Recipient:</span> <span class="value">${getRecipientName(transaction)}</span></div>
-              <div class="row"><span class="label">Principal Amount:</span> <span class="value">₦${transaction.amount.toLocaleString()}</span></div>
-              <div class="row"><span class="label">Charges:</span> <span class="value">₦${charges.toLocaleString()}</span></div>
-              <div class="row" style="font-size: 18px; font-weight: bold; border-top: 1px solid #eee; padding-top: 8px; margin-top: 8px;">
-                <span class="label">Total Amount:</span> <span class="value" style="color: #4f46e5;">₦${totalDeduction.toLocaleString()}</span>
-              </div>
+              ${contentRows.map(row => `
+                <div class="row">
+                  <span class="label">${row.label}:</span>
+                  <span class="value">${row.value}</span>
+                </div>
+              `).join('')}
             </div>
             <div class="footer">
               <p>Fully Encrypted & Verified Settlement Receipt</p>
@@ -131,7 +165,6 @@ Security:        Fully verified & finalized
       printWindow.document.close();
       onToast('Receipt print window opened! Select Save as PDF.', 'success');
     } else {
-      // Fallback if popup blocked
       const element = document.createElement('a');
       const file = new Blob([receiptText], { type: 'text/plain' });
       element.href = URL.createObjectURL(file);
@@ -144,13 +177,13 @@ Security:        Fully verified & finalized
   };
 
   const handleShareClick = () => {
-    const summary = `SwiftPay Transaction Receipt:\nSent ₦${transaction.amount.toLocaleString()} to ${getRecipientName(transaction)} on ${date}. Status: ${transaction.status.toUpperCase()}. Ref ID: ${transaction.id}`;
+    const summary = `SwiftPay Receipt:\n${title}\n` + contentRows.map(row => `${row.label}: ${row.value}`).join('\n');
     onShare(summary);
   };
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm bg-[#0c0c14] border border-white/10 rounded-[32px] overflow-hidden shadow-2xl relative animate-[scaleUp_0.25s_ease-out]">
+      <div className="w-full max-w-sm bg-[#0c0c14] border border-white/10 rounded-[32px] overflow-hidden shadow-2xl relative animate-[scaleUp_0.25s_ease-out] font-sans">
         
         {/* Receipt Header Banner */}
         <div className="bg-gradient-to-r from-indigo-600 to-teal-500 p-6 text-center text-white relative">
@@ -164,7 +197,7 @@ Security:        Fully verified & finalized
           <div className="mx-auto h-12 w-12 rounded-full bg-white/10 flex items-center justify-center mb-2">
             <CheckCircle2 className="h-7 w-7 text-teal-300" />
           </div>
-          <h4 className="text-sm font-black tracking-widest uppercase font-mono">Transaction Receipt</h4>
+          <h4 className="text-sm font-black tracking-widest uppercase font-mono">{title}</h4>
           <p className="text-[10px] text-teal-200 mt-1">Official settlement confirmation</p>
         </div>
 
@@ -176,47 +209,28 @@ Security:        Fully verified & finalized
               ₦{transaction.amount.toLocaleString()}
             </h3>
             <span className="text-[9px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full inline-block mt-2">
-              Status: {transaction.status.toUpperCase()}
+              Status: Successful
             </span>
           </div>
 
           <GlassCard className="p-4 bg-white/[0.02] border-white/5 space-y-3 font-mono text-[10px] text-slate-300">
-            <div className="flex justify-between">
-              <span className="text-slate-500">Transaction ID</span>
-              <span className="text-white font-bold select-all">{transaction.id}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-500">Date &amp; Time</span>
-              <span className="text-white">{date} &bull; {time}</span>
-            </div>
-            <div className="border-t border-white/5 my-2" />
-            <div className="flex justify-between">
-              <span className="text-slate-500">Sender</span>
-              <span className="text-white truncate max-w-[150px]">{getSenderName(transaction)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-500">Recipient</span>
-              <span className="text-white truncate max-w-[150px]">{getRecipientName(transaction)}</span>
-            </div>
-            {transaction.narration && (
-              <div className="flex justify-between">
-                <span className="text-slate-500">Narration</span>
-                <span className="text-white truncate max-w-[150px] italic">"{transaction.narration}"</span>
+            {contentRows.map((row, i) => (
+              <div key={i}>
+                {row.label === 'New Wallet Balance' || row.label === 'New Balance' ? (
+                  <div className="border-t border-dashed border-white/10 my-2 pt-2 flex justify-between text-xs font-bold text-teal-400">
+                    <span>{row.label}</span>
+                    <span>{row.value}</span>
+                  </div>
+                ) : (
+                  <div className="flex justify-between items-center py-0.5">
+                    <span className="text-slate-500">{row.label}</span>
+                    <span className={`text-white truncate max-w-[200px] ${row.bold ? 'font-bold' : ''} ${row.selectAll ? 'select-all' : ''}`}>
+                      {row.value}
+                    </span>
+                  </div>
+                )}
               </div>
-            )}
-            <div className="border-t border-white/5 my-2" />
-            <div className="flex justify-between">
-              <span className="text-slate-500">Principal</span>
-              <span className="text-white">₦{transaction.amount.toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-500">Service Charges</span>
-              <span className="text-white">₦{charges.toLocaleString()}</span>
-            </div>
-            <div className="border-t border-dashed border-white/10 my-2 pt-2 flex justify-between text-xs font-bold text-teal-400">
-              <span>Total Settlement</span>
-              <span>₦{totalDeduction.toLocaleString()}</span>
-            </div>
+            ))}
           </GlassCard>
 
           <div className="flex gap-2">

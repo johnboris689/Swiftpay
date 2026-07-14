@@ -137,12 +137,12 @@ export const INITIAL_TRANSACTIONS: Transaction[] = [
   },
   {
     id: 'tx-2',
-    type: 'buy_bpc',
+    type: 'buy_wdv',
     amount: 10000,
     date: '2026-07-08T18:45:00Z',
     status: 'success',
-    description: 'BPC Voucher Purchase',
-    bpcCodeGenerated: 'BPC-8960-7232-9501'
+    description: 'WDV Voucher Purchase',
+    wdvCodeGenerated: 'WDV-8960-7232-9501'
   },
   {
     id: 'tx-3',
@@ -151,7 +151,7 @@ export const INITIAL_TRANSACTIONS: Transaction[] = [
     date: '2026-07-08T19:02:00Z',
     status: 'success',
     description: 'Airtime Recharge (MTN 08034567890)',
-    bpcCodeUsed: 'BPC-8960-7232-9501'
+    wdvCodeUsed: 'WDV-8960-7232-9501'
   },
   {
     id: 'tx-4',
@@ -182,23 +182,23 @@ export const INITIAL_NOTIFICATIONS: NotificationItem[] = [
 
 export const FAQS = [
   {
-    question: 'What is a BPC (Bill Payment Code)?',
-    answer: 'The Bill Payment Code (BPC) is a first-class voucher code purchased on SwiftPay. You pay for it via a secure manual bank transfer. Once generated, it acts as instant store credit or a redeemable token. You can copy this code and redeem it during airtime, data, or bank transfer operations instead of paying from your direct wallet balance.'
+    question: 'What is a WDV (Withdrawal Voucher)?',
+    answer: 'The Withdrawal Voucher (WDV) is a first-class voucher code purchased on SwiftPay. You pay for it via a secure manual bank transfer. Once generated, it acts as instant store credit or a redeemable token. You can copy this code and redeem it during airtime, data, or bank transfer operations instead of paying from your direct wallet balance.'
   },
   {
     question: 'How do I fund my Naira Wallet?',
     answer: 'You can fund your SwiftPay wallet by clicking "Withdraw" or utilizing any active voucher code, or completing a direct peer bank transfer. Direct balance updates occur instantly after verifying the transaction.'
   },
   {
-    question: 'How long does BPC confirmation take?',
-    answer: 'BPC validation usually takes under 3 minutes. Once you copy the bank transfer details, execute the transfer from your personal banking app, and click "I have made this bank Transfer", our system auto-reconciles the payment and activates your BPC Code immediately.'
+    question: 'How long does WDV confirmation take?',
+    answer: 'WDV validation usually takes under 3 minutes. Once you copy the bank transfer details, execute the transfer from your personal banking app, and click "I have made this bank Transfer", our system auto-reconciles the payment and activates your WDV Code immediately.'
   },
   {
     question: 'Are there any transaction fees?',
-    answer: 'No! SwiftPay offers zero charge transfers on BPC generations, and heavily discounted airtime and data bundles compared to direct retail rates.'
+    answer: 'No! SwiftPay offers zero charge transfers on WDV generations, and heavily discounted airtime and data bundles compared to direct retail rates.'
   },
   {
     question: 'What happens if a bank is temporarily unavailable?',
-    answer: 'If any major partner bank is undergoing service downtime, we display a status alert notification in the BPC screen. We highly recommend transferring to alternative active bank options to ensure instant confirmation.'
+    answer: 'If any major partner bank is undergoing service downtime, we display a status alert notification in the WDV screen. We highly recommend transferring to alternative active bank options to ensure instant confirmation.'
   }
 ];

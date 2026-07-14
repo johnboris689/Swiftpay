@@ -37,14 +37,14 @@ export function TermsOfService({ onBack }: LegalPageProps) {
         <div>
           <h5 className="font-bold text-white uppercase text-xs mb-1">2. Wallet Balances and Account Funding</h5>
           <p>
-            SwiftPay operates digital wallet balances for Nigeria (Naira). Balances can be used for virtual payments. All direct wallet balances are stored in persistent state. Account funding must be conducted via authorized channels, including manual peer-to-peer transfers or confirmed Bill Payment Code (BPC) vouchers.
+            SwiftPay operates digital wallet balances for Nigeria (Naira). Balances can be used for virtual payments. All direct wallet balances are stored in persistent state. Account funding must be conducted via authorized channels, including manual peer-to-peer transfers or confirmed Withdrawal Voucher (WDV) vouchers.
           </p>
         </div>
 
         <div>
-          <h5 className="font-bold text-white uppercase text-xs mb-1">3. Bill Payment Codes (BPC)</h5>
+          <h5 className="font-bold text-white uppercase text-xs mb-1">3. Withdrawal Vouchers (WDV)</h5>
           <p>
-            Bill Payment Codes are unique cryptographic voucher tokens purchased by users. A BPC voucher is strictly non-refundable and has a fixed face value of ₦6,500. Verification of the BPC code is performed server-side. Users are solely responsible for keeping their active voucher codes secure. Sharing voucher codes is strictly at your own risk.
+            Withdrawal Vouchers are unique cryptographic voucher tokens purchased by users. A WDV voucher is strictly non-refundable and has a fixed face value of ₦6,500. Verification of the WDV code is performed server-side. Users are solely responsible for keeping their active voucher codes secure. Sharing voucher codes is strictly at your own risk.
           </p>
         </div>
 

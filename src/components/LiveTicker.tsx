@@ -30,8 +30,8 @@ export default function LiveTicker() {
     const firstName = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)];
     const lastName = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)];
     
-    // Amount must be between 100k and 200k inclusive (multiples of 5k or 10k look more natural)
-    const amountVal = Math.floor(Math.random() * 21) * 5000 + 100000;
+    // Amount must be between 100k and 500k inclusive (multiples of 5k or 10k look more natural)
+    const amountVal = Math.floor(Math.random() * 81) * 5000 + 100000;
     const formattedAmount = `₦${amountVal.toLocaleString()}`;
 
     return {

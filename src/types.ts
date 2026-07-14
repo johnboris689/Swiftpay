@@ -46,8 +46,6 @@ export interface Transaction {
   reference?: string;
   wdvCodeUsed?: string;
   wdvCodeGenerated?: string;
-  bpcCodeUsed?: string;
-  bpcCodeGenerated?: string;
   narration?: string;
   senderName?: string;
   recipientName?: string;

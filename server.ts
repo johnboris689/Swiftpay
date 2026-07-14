@@ -1648,7 +1648,7 @@ app.get('/api/config/video', async (req, res) => {
     }
     res.json({
       success: true,
-      videoUrl: settings.videoUrl || "https://www.youtube.com/embed/dQw4w9WgXcQ",
+      videoUrl: settings.videoUrl || "",
       videoEnabled: settings.videoEnabled !== 'false',
       recoveryEnabled: settings.recoveryEnabled !== 'false',
       smsRecoveryEnabled: settings.smsRecoveryEnabled !== 'false'
@@ -1656,7 +1656,7 @@ app.get('/api/config/video', async (req, res) => {
   } catch (err) {
     res.json({
       success: true,
-      videoUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+      videoUrl: "",
       videoEnabled: true,
       recoveryEnabled: true,
       smsRecoveryEnabled: true

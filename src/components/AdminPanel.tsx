@@ -311,7 +311,7 @@ export default function AdminPanel({
   const totalTxsCount = transactions.length;
   const airtimeTxs = transactions.filter(t => t.type === 'redeem_airtime');
   const transferTxs = transactions.filter(t => t.type === 'bank_transfer_direct' || t.type === 'withdraw');
-  const wdvTxs = transactions.filter(t => t.type === 'buy_wdv' || t.type === 'buy_bpc');
+  const wdvTxs = transactions.filter(t => t.type === 'buy_wdv');
   
   const totalRevenue = transactions
     .filter(t => t.status === 'success')
@@ -477,9 +477,9 @@ export default function AdminPanel({
 
   const handleExportTransactionsCSV = () => {
     let csvContent = "data:text/csv;charset=utf-8,";
-    csvContent += "Transaction ID,Type,Amount,Date,Status,Description,BPC Used,BPC Generated,Charges\n";
+    csvContent += "Transaction ID,Type,Amount,Date,Status,Description,WDV Used,WDV Generated,Charges\n";
     transactions.forEach(t => {
-      csvContent += `"${t.id}","${t.type}",${t.amount},"${t.date}","${t.status}","${t.description}","${t.bpcCodeUsed || ''}","${t.bpcCodeGenerated || ''}",${t.charges || 10}\n`;
+      csvContent += `"${t.id}","${t.type}",${t.amount},"${t.date}","${t.status}","${t.description}","${t.wdvCodeUsed || ''}","${t.wdvCodeGenerated || ''}",${t.charges || 10}\n`;
     });
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
@@ -588,14 +588,14 @@ export default function AdminPanel({
               <span className="text-[8px] text-slate-400 font-mono">Transfers</span>
             </div>
 
-            {/* BPC Generation Purchases */}
+            {/* WDV Generation Purchases */}
             <div className="flex flex-col items-center gap-1 w-1/4 group cursor-pointer z-10">
-              <span className="text-[8px] font-mono text-slate-300 font-bold opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 px-1 py-0.5 rounded -mt-6 absolute">{bpcTxs.length} txs</span>
+              <span className="text-[8px] font-mono text-slate-300 font-bold opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 px-1 py-0.5 rounded -mt-6 absolute">{wdvTxs.length} txs</span>
               <div
-                style={{ height: `${Math.max(15, Math.min(80, (bpcTxs.length / (totalTxsCount || 1)) * 100))}%` }}
+                style={{ height: `${Math.max(15, Math.min(80, (wdvTxs.length / (totalTxsCount || 1)) * 100))}%` }}
                 className="w-10 bg-gradient-to-t from-teal-500 to-teal-300 rounded-t-md hover:from-teal-400 hover:to-teal-200 transition-all duration-300"
               />
-              <span className="text-[8px] text-slate-400 font-mono">BPC Codes</span>
+              <span className="text-[8px] text-slate-400 font-mono">WDV Codes</span>
             </div>
 
             {/* Airtime Redeem logs */}

@@ -32,7 +32,6 @@ export default function TransactionList({
           bg: 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20'
         };
       case 'buy_wdv':
-      case 'buy_bpc':
         return {
           icon: Ticket,
           bg: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20'
@@ -60,7 +59,7 @@ export default function TransactionList({
       // Type filtering
       if (filter === 'in' && tx.type !== 'deposit') return false;
       if (filter === 'out' && tx.type === 'deposit') return false;
-      if (filter === 'wdv' && tx.type !== 'buy_wdv' && tx.type !== 'buy_bpc') return false;
+      if (filter === 'wdv' && tx.type !== 'buy_wdv') return false;
       return true;
     })
     .filter((tx) => {
@@ -71,9 +70,7 @@ export default function TransactionList({
         tx.description.toLowerCase().includes(term) ||
         tx.amount.toString().includes(term) ||
         (tx.wdvCodeUsed && tx.wdvCodeUsed.toLowerCase().includes(term)) ||
-        (tx.wdvCodeGenerated && tx.wdvCodeGenerated.toLowerCase().includes(term)) ||
-        (tx.bpcCodeUsed && tx.bpcCodeUsed.toLowerCase().includes(term)) ||
-        (tx.bpcCodeGenerated && tx.bpcCodeGenerated.toLowerCase().includes(term))
+        (tx.wdvCodeGenerated && tx.wdvCodeGenerated.toLowerCase().includes(term))
       );
     });
 
@@ -175,7 +172,7 @@ export default function TransactionList({
                     {formatCurrency(tx.amount)}
                   </span>
                   
-                  {(tx.wdvCodeGenerated || tx.bpcCodeGenerated) && (
+                  {tx.wdvCodeGenerated && (
                     <span className="text-[9px] font-bold font-mono text-indigo-500 dark:text-teal-400 bg-indigo-500/10 dark:bg-teal-500/10 px-1.5 py-0.5 rounded block mt-1 uppercase">
                       Code Issued
                     </span>

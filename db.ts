@@ -31,6 +31,25 @@ interface JsonData {
 }
 
 // -------------------- JSON DATABASE ENGINE FALLBACK --------------------
+function safeStringifyJsonField(val: any): string {
+  if (val === undefined || val === null) return '[]';
+  if (typeof val === 'string') {
+    try {
+      const parsed = JSON.parse(val);
+      if (typeof parsed === 'string') {
+        return safeStringifyJsonField(parsed);
+      }
+      return val;
+    } catch (e) {
+      if (val.trim().startsWith('[') || val.trim().startsWith('{')) {
+        return val;
+      }
+      return JSON.stringify(val);
+    }
+  }
+  return JSON.stringify(val);
+}
+
 function getJsonDb(): JsonData {
   if (!fs.existsSync(JSON_FILE)) {
     const defaultSettings: Record<string, string> = {
@@ -120,11 +139,11 @@ function getJsonDb(): JsonData {
         isfrozen: u.isFrozen || u.isfrozen ? 1 : 0,
         registrationdate: u.registrationDate || u.registrationdate || '',
         accountstatus: u.accountStatus || u.accountstatus || 'active',
-        beneficiaries: typeof u.beneficiaries === 'string' ? u.beneficiaries : JSON.stringify(u.beneficiaries || []),
-        phonebeneficiaries: typeof u.phoneBeneficiaries === 'string' ? u.phoneBeneficiaries : JSON.stringify(u.phoneBeneficiaries || u.phonebeneficiaries || []),
-        loginhistory: typeof u.loginHistory === 'string' ? u.loginHistory : JSON.stringify(u.loginHistory || u.loginhistory || []),
-        notifications: typeof u.notifications === 'string' ? u.notifications : JSON.stringify(u.notifications || []),
-        transactions: typeof u.transactions === 'string' ? u.transactions : JSON.stringify(u.transactions || [])
+        beneficiaries: safeStringifyJsonField(u.beneficiaries),
+        phonebeneficiaries: safeStringifyJsonField(u.phonebeneficiaries || u.phoneBeneficiaries),
+        loginhistory: safeStringifyJsonField(u.loginhistory || u.loginHistory),
+        notifications: safeStringifyJsonField(u.notifications),
+        transactions: safeStringifyJsonField(u.transactions)
       })),
       vouchers: (parsed.vouchers || []).map((v: any) => ({
         code: v.code,

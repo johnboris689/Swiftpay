@@ -5,7 +5,7 @@ import crypto from 'crypto';
 
 const { Pool } = pg;
 
-const isPostgres = !!process.env.DATABASE_URL;
+const isPostgres = !!process.env.DATABASE_URL || !!process.env.SQL_HOST;
 let pgPool: pg.Pool | null = null;
 
 const JSON_FILE = path.join(process.cwd(), 'swiftpay_db.json');
@@ -232,12 +232,24 @@ function saveJsonDb(data: JsonData) {
 export async function initDb() {
   if (isPostgres) {
     console.log('[SwiftPay DB] Connecting to PostgreSQL database...');
-    pgPool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
-    });
+    if (process.env.SQL_HOST) {
+      console.log('[SwiftPay DB] Using Cloud SQL socket/host connection params...');
+      pgPool = new Pool({
+        host: process.env.SQL_HOST,
+        user: process.env.SQL_USER,
+        password: process.env.SQL_PASSWORD,
+        database: process.env.SQL_DB_NAME,
+        connectionTimeoutMillis: 15000,
+      });
+    } else {
+      console.log('[SwiftPay DB] Using DATABASE_URL connection string...');
+      pgPool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
+      });
+    }
   } else {
-    console.log(`[SwiftPay DB] No DATABASE_URL found. Initializing pure JS JSON database fallback at ${JSON_FILE}...`);
+    console.log(`[SwiftPay DB] No DATABASE_URL or SQL_HOST found. Initializing pure JS JSON database fallback at ${JSON_FILE}...`);
     getJsonDb(); // ensure initialized
   }
 

@@ -18,6 +18,30 @@ const DB_FILE = path.join(process.cwd(), 'swiftpay_db.json');
 app.use(express.json());
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
+// -------------------- DATABASE REAL-TIME READ/WRITE SYNC MIDDLEWARE --------------------
+app.use('/api', async (req, res, next) => {
+  // 1. Ensure read-through consistency: load latest database state into cache on every request
+  try {
+    await loadDbCache();
+  } catch (err) {
+    console.error('[SwiftPay DB] Failed to reload database cache:', err);
+  }
+
+  // 2. Ensure write-through consistency: intercept response to await any active database writes
+  const originalSend = res.send;
+  res.send = function (body?: any) {
+    pendingWritePromise.then(() => {
+      originalSend.call(this, body);
+    }).catch((err) => {
+      console.error('[SwiftPay DB] Error waiting for database write:', err);
+      originalSend.call(this, body);
+    });
+    return this;
+  };
+
+  next();
+});
+
 // Set up multer disk storage
 const uploadsDir = path.join(process.cwd(), 'uploads');
 if (!fs.existsSync(uploadsDir)) {
@@ -347,15 +371,18 @@ async function persistDbCache(data: DBStructure) {
   }
 }
 
+let pendingWritePromise: Promise<any> = Promise.resolve();
+
 function readDb(): DBStructure {
   return dbCache;
 }
 
 function writeDb(data: DBStructure) {
   dbCache = data;
-  persistDbCache(data).catch(err => {
-    console.error('[SwiftPay DB] Error during background database persistence:', err);
+  const currentWrite = persistDbCache(data).catch(err => {
+    console.error('[SwiftPay DB] Error during database persistence:', err);
   });
+  pendingWritePromise = Promise.all([pendingWritePromise, currentWrite]);
 }
 
 // -------------------- SECURE AUTHENTICATION TOKENS (JWT-like) --------------------

@@ -1022,8 +1022,6 @@ export default function App() {
       description: `WDV Voucher Purchased (Manual confirmation pending via WhatsApp)`
     };
 
-    setTransactions([newTransaction, ...transactions]);
-
     const newNotif: NotificationItem = {
       id: `notif-${Date.now()}`,
       title: 'WDV Order Placed via WhatsApp',
@@ -1031,7 +1029,27 @@ export default function App() {
       date: new Date().toISOString(),
       unread: true
     };
-    setNotifications([newNotif, ...notifications]);
+
+    const updatedTransactions = [newTransaction, ...transactions];
+    const updatedNotifications = [newNotif, ...notifications];
+
+    setTransactions(updatedTransactions);
+    setNotifications(updatedNotifications);
+
+    const token = localStorage.getItem('swiftpay_token');
+    if (token) {
+      fetch('/api/user/sync-state', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          transactions: updatedTransactions,
+          notifications: updatedNotifications
+        })
+      }).catch(err => console.error('Error syncing manual transaction state:', err));
+    }
 
     showToast('Redirected to WhatsApp! Please send payment proof.', 'success');
     setCurrentScreen('dashboard');

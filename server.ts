@@ -399,8 +399,8 @@ function authenticateToken(req: any, res: any, next: any) {
 
   // Auto-provision user record in database if missing, preventing any downstream "User not found" errors
   const db = readDb();
-  const userExists = db.users.some((u: any) => u.email.toLowerCase() === email.toLowerCase());
-  if (!userExists) {
+  let userIndex = db.users.findIndex((u: any) => u.email.toLowerCase() === email.toLowerCase());
+  if (userIndex === -1) {
     const defaultName = email.split('@')[0].split(/[._-]/).map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
     const dummyUser = {
       fullName: defaultName || 'SwiftPay User',
@@ -432,9 +432,11 @@ function authenticateToken(req: any, res: any, next: any) {
     };
     db.users.push(dummyUser);
     writeDb(db);
+    userIndex = db.users.length - 1;
     logDiagnostic('INFO', 'Auto-created missing user record for authenticated session', { email });
   }
 
+  req.userIndex = userIndex;
   next();
 }
 
@@ -754,10 +756,7 @@ app.post('/api/auth/change-password', authenticateToken, (req: any, res) => {
   }
 
   const db = readDb();
-  const userIndex = db.users.findIndex((u: any) => u.email.toLowerCase() === email.toLowerCase());
-  if (userIndex === -1) {
-    return res.status(404).json({ error: 'User profile not found.' });
-  }
+  const userIndex = req.userIndex;
 
   const user = db.users[userIndex];
   let isCurrentPasswordCorrect = false;
@@ -930,12 +929,8 @@ app.post('/api/auth/reset-password', (req, res) => {
 
 // Get State
 app.get('/api/user/get-state', authenticateToken, (req: any, res) => {
-  const email = req.userEmail;
   const db = readDb();
-  const user = db.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase());
-  if (!user) {
-    return res.status(404).json({ error: 'User not found.' });
-  }
+  const user = db.users[req.userIndex];
 
   res.json({
     success: true,
@@ -968,11 +963,7 @@ app.post('/api/user/sync-state', authenticateToken, (req: any, res) => {
   const stateToSync = req.body;
 
   const db = readDb();
-  const userIndex = db.users.findIndex((u: any) => u.email.toLowerCase() === email.toLowerCase());
-  if (userIndex === -1) {
-    return res.status(404).json({ error: 'User profile not found.' });
-  }
-
+  const userIndex = req.userIndex;
   const user = db.users[userIndex];
 
   // Prevent transactions if user is frozen
@@ -1030,10 +1021,7 @@ app.post('/api/user/update-profile', authenticateToken, (req: any, res) => {
   }
 
   const db = readDb();
-  const userIndex = db.users.findIndex((u: any) => u.email.toLowerCase() === email.toLowerCase());
-  if (userIndex === -1) {
-    return res.status(404).json({ error: 'User not found.' });
-  }
+  const userIndex = req.userIndex;
 
   if (fullName && fullName.trim()) db.users[userIndex].fullName = fullName.trim();
   if (phone !== undefined) db.users[userIndex].phone = phone;
@@ -1180,11 +1168,7 @@ app.post('/api/transactions/airtime', authenticateToken, (req: any, res) => {
     return res.status(400).json({ error: "Invalid or already used WDV voucher." });
   }
 
-  const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
-  if (userIndex === -1) {
-    return res.status(404).json({ error: "User not found" });
-  }
-  const user = db.users[userIndex];
+  const user = db.users[req.userIndex];
   const price = Number(amount);
 
   if (user.balance < price) {
@@ -1325,11 +1309,7 @@ app.post('/api/transactions/data', authenticateToken, (req: any, res) => {
     return res.status(400).json({ error: "Invalid or already used WDV voucher." });
   }
 
-  const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
-  if (userIndex === -1) {
-    return res.status(404).json({ error: "User not found" });
-  }
-  const user = db.users[userIndex];
+  const user = db.users[req.userIndex];
   const price = plan.price;
 
   if (user.balance < price) {
@@ -1428,11 +1408,7 @@ app.post('/api/transactions/transfer', authenticateToken, async (req: any, res) 
 
   const resolvedName = accountName.trim();
 
-  const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
-  if (userIndex === -1) {
-    return res.status(404).json({ error: "User not found" });
-  }
-  const user = db.users[userIndex];
+  const user = db.users[req.userIndex];
   const price = Number(amount);
 
   if (user.balance < price) {
@@ -1533,11 +1509,7 @@ app.post('/api/transactions/withdraw', authenticateToken, async (req: any, res) 
 
   const resolvedName = accountName.trim();
 
-  const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
-  if (userIndex === -1) {
-    return res.status(404).json({ error: "User not found" });
-  }
-  const user = db.users[userIndex];
+  const user = db.users[req.userIndex];
   const price = Number(amount);
 
   if (user.balance < price) {
@@ -1620,10 +1592,7 @@ app.post('/api/auth/update-balance', authenticateToken, (req: any, res) => {
   }
 
   const db = readDb();
-  const userIndex = db.users.findIndex((u: any) => u.email.toLowerCase() === email.toLowerCase());
-  if (userIndex === -1) {
-    return res.status(404).json({ error: 'User not found' });
-  }
+  const userIndex = req.userIndex;
 
   db.users[userIndex].balance = Number(balance);
   writeDb(db);

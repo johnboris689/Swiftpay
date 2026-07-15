@@ -38,27 +38,24 @@ export default function TransactionReceipt({
   if (type === 'withdraw') {
     title = "Withdrawal Successful";
     contentRows = [
-      { label: "Status", value: "Successful", highlight: true },
-      { label: "Amount", value: `₦${transaction.amount.toLocaleString()}`, bold: true },
-      { label: "Destination Bank", value: transaction.recipientBank || 'PalmPay' },
+      { label: "Bank", value: transaction.recipientBank || 'PalmPay', bold: true },
       { label: "Account Name", value: transaction.recipientName || 'Pwamunadi Ishaku' },
       { label: "Account Number", value: transaction.recipientAccount || '8960723295' },
-      { label: "Date", value: date },
-      { label: "Time", value: time },
-      { label: "Transaction ID", value: transaction.id, selectAll: true },
-      { label: "New Wallet Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
+      { label: "Amount", value: `₦${transaction.amount.toLocaleString()}`, bold: true },
+      { label: "Transaction Reference", value: refNum, selectAll: true },
+      { label: "Date & Time", value: `${date} ${time}` },
+      { label: "Remaining Wallet Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
     ];
   } else if (type === 'bank_transfer_direct') {
     title = "Transfer Successful";
     contentRows = [
-      { label: "Recipient Name", value: transaction.recipientName || 'N/A', bold: true },
-      { label: "Recipient Bank", value: transaction.recipientBank || 'N/A' },
+      { label: "Recipient Bank", value: transaction.recipientBank || 'N/A', bold: true },
       { label: "Recipient Account Number", value: transaction.recipientAccount || 'N/A' },
+      { label: "Recipient Name", value: transaction.recipientName || 'N/A' },
       { label: "Amount", value: `₦${transaction.amount.toLocaleString()}`, bold: true },
-      { label: "Date", value: date },
-      { label: "Time", value: time },
-      { label: "Reference Number", value: refNum, selectAll: true },
-      { label: "New Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
+      { label: "Transaction Reference", value: refNum, selectAll: true },
+      { label: "Date & Time", value: `${date} ${time}` },
+      { label: "Remaining Wallet Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
     ];
   } else if (type === 'redeem_airtime') {
     title = "Airtime Purchase Successful";
@@ -66,10 +63,9 @@ export default function TransactionReceipt({
       { label: "Network", value: transaction.recipientBank || transaction.network || 'MTN', bold: true },
       { label: "Phone Number", value: transaction.recipientAccount || transaction.phoneNumber || 'N/A' },
       { label: "Amount", value: `₦${transaction.amount.toLocaleString()}`, bold: true },
-      { label: "Reference", value: refNum, selectAll: true },
-      { label: "Date", value: date },
-      { label: "Time", value: time },
-      { label: "New Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
+      { label: "Transaction Reference", value: refNum, selectAll: true },
+      { label: "Date & Time", value: `${date} ${time}` },
+      { label: "Remaining Wallet Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
     ];
   } else if (type === 'redeem_data') {
     let planSize = transaction.dataPlan;
@@ -85,20 +81,19 @@ export default function TransactionReceipt({
       { label: "Phone Number", value: transaction.recipientAccount || transaction.phoneNumber || 'N/A' },
       { label: "Data Plan", value: planSize },
       { label: "Amount", value: `₦${transaction.amount.toLocaleString()}`, bold: true },
-      { label: "Reference", value: refNum, selectAll: true },
-      { label: "Date", value: date },
-      { label: "Time", value: time },
-      { label: "New Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
+      { label: "Transaction Reference", value: refNum, selectAll: true },
+      { label: "Date & Time", value: `${date} ${time}` },
+      { label: "Remaining Wallet Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
     ];
   } else {
     title = "Operation Successful";
     contentRows = [
-      { label: "Transaction ID", value: transaction.id, selectAll: true },
+      { label: "Transaction Reference", value: transaction.id, selectAll: true },
       { label: "Date & Time", value: `${date} ${time}` },
       { label: "Type", value: transaction.type.toUpperCase() },
       { label: "Amount", value: `₦${transaction.amount.toLocaleString()}`, bold: true },
       { label: "Description", value: transaction.description },
-      { label: "New Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
+      { label: "Remaining Wallet Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
     ];
   }
 
@@ -216,7 +211,7 @@ Thank you for choosing SwiftPay!
           <GlassCard className="p-4 bg-white/[0.02] border-white/5 space-y-3 font-mono text-[10px] text-slate-300">
             {contentRows.map((row, i) => (
               <div key={i}>
-                {row.label === 'New Wallet Balance' || row.label === 'New Balance' ? (
+                {row.label === 'New Wallet Balance' || row.label === 'New Balance' || row.label === 'Remaining Wallet Balance' ? (
                   <div className="border-t border-dashed border-white/10 my-2 pt-2 flex justify-between text-xs font-bold text-teal-400">
                     <span>{row.label}</span>
                     <span>{row.value}</span>

@@ -558,6 +558,14 @@ export default function App() {
           'Authorization': `Bearer ${token}`
         }
       });
+      if (res.status === 401 || res.status === 403) {
+        setIsAuthenticated(false);
+        localStorage.removeItem('swiftpay_auth');
+        localStorage.removeItem('swiftpay_token');
+        localStorage.removeItem('swiftpay_user');
+        setCurrentScreen('onboarding');
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         if (data.success && data.user) {
@@ -1093,6 +1101,17 @@ export default function App() {
       });
       const data = await res.json();
 
+      if (res.status === 401 || res.status === 403) {
+        showToast('Your session has expired. Please log in again.', 'error');
+        setIsAuthenticated(false);
+        localStorage.removeItem('swiftpay_auth');
+        localStorage.removeItem('swiftpay_token');
+        localStorage.removeItem('swiftpay_user');
+        setCurrentScreen('onboarding');
+        setIsSubmitting(false);
+        return;
+      }
+
       if (!res.ok) {
         showToast(data.error || 'Airtime purchase failed.', 'error');
         setIsSubmitting(false);
@@ -1115,6 +1134,7 @@ export default function App() {
       setNotifications([newNotif, ...notifications]);
 
       showToast('Airtime purchase completed successfully!', 'success');
+      setSelectedReceiptTx(data.transaction);
       
       // Reset fields
       setAirtimePhone('');
@@ -1171,6 +1191,17 @@ export default function App() {
       });
       const data = await res.json();
 
+      if (res.status === 401 || res.status === 403) {
+        showToast('Your session has expired. Please log in again.', 'error');
+        setIsAuthenticated(false);
+        localStorage.removeItem('swiftpay_auth');
+        localStorage.removeItem('swiftpay_token');
+        localStorage.removeItem('swiftpay_user');
+        setCurrentScreen('onboarding');
+        setIsSubmitting(false);
+        return;
+      }
+
       if (!res.ok) {
         showToast(data.error || 'Data purchase failed.', 'error');
         setIsSubmitting(false);
@@ -1193,6 +1224,7 @@ export default function App() {
       setNotifications([newNotif, ...notifications]);
 
       showToast(`Successfully purchased ${selectedDataPlan.size} data bundle!`, 'success');
+      setSelectedReceiptTx(data.transaction);
 
       // Reset fields
       setDataPhone('');
@@ -1250,6 +1282,17 @@ export default function App() {
       });
       const data = await res.json();
 
+      if (res.status === 401 || res.status === 403) {
+        showToast('Your session has expired. Please log in again.', 'error');
+        setIsAuthenticated(false);
+        localStorage.removeItem('swiftpay_auth');
+        localStorage.removeItem('swiftpay_token');
+        localStorage.removeItem('swiftpay_user');
+        setCurrentScreen('onboarding');
+        setIsSubmitting(false);
+        return;
+      }
+
       if (!res.ok) {
         showToast(data.error || 'Bank transfer failed.', 'error');
         setIsSubmitting(false);
@@ -1272,6 +1315,7 @@ export default function App() {
       setNotifications([newNotif, ...notifications]);
 
       showToast('Bank transfer completed successfully!', 'success');
+      setSelectedReceiptTx(data.transaction);
 
       // Reset and return
       setTransferAccNum('');
@@ -1330,6 +1374,17 @@ export default function App() {
       });
       const data = await res.json();
 
+      if (res.status === 401 || res.status === 403) {
+        showToast('Your session has expired. Please log in again.', 'error');
+        setIsAuthenticated(false);
+        localStorage.removeItem('swiftpay_auth');
+        localStorage.removeItem('swiftpay_token');
+        localStorage.removeItem('swiftpay_user');
+        setCurrentScreen('onboarding');
+        setIsSubmitting(false);
+        return;
+      }
+
       if (!res.ok) {
         showToast(data.error || 'Withdrawal failed.', 'error');
         setIsSubmitting(false);
@@ -1352,6 +1407,7 @@ export default function App() {
       setNotifications([newNotif, ...notifications]);
 
       showToast('Withdrawal completed successfully!', 'success');
+      setSelectedReceiptTx(data.transaction);
 
       // Reset and return
       setWithdrawAccount('');

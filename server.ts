@@ -20,14 +20,7 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // -------------------- DATABASE REAL-TIME READ/WRITE SYNC MIDDLEWARE --------------------
 app.use('/api', async (req, res, next) => {
-  // 1. Ensure read-through consistency: load latest database state into cache on every request
-  try {
-    await loadDbCache();
-  } catch (err) {
-    console.error('[SwiftPay DB] Failed to reload database cache:', err);
-  }
-
-  // 2. Ensure write-through consistency: intercept response to await any active database writes
+  // 1. Ensure write-through consistency: intercept response to await any active database writes
   const originalSend = res.send;
   res.send = function (body?: any) {
     pendingWritePromise.then(() => {
@@ -355,6 +348,7 @@ async function persistDbCache(data: DBStructure) {
         wdvBankName: c.bankName,
         wdvAccountNumber: c.accountNumber,
         wdvAccountName: c.accountName,
+        wdvWhatsappLink: c.whatsappLink,
         wdvVoucherPrice: String(c.voucherPrice),
         wdvInstructions: c.instructions,
         wdvMaintenanceNotice: c.maintenanceNotice

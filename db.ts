@@ -231,13 +231,13 @@ function saveJsonDb(data: JsonData) {
 // -------------------- DATABASE INITIALIZATION --------------------
 export async function initDb() {
   if (isPostgres) {
-    console.log('[SwiftPay DB] Connecting to PostgreSQL database...');
+    console.log('[SwiftPay DB] Connecting to PostgreSQL database (Admin privileges for Schema setup)...');
     if (process.env.SQL_HOST) {
-      console.log('[SwiftPay DB] Using Cloud SQL socket/host connection params...');
+      console.log('[SwiftPay DB] Using Cloud SQL socket/host connection params with ADMIN privileges...');
       pgPool = new Pool({
         host: process.env.SQL_HOST,
-        user: process.env.SQL_USER,
-        password: process.env.SQL_PASSWORD,
+        user: process.env.SQL_ADMIN_USER || process.env.SQL_USER,
+        password: process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD,
         database: process.env.SQL_DB_NAME,
         connectionTimeoutMillis: 15000,
       });
@@ -498,6 +498,33 @@ export async function initDb() {
       await execute(`INSERT INTO admin_settings (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = $2`, [key, value]);
     }
     console.log('[SwiftPay DB] Default admin settings seeded.');
+  }
+
+  // Reinitialize the pool with App user (least privilege) for runtime database access
+  if (isPostgres) {
+    console.log('[SwiftPay DB] Schema setup and seeding complete. Switching database connection pool to App user (least privilege)...');
+    try {
+      if (pgPool) {
+        await pgPool.end();
+      }
+    } catch (err) {
+      console.error('[SwiftPay DB] Error closing Admin pool:', err);
+    }
+    
+    if (process.env.SQL_HOST) {
+      pgPool = new Pool({
+        host: process.env.SQL_HOST,
+        user: process.env.SQL_USER,
+        password: process.env.SQL_PASSWORD,
+        database: process.env.SQL_DB_NAME,
+        connectionTimeoutMillis: 15000,
+      });
+    } else {
+      pgPool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
+      });
+    }
   }
 }
 

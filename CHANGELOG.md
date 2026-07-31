@@ -1,7 +1,7 @@
 # SwiftPay Complete Consolidated Update Package
 
 **Package Name:** `swiftpay-complete-three-updates.zip`  
-**Version:** v3.0.0 (Merged All-In-One Upgrade)  
+**Version:** v3.1.0 (Merged All-In-One Upgrade & Route Fix)  
 **Date:** July 31, 2026  
 
 ---
@@ -19,12 +19,14 @@ This update package merges all 3 incremental updates into a single complete upgr
 - **Error Boundary Integration**:
   - Created `src/components/ErrorBoundary.tsx` to wrap admin routes and prevent whole-page blank screens on component errors.
 
-### UPDATE 2: Admin URL Security & Migration
-- **Obfuscated Admin Routes**:
-  - Replaced legacy `/admin` route with hidden entry point `/Boris`.
-  - Configured login route: `/Boris/login`
-  - Configured workspace route: `/Boris/dashboard`
-  - Updated all internal links, SPA state management, and back navigation hooks.
+### UPDATE 2: Admin URL Security & Case-Insensitive Route Registration
+- **Obfuscated Admin Routes & Case-Insensitive Matching**:
+  - Replaced legacy `/admin` route with hidden entry point `/Boris`:
+    - Admin Login: `/Boris/login` (or `/boris/login` or `/boris`)
+    - Admin Workspace / Dashboard: `/Boris/dashboard` (or `/boris/dashboard`)
+  - Fixed client-side SPA routing and initial state handlers in `src/App.tsx` so case-variation URLs (`/boris`, `/Boris`, `/boris/login`, `/Boris/login`) are registered properly and do not hit `Custom404Page`.
+  - Configured Render deployment SPA fallback in `server.ts` (`app.get('*', ...)` serving `index.html`).
+  - Access to legacy `/admin` route cleanly drops through to `Custom404Page`.
 - **API Authentication Middleware**:
   - Protected AI administration, conversation log, user management, and withdrawal endpoints with `authenticateAdminToken` middleware.
 - **Brute-Force Login Rate Limiting**:
@@ -45,7 +47,7 @@ This update package merges all 3 incremental updates into a single complete upgr
 1. `CHANGELOG.md` - Complete changelog documentation
 2. `server.ts` - Backend security, rate limiting, and update download routes
 3. `swiftpay_db.json` - System settings database configuration
-4. `src/App.tsx` - Admin routing, auth state handler, `/Boris` path protection
+4. `src/App.tsx` - Admin routing, auth state handler, case-insensitive `/Boris` path protection
 5. `src/components/AdminPanel.tsx` - High-tech admin command center dashboard
 6. `src/components/CyberWithdrawalTerminal.tsx` - Cyber withdrawal monitoring terminal component
 7. `src/components/ErrorBoundary.tsx` - Error handling and crash fallback UI

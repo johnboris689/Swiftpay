@@ -194,9 +194,10 @@ export default function App() {
 
   useEffect(() => {
     const handlePopState = (e: PopStateEvent) => {
-      setAdminPath(window.location.pathname);
-      if (!window.location.pathname.startsWith('/Boris')) {
-        if (window.location.pathname === '/dashboard/withdraw' || window.location.pathname === '/withdraw') {
+      const path = window.location.pathname;
+      setAdminPath(path);
+      if (!path.toLowerCase().startsWith('/boris')) {
+        if (path === '/dashboard/withdraw' || path === '/withdraw') {
           setCurrentScreen('withdraw');
         } else if (e.state && e.state.appScreen) {
           setCurrentScreen(e.state.appScreen);
@@ -208,11 +209,12 @@ export default function App() {
     window.addEventListener('popstate', handlePopState);
 
     // Set initial state
-    if (!window.location.pathname.startsWith('/Boris')) {
-      if (window.location.pathname === '/dashboard/withdraw' || window.location.pathname === '/withdraw') {
+    const currentPath = window.location.pathname;
+    if (!currentPath.toLowerCase().startsWith('/boris')) {
+      if (currentPath === '/dashboard/withdraw' || currentPath === '/withdraw') {
         setCurrentScreen('withdraw');
       } else {
-        window.history.replaceState({ appScreen: 'dashboard' }, '', window.location.pathname + window.location.search);
+        window.history.replaceState({ appScreen: 'dashboard' }, '', currentPath + window.location.search);
       }
     }
 
@@ -220,9 +222,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if ((adminPath === '/Boris' || adminPath === '/Boris/' || adminPath === '/Boris/dashboard') && !isAdminAuthenticated) {
+    const lower = adminPath.toLowerCase();
+    if ((lower === '/boris' || lower === '/boris/' || lower === '/boris/dashboard') && !isAdminAuthenticated) {
       navigateTo('/Boris/login');
-    } else if (adminPath === '/Boris/login' && isAdminAuthenticated) {
+    } else if (lower === '/boris/login' && isAdminAuthenticated) {
       navigateTo('/Boris/dashboard');
     }
   }, [adminPath, isAdminAuthenticated]);
@@ -2334,26 +2337,26 @@ export default function App() {
     return <StandalonePrivacyPage navigateTo={navigateTo} />;
   }
 
+  const lowerAdminPath = adminPath.toLowerCase();
+  const lowerNormalizedPath = normalizedPath.toLowerCase();
+  const isBorisRoute = lowerAdminPath.startsWith('/boris');
+
   const isValidRoute = 
     normalizedPath === '/' || 
     normalizedPath === '/index.html' || 
-    normalizedPath === '/terms' || 
-    normalizedPath === '/privacy' || 
-    normalizedPath === '/dashboard' ||
-    normalizedPath === '/dashboard/withdraw' ||
-    normalizedPath === '/withdraw' ||
-    adminPath === '/Boris/login' || 
-    adminPath === '/Boris' || 
-    adminPath === '/Boris/' ||
-    adminPath === '/Boris/dashboard' ||
-    adminPath.startsWith('/Boris/withdrawals/');
+    lowerNormalizedPath === '/terms' || 
+    lowerNormalizedPath === '/privacy' || 
+    lowerNormalizedPath === '/dashboard' ||
+    lowerNormalizedPath === '/dashboard/withdraw' ||
+    lowerNormalizedPath === '/withdraw' ||
+    isBorisRoute;
 
   if (!isValidRoute) {
     return <Custom404Page navigateTo={navigateTo} />;
   }
 
-  // Render Secure Admin Login Router (Point 1)
-  if (adminPath === '/Boris/login') {
+  // Render Secure Admin Login Router for unauthenticated admin access
+  if (isBorisRoute && !isAdminAuthenticated) {
     return (
       <div className="min-h-screen bg-[#050507] [background:radial-gradient(circle_at_0%_0%,#1e1b4b_0%,#050507_50%),radial-gradient(circle_at_100%_100%,#082f49_0%,#050507_50%)] text-white flex flex-col items-center justify-center p-4">
         {toastMessage && (
@@ -2428,16 +2431,9 @@ export default function App() {
     );
   }
 
-  // Render Secure Admin Workspace (Point 1, 2, 3, 4)
-  if (adminPath === '/Boris' || adminPath === '/Boris/' || adminPath === '/Boris/dashboard' || adminPath.startsWith('/Boris/withdrawals/')) {
-    if (!isAdminAuthenticated) {
-      return (
-        <div className="min-h-screen bg-[#050507] text-white flex items-center justify-center font-mono text-sm tracking-widest uppercase animate-pulse">
-          Redirecting to secure terminal...
-        </div>
-      );
-    }
-    const isWithdrawalDetailsPath = adminPath.startsWith('/Boris/withdrawals/');
+  // Render Secure Admin Workspace for authenticated admin access
+  if (isBorisRoute && isAdminAuthenticated) {
+    const isWithdrawalDetailsPath = lowerAdminPath.startsWith('/boris/withdrawals/');
     return (
       <div className="min-h-screen bg-[#050507] [background:radial-gradient(circle_at_0%_0%,#1e1b4b_0%,#050507_50%),radial-gradient(circle_at_100%_100%,#0f172a_0%,#050507_50%)] text-white flex flex-col font-sans">
         {toastMessage && (
@@ -5499,7 +5495,7 @@ export default function App() {
             />
 
             {/* Floating AI Chat Launcher Button */}
-            {!adminPath.startsWith('/Boris') && currentScreen !== 'support_live_chat' && (
+            {!adminPath.toLowerCase().startsWith('/boris') && currentScreen !== 'support_live_chat' && (
               <div className="fixed bottom-20 right-4 z-40 sm:bottom-24 sm:right-6">
                 <button
                   id="btn-floating-ai-support"

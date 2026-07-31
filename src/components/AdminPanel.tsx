@@ -803,7 +803,7 @@ export default function AdminPanel({
   };
 
   // Detect and handle SPA Details routing
-  const isDetailsPage = adminPath?.startsWith('/Boris/withdrawals/');
+  const isDetailsPage = adminPath?.toLowerCase().startsWith('/boris/withdrawals/');
   const selectedTxId = isDetailsPage ? adminPath?.split('/').pop() : null;
 
   useEffect(() => {

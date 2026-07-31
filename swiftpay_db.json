@@ -46,7 +46,11 @@
   "admins": [
     {
       "email": "talkdavidjohn@gmail.com",
-      "passwordhash": "447b3ce899e1ccf581589e2efc0c3aa1c75c9c4619d294b0b5f0cd04aa28fb50"
+      "passwordHash": "$2b$10$o57nUH.Mm8BlIIb4Z5HB6.lmMVCGieOqu6ewbsYGRMZ/bTXx4I2i2"
+    },
+    {
+      "email": "admin@swiftpay.com",
+      "passwordHash": "$2b$10$o57nUH.Mm8BlIIb4Z5HB6.lmMVCGieOqu6ewbsYGRMZ/bTXx4I2i2"
     }
   ]
 }

@@ -216,6 +216,19 @@ export default function AdminPanel({
   const [voucherSearchTerm, setVoucherSearchTerm] = useState('');
   const [generatingVoucher, setGeneratingVoucher] = useState(false);
 
+  const safeDateStr = (val: any, type: 'datetime' | 'date' | 'time' = 'datetime') => {
+    if (!val || val === 'null' || val === 'undefined' || val === 'N/A') return 'N/A';
+    try {
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return 'N/A';
+      if (type === 'date') return d.toLocaleDateString();
+      if (type === 'time') return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return d.toLocaleString();
+    } catch (e) {
+      return 'N/A';
+    }
+  };
+
   const getAdminHeaders = (extraHeaders = {}) => {
     const token = localStorage.getItem('swiftpay_admin_token') || '';
     return {
@@ -950,7 +963,7 @@ export default function AdminPanel({
       });
       if (res.ok) {
         const data = await res.json();
-        setVouchers(data.vouchers || []);
+        setVouchers(Array.isArray(data?.vouchers) ? data.vouchers : []);
       } else {
         // Fallback to existing path if custom route isn't loaded yet
         const fallbackRes = await fetch('/api/admin/vouchers', {
@@ -958,33 +971,66 @@ export default function AdminPanel({
         });
         if (fallbackRes.ok) {
           const data = await fallbackRes.json();
-          setVouchers(data.vouchers || []);
+          setVouchers(Array.isArray(data?.vouchers) ? data.vouchers : []);
         } else {
           onToast('Failed to fetch WDV vouchers', 'error');
         }
       }
     } catch (err) {
+      console.error('Error loading WDV vouchers:', err);
       onToast('Network error loading WDV vouchers', 'error');
     } finally {
       setLoadingVouchers(false);
     }
   };
 
-  const handleGenerateVoucher = async () => {
+  const handleGenerateVoucher = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     setGeneratingVoucher(true);
     try {
       const res = await fetch('/api/admin/wdv/generate', {
         method: 'POST',
         headers: getAdminHeaders()
       });
-      const data = await res.json();
-      if (res.ok) {
-        onToast(`New WDV voucher generated: ${data.voucher?.code || data.code}`, 'success');
-        fetchVouchers();
+
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch (pErr) {
+        console.error('Failed to parse voucher generation response JSON:', pErr);
+      }
+
+      if (res.ok && data?.success) {
+        const newVoucher = data.voucher || (data.code ? {
+          id: 'v-' + Date.now(),
+          code: data.code,
+          voucherCode: data.code,
+          status: 'unused',
+          createdAt: new Date().toISOString(),
+          generatedAt: new Date().toISOString(),
+          usedBy: '',
+          usedAt: ''
+        } : null);
+
+        const codeDisplay = newVoucher?.voucherCode || newVoucher?.code || data.code || 'Code';
+        onToast(`New WDV voucher generated: ${codeDisplay}`, 'success');
+
+        if (newVoucher) {
+          setVouchers(prev => {
+            const list = Array.isArray(prev) ? prev : [];
+            const filtered = list.filter(v => v && v.id !== newVoucher.id && (v.voucherCode || v.code) !== codeDisplay);
+            return [newVoucher, ...filtered];
+          });
+        }
+        await fetchVouchers();
       } else {
-        onToast(data.error || 'Failed to generate voucher', 'error');
+        onToast(data?.error || 'Failed to generate voucher', 'error');
       }
     } catch (err) {
+      console.error('Error generating WDV voucher:', err);
       onToast('Network error generating voucher', 'error');
     } finally {
       setGeneratingVoucher(false);
@@ -1630,7 +1676,7 @@ export default function AdminPanel({
               setMobileMenuOpen(false);
             }}
             className={`w-full text-left px-3 py-2 rounded-lg font-bold text-[10px] uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'overview'
+              (activeTab as string) === 'overview'
                 ? 'bg-gradient-to-r from-teal-500/15 to-indigo-500/15 border border-teal-500/30 text-teal-400'
                 : 'border border-transparent hover:bg-white/5 text-slate-400 hover:text-white'
             }`}
@@ -1822,7 +1868,7 @@ export default function AdminPanel({
 
         {/* Content Workspace */}
         <div className="flex-1 w-full space-y-4 min-w-0">
-          {activeTab === 'overview' && (
+          {(activeTab as string) === 'overview' && (
             <>
               {/* Overview Statistics Cards Grid */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -2546,7 +2592,7 @@ export default function AdminPanel({
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="text-[9px] font-mono text-slate-500">Unused Count:</span>
                     <span className="px-2 py-0.5 bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 rounded text-[9px] font-mono font-bold animate-pulse">
-                      {vouchers.filter(v => v.status === 'unused').length}
+                      {(Array.isArray(vouchers) ? vouchers : []).filter(v => v && v.status === 'unused').length}
                     </span>
                   </div>
                 </div>
@@ -2565,7 +2611,8 @@ export default function AdminPanel({
                   </div>
 
                   <button
-                    onClick={handleGenerateVoucher}
+                    type="button"
+                    onClick={(e) => handleGenerateVoucher(e)}
                     disabled={generatingVoucher}
                     className="w-full py-4 px-6 bg-gradient-to-r from-teal-500 via-emerald-500 to-indigo-600 hover:from-teal-600 hover:to-indigo-700 disabled:opacity-50 text-slate-950 font-black text-xs uppercase tracking-widest rounded-xl shadow-xl hover:shadow-teal-500/10 transition-all cursor-pointer flex items-center justify-center gap-2"
                   >
@@ -2640,7 +2687,7 @@ export default function AdminPanel({
                           <div className="text-[10px] space-y-1 text-slate-400 font-mono">
                             <div className="flex justify-between">
                               <span>Created:</span>
-                              <span className="text-slate-300">{v.createdAt || v.generatedAt ? new Date(v.createdAt || v.generatedAt).toLocaleString() : 'N/A'}</span>
+                              <span className="text-slate-300">{safeDateStr(v.createdAt || v.generatedAt)}</span>
                             </div>
                             <div className="flex justify-between">
                               <span>Used By:</span>
@@ -2649,7 +2696,7 @@ export default function AdminPanel({
                             {v.usedAt && (
                               <div className="flex justify-between">
                                 <span>Used Date:</span>
-                                <span className="text-slate-300">{new Date(v.usedAt).toLocaleString()}</span>
+                                <span className="text-slate-300">{safeDateStr(v.usedAt)}</span>
                               </div>
                             )}
                           </div>
@@ -2727,13 +2774,13 @@ export default function AdminPanel({
                                 </span>
                               </td>
                               <td className="px-3 py-3.5 text-slate-300 whitespace-nowrap text-[9px]">
-                                {v.createdAt || v.generatedAt ? new Date(v.createdAt || v.generatedAt).toLocaleString() : 'N/A'}
+                                {safeDateStr(v.createdAt || v.generatedAt)}
                               </td>
                               <td className="px-3 py-3.5 text-teal-400 whitespace-nowrap max-w-[120px] truncate" title={v.usedBy}>
                                 {v.usedBy || <span className="text-slate-600">-</span>}
                               </td>
                               <td className="px-3 py-3.5 text-slate-400 whitespace-nowrap text-[9px]">
-                                {v.usedAt ? new Date(v.usedAt).toLocaleString() : <span className="text-slate-600">-</span>}
+                                {v.usedAt ? safeDateStr(v.usedAt) : <span className="text-slate-600">-</span>}
                               </td>
                               <td className="px-4 py-3.5 text-right whitespace-nowrap">
                                 <div className="flex items-center justify-end gap-1.5">
@@ -3114,7 +3161,7 @@ export default function AdminPanel({
                             <div>
                               <span className="block text-[8px] uppercase text-slate-500">Date &amp; Time</span>
                               <span className="text-slate-300">
-                                {new Date(w.timestamp || w.created_at).toLocaleDateString()}
+                                {safeDateStr(w.timestamp || w.created_at || w.createdat, 'date')}
                               </span>
                             </div>
                             <div>
@@ -3210,7 +3257,7 @@ export default function AdminPanel({
                                 {maskAccountNumber(w.accountNumber || w.accountnumber)}
                               </td>
                               <td className="py-3 px-4 text-slate-400 font-mono text-[10px]">
-                                {new Date(w.timestamp || w.created_at).toLocaleDateString()} &bull; {new Date(w.timestamp || w.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                {safeDateStr(w.timestamp || w.created_at || w.createdat, 'date')} &bull; {safeDateStr(w.timestamp || w.created_at || w.createdat, 'time')}
                               </td>
                               <td className="py-3 px-4 font-mono text-teal-400 text-[10px] select-all">
                                 {w.reference}
@@ -3541,7 +3588,7 @@ export default function AdminPanel({
             </div>
           )}
 
-          {(activeTab === 'settings' || activeTab === 'overview') && (
+          {(activeTab === 'settings' || (activeTab as string) === 'overview') && (
             <>
               {/* Video Management Section */}
       <GlassCard className="p-4 border-white/5 space-y-4">
@@ -4111,7 +4158,7 @@ export default function AdminPanel({
                 <div key={l.id} className="p-2 bg-slate-950/40 rounded-lg border border-white/[0.03] flex flex-col gap-1">
                   <div className="flex items-center justify-between gap-2">
                     <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${tagColor}`}>{l.type}</span>
-                    <span className="text-slate-500 text-[8px]">{new Date(l.timestamp).toLocaleTimeString()} - {new Date(l.timestamp).toLocaleDateString()}</span>
+                    <span className="text-slate-500 text-[8px]">{safeDateStr(l.timestamp, 'time')} - {safeDateStr(l.timestamp, 'date')}</span>
                   </div>
                   <p className="text-slate-300 break-words leading-relaxed">{l.message}</p>
                 </div>
@@ -4405,8 +4452,8 @@ export default function AdminPanel({
                         {aiConversations.map((log) => (
                           <tr key={log.id} className="hover:bg-white/[0.02] transition-colors">
                             <td className="p-2.5 text-slate-400 font-mono text-[10px] whitespace-nowrap">
-                              {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              <div className="text-[8px] text-slate-600">{new Date(log.timestamp).toLocaleDateString()}</div>
+                              {safeDateStr(log.timestamp, 'time')}
+                              <div className="text-[8px] text-slate-600">{safeDateStr(log.timestamp, 'date')}</div>
                             </td>
                             <td className="p-2.5 font-mono text-slate-300 whitespace-nowrap">
                               {log.user_email || log.session_id ? (log.user_email || log.session_id.substring(0, 12)) : 'Guest User'}
@@ -4597,7 +4644,7 @@ export default function AdminPanel({
                     <div key={l.id} className="p-3 bg-slate-950/40 rounded-xl border border-white/5 flex flex-col gap-1">
                       <div className="flex items-center justify-between">
                         <span className="px-2 py-0.5 rounded bg-teal-500/10 border border-teal-500/20 text-teal-400 text-[9px] font-bold">{l.type || 'INFO'}</span>
-                        <span className="text-slate-500 text-[9px]">{new Date(l.timestamp).toLocaleString()}</span>
+                        <span className="text-slate-500 text-[9px]">{safeDateStr(l.timestamp)}</span>
                       </div>
                       <p className="text-slate-300">{l.message}</p>
                     </div>
@@ -4667,7 +4714,7 @@ export default function AdminPanel({
                   </div>
                   <div className="flex justify-between py-1 border-b border-white/5">
                     <span className="text-slate-400">Registration Date:</span>
-                    <span className="text-slate-300">{new Date(selectedUserForView.registeredAt || Date.now()).toLocaleString()}</span>
+                    <span className="text-slate-300">{safeDateStr(selectedUserForView.registeredAt)}</span>
                   </div>
                   <div className="flex justify-between py-1 border-b border-white/5">
                     <span className="text-slate-400">Referral Count:</span>

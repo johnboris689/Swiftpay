@@ -79,6 +79,7 @@ import EmailSimulator from './components/EmailSimulator';
 import DevicesHistory from './components/DevicesHistory';
 import TransactionReceipt from './components/TransactionReceipt';
 import AdminPanel from './components/AdminPanel';
+import ErrorBoundary from './components/ErrorBoundary';
 import { DeviceSession, LoginHistoryItem, Beneficiary, SimulatedEmail } from './types';
 
 const CABLE_PROVIDERS = [
@@ -285,7 +286,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>('wallet');
 
   // Multi-step form values
-  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signup');
+  const [authMode, setAuthMode] = useState<'signin' | 'signup' | 'forgot'>('signup');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -2451,36 +2452,7 @@ export default function App() {
         )}
         {isWithdrawalDetailsPath ? (
           <div className="w-full flex-1 flex flex-col">
-            <AdminPanel
-              currentUserEmail="admin@swiftpay.com"
-              transactions={transactions}
-              adminPath={adminPath}
-              navigateTo={navigateTo}
-              onBack={() => {
-                localStorage.removeItem('swiftpay_admin_auth');
-                localStorage.removeItem('swiftpay_admin_token');
-                setIsAdminAuthenticated(false);
-                navigateTo('/admin/login');
-              }}
-              onToast={(msg, type) => showToast(msg, type)}
-              onAddGlobalNotification={(title, body, type) => {
-                const newNotif = {
-                  id: 'notif-' + Date.now(),
-                  title,
-                  body,
-                  date: new Date().toISOString(),
-                  unread: true
-                };
-                const updated = [newNotif, ...notifications];
-                setNotifications(updated);
-                localStorage.setItem('swiftpay_notifications', JSON.stringify(updated));
-              }}
-              onSendSimulatedEmail={(to, subject, body) => sendSimulatedEmail(to, subject, body)}
-            />
-          </div>
-        ) : (
-          <div className="w-full flex-1 flex flex-col p-3 sm:p-6 bg-[#0c0c14]">
-            <div className="w-full bg-[#0c0c14] border border-white/10 rounded-2xl p-4 sm:p-6 shadow-2xl backdrop-blur-xl flex-1 flex flex-col">
+            <ErrorBoundary fallbackTitle="Admin Panel Error">
               <AdminPanel
                 currentUserEmail="admin@swiftpay.com"
                 transactions={transactions}
@@ -2507,6 +2479,39 @@ export default function App() {
                 }}
                 onSendSimulatedEmail={(to, subject, body) => sendSimulatedEmail(to, subject, body)}
               />
+            </ErrorBoundary>
+          </div>
+        ) : (
+          <div className="w-full flex-1 flex flex-col p-3 sm:p-6 bg-[#0c0c14]">
+            <div className="w-full bg-[#0c0c14] border border-white/10 rounded-2xl p-4 sm:p-6 shadow-2xl backdrop-blur-xl flex-1 flex flex-col">
+              <ErrorBoundary fallbackTitle="Admin Panel Error">
+                <AdminPanel
+                  currentUserEmail="admin@swiftpay.com"
+                  transactions={transactions}
+                  adminPath={adminPath}
+                  navigateTo={navigateTo}
+                  onBack={() => {
+                    localStorage.removeItem('swiftpay_admin_auth');
+                    localStorage.removeItem('swiftpay_admin_token');
+                    setIsAdminAuthenticated(false);
+                    navigateTo('/admin/login');
+                  }}
+                  onToast={(msg, type) => showToast(msg, type)}
+                  onAddGlobalNotification={(title, body, type) => {
+                    const newNotif = {
+                      id: 'notif-' + Date.now(),
+                      title,
+                      body,
+                      date: new Date().toISOString(),
+                      unread: true
+                    };
+                    const updated = [newNotif, ...notifications];
+                    setNotifications(updated);
+                    localStorage.setItem('swiftpay_notifications', JSON.stringify(updated));
+                  }}
+                  onSendSimulatedEmail={(to, subject, body) => sendSimulatedEmail(to, subject, body)}
+                />
+              </ErrorBoundary>
             </div>
           </div>
         )}
@@ -5430,30 +5435,32 @@ export default function App() {
               {/* -------------------- VIEW 3.8: ADMIN PANEL (Point 10) -------------------- */}
               {(currentScreen === 'admin' || currentScreen === 'admin_dashboard') && (
                 <div className="animate-[fadeIn_0.2s_ease-out] w-full min-h-screen pb-10">
-                  <AdminPanel
-                    currentUserEmail={user?.email || 'admin@swiftpay.com'}
-                    transactions={transactions}
-                    adminPath={adminPath}
-                    navigateTo={navigateTo}
-                    onBack={() => {
-                      setCurrentScreen('dashboard');
-                      setActiveTab('profile');
-                    }}
-                    onToast={(msg, type) => showToast(msg, type)}
-                    onAddGlobalNotification={(title, body, type) => {
-                      const newNotif = {
-                        id: 'notif-' + Date.now(),
-                        title,
-                        body,
-                        date: new Date().toISOString(),
-                        unread: true
-                      };
-                      const updated = [newNotif, ...notifications];
-                      setNotifications(updated);
-                      localStorage.setItem('swiftpay_notifications', JSON.stringify(updated));
-                    }}
-                    onSendSimulatedEmail={(to, subject, body) => sendSimulatedEmail(to, subject, body)}
-                  />
+                  <ErrorBoundary fallbackTitle="Admin Panel Module Error">
+                    <AdminPanel
+                      currentUserEmail={user?.email || 'admin@swiftpay.com'}
+                      transactions={transactions}
+                      adminPath={adminPath}
+                      navigateTo={navigateTo}
+                      onBack={() => {
+                        setCurrentScreen('dashboard');
+                        setActiveTab('profile');
+                      }}
+                      onToast={(msg, type) => showToast(msg, type)}
+                      onAddGlobalNotification={(title, body, type) => {
+                        const newNotif = {
+                          id: 'notif-' + Date.now(),
+                          title,
+                          body,
+                          date: new Date().toISOString(),
+                          unread: true
+                        };
+                        const updated = [newNotif, ...notifications];
+                        setNotifications(updated);
+                        localStorage.setItem('swiftpay_notifications', JSON.stringify(updated));
+                      }}
+                      onSendSimulatedEmail={(to, subject, body) => sendSimulatedEmail(to, subject, body)}
+                    />
+                  </ErrorBoundary>
                 </div>
               )}
 

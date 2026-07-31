@@ -1,0 +1,6 @@
+{
+  "name": "SwiftPay",
+  "description": "Mobile-first fintech digital wallet with Naira balances, bank transfers, and Bill Payment Code (BPC) voucher purchases.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

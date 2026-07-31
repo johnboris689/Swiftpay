@@ -15,6 +15,110 @@ interface AdminPanelProps {
   navigateTo?: (path: string) => void;
 }
 
+// Robust, type-safe primitive and string conversion helpers
+export const toSafeStr = (val: any): string => {
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+  if (typeof val === 'object') {
+    if (typeof val.email === 'string') return val.email;
+    if (typeof val.username === 'string') return val.username;
+    if (typeof val.name === 'string') return val.name;
+    if (typeof val.code === 'string') return val.code;
+    try {
+      return JSON.stringify(val);
+    } catch (e) {
+      return '';
+    }
+  }
+  return String(val);
+};
+
+export const toSafeLower = (val: any): string => {
+  return toSafeStr(val).toLowerCase();
+};
+
+export const safeDateStr = (val: any): string => {
+  if (!val) return '-';
+  try {
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return typeof val === 'string' ? val : '-';
+    return d.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  } catch {
+    return typeof val === 'string' ? val : '-';
+  }
+};
+
+export const normalizeVoucher = (v: any) => {
+  if (!v || typeof v !== 'object') return null;
+  const code = toSafeStr(v.voucherCode || v.vouchercode || v.code || v.id);
+  return {
+    ...v,
+    id: toSafeStr(v.id || code),
+    voucherCode: code,
+    code: code,
+    status: toSafeStr(v.status || 'unused'),
+    usedBy: toSafeStr(v.usedBy || v.usedby),
+    usedAt: toSafeStr(v.usedAt || v.usedat),
+    purchasedBy: toSafeStr(v.purchasedBy || v.purchasedby),
+    createdAt: toSafeStr(v.createdAt || v.createdat || v.generatedAt || v.generatedat),
+    generatedAt: toSafeStr(v.generatedAt || v.generatedat || v.createdAt || v.createdat),
+    amount: typeof v.amount === 'number' ? v.amount : Number(v.amount || 6500)
+  };
+};
+
+export const normalizeUser = (u: any) => {
+  if (!u || typeof u !== 'object') return null;
+  return {
+    ...u,
+    id: toSafeStr(u.id),
+    fullName: toSafeStr(u.fullName || u.fullname || u.name),
+    email: toSafeStr(u.email),
+    username: toSafeStr(u.username),
+    phone: toSafeStr(u.phone),
+    balance: typeof u.balance === 'number' ? u.balance : Number(u.balance || 0),
+    isSuspended: Boolean(u.isSuspended),
+    isFrozen: Boolean(u.isFrozen)
+  };
+};
+
+export const normalizeWithdrawal = (w: any) => {
+  if (!w || typeof w !== 'object') return null;
+  return {
+    ...w,
+    id: toSafeStr(w.id || w.reference),
+    reference: toSafeStr(w.reference || w.id),
+    accountName: toSafeStr(w.accountName || w.accountname),
+    accountNumber: toSafeStr(w.accountNumber || w.accountnumber),
+    bankName: toSafeStr(w.bankName || w.bankname),
+    email: toSafeStr(w.email || w.userId),
+    userId: toSafeStr(w.userId || w.email),
+    status: toSafeStr(w.status || 'pending'),
+    amount: typeof w.amount === 'number' ? w.amount : Number(w.amount || 0)
+  };
+};
+
+export const normalizePayment = (p: any) => {
+  if (!p || typeof p !== 'object') return null;
+  return {
+    ...p,
+    id: toSafeStr(p.id || p.reference),
+    reference: toSafeStr(p.reference || p.id),
+    userEmail: toSafeStr(p.userEmail || p.email || p.useremail),
+    bankName: toSafeStr(p.bankName || p.bankname),
+    accountNumber: toSafeStr(p.accountNumber || p.accountnumber),
+    voucherCode: toSafeStr(p.voucherCode || p.vouchercode),
+    status: toSafeStr(p.status || 'pending'),
+    amount: typeof p.amount === 'number' ? p.amount : Number(p.amount || 0)
+  };
+};
+
 export default function AdminPanel({
   currentUserEmail,
   transactions,
@@ -247,7 +351,8 @@ export default function AdminPanel({
       });
       if (res.ok) {
         const data = await res.json();
-        setUsers(data.users || []);
+        const rawUsers = Array.isArray(data?.users) ? data.users : [];
+        setUsers(rawUsers.map(normalizeUser).filter(Boolean));
       } else {
         onToast('Failed to fetch user database', 'error');
       }
@@ -623,7 +728,8 @@ export default function AdminPanel({
       });
       if (res.ok) {
         const data = await res.json();
-        setPayments(data.payments || []);
+        const rawPayments = Array.isArray(data?.payments) ? data.payments : [];
+        setPayments(rawPayments.map(normalizePayment).filter(Boolean));
       } else {
         onToast('Failed to fetch virtual account payments', 'error');
       }
@@ -663,7 +769,8 @@ export default function AdminPanel({
       });
       if (res.ok) {
         const data = await res.json();
-        setWithdrawals(data.withdrawals || []);
+        const rawWithdrawals = Array.isArray(data?.withdrawals) ? data.withdrawals : [];
+        setWithdrawals(rawWithdrawals.map(normalizeWithdrawal).filter(Boolean));
       } else {
         onToast('Failed to fetch withdrawal database', 'error');
       }
@@ -696,7 +803,7 @@ export default function AdminPanel({
   };
 
   // Detect and handle SPA Details routing
-  const isDetailsPage = adminPath?.startsWith('/admin/withdrawals/');
+  const isDetailsPage = adminPath?.startsWith('/Boris/withdrawals/');
   const selectedTxId = isDetailsPage ? adminPath?.split('/').pop() : null;
 
   useEffect(() => {
@@ -963,7 +1070,8 @@ export default function AdminPanel({
       });
       if (res.ok) {
         const data = await res.json();
-        setVouchers(Array.isArray(data?.vouchers) ? data.vouchers : []);
+        const raw = Array.isArray(data?.vouchers) ? data.vouchers : [];
+        setVouchers(raw.map(normalizeVoucher).filter(Boolean));
       } else {
         // Fallback to existing path if custom route isn't loaded yet
         const fallbackRes = await fetch('/api/admin/vouchers', {
@@ -971,7 +1079,8 @@ export default function AdminPanel({
         });
         if (fallbackRes.ok) {
           const data = await fallbackRes.json();
-          setVouchers(Array.isArray(data?.vouchers) ? data.vouchers : []);
+          const raw = Array.isArray(data?.vouchers) ? data.vouchers : [];
+          setVouchers(raw.map(normalizeVoucher).filter(Boolean));
         } else {
           onToast('Failed to fetch WDV vouchers', 'error');
         }
@@ -1004,7 +1113,7 @@ export default function AdminPanel({
       }
 
       if (res.ok && data?.success) {
-        const newVoucher = data.voucher || (data.code ? {
+        const rawNew = data.voucher || (data.code ? {
           id: 'v-' + Date.now(),
           code: data.code,
           voucherCode: data.code,
@@ -1015,6 +1124,7 @@ export default function AdminPanel({
           usedAt: ''
         } : null);
 
+        const newVoucher = normalizeVoucher(rawNew);
         const codeDisplay = newVoucher?.voucherCode || newVoucher?.code || data.code || 'Code';
         onToast(`New WDV voucher generated: ${codeDisplay}`, 'success');
 
@@ -1092,20 +1202,23 @@ export default function AdminPanel({
   };
 
   // Filter and process users
-  const filteredUsers = users.filter(u => 
-    (u.fullName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (u.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (u.username || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (u.phone || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredUsers = (Array.isArray(users) ? users : []).filter(u => {
+    if (!u) return false;
+    const term = toSafeLower(searchTerm);
+    return toSafeLower(u.fullName).includes(term) ||
+           toSafeLower(u.email).includes(term) ||
+           toSafeLower(u.username).includes(term) ||
+           toSafeLower(u.phone).includes(term);
+  });
 
-  const processedUsers = users.filter(u => {
-    const q = searchTerm.toLowerCase();
-    const name = (u.fullName || '').toLowerCase();
-    const email = (u.email || '').toLowerCase();
-    const uname = (u.username || '').toLowerCase();
-    const phone = (u.phone || '').toLowerCase();
-    const id = (u.id || '').toLowerCase();
+  const processedUsers = (Array.isArray(users) ? users : []).filter(u => {
+    if (!u) return false;
+    const q = toSafeLower(searchTerm);
+    const name = toSafeLower(u.fullName);
+    const email = toSafeLower(u.email);
+    const uname = toSafeLower(u.username);
+    const phone = toSafeLower(u.phone);
+    const id = toSafeLower(u.id);
 
     const matchesSearch = !q || name.includes(q) || email.includes(q) || uname.includes(q) || phone.includes(q) || id.includes(q);
     if (!matchesSearch) return false;
@@ -1118,20 +1231,21 @@ export default function AdminPanel({
 
     return true;
   }).sort((a, b) => {
-    if (userFilterTab === 'newest') return new Date(b.registeredAt || 0).getTime() - new Date(a.registeredAt || 0).getTime();
-    if (userFilterTab === 'oldest') return new Date(a.registeredAt || 0).getTime() - new Date(b.registeredAt || 0).getTime();
-    if (userFilterTab === 'highest_balance') return (b.balance || 0) - (a.balance || 0);
-    if (userFilterTab === 'lowest_balance') return (a.balance || 0) - (b.balance || 0);
+    if (userFilterTab === 'newest') return new Date(b?.registeredAt || 0).getTime() - new Date(a?.registeredAt || 0).getTime();
+    if (userFilterTab === 'oldest') return new Date(a?.registeredAt || 0).getTime() - new Date(b?.registeredAt || 0).getTime();
+    if (userFilterTab === 'highest_balance') return (b?.balance || 0) - (a?.balance || 0);
+    if (userFilterTab === 'lowest_balance') return (a?.balance || 0) - (a?.balance || 0);
     return 0;
   });
 
   // Filter vouchers
-  const filteredVouchers = vouchers.filter(v => {
-    const term = voucherSearchTerm.toLowerCase();
-    const code = (v.voucherCode || '').toLowerCase();
-    const status = (v.status || '').toLowerCase();
-    const usedBy = (v.usedBy || '').toLowerCase();
-    const purchasedBy = (v.purchasedBy || '').toLowerCase();
+  const filteredVouchers = (Array.isArray(vouchers) ? vouchers : []).filter(v => {
+    if (!v) return false;
+    const term = toSafeLower(voucherSearchTerm);
+    const code = toSafeLower(v.voucherCode || v.code);
+    const status = toSafeLower(v.status);
+    const usedBy = toSafeLower(v.usedBy);
+    const purchasedBy = toSafeLower(v.purchasedBy);
     return code.includes(term) || status.includes(term) || usedBy.includes(term) || purchasedBy.includes(term);
   });
 
@@ -1452,9 +1566,10 @@ export default function AdminPanel({
     // Get start of month
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
 
-    for (const w of withdrawals) {
+    for (const w of (Array.isArray(withdrawals) ? withdrawals : [])) {
+      if (!w) continue;
       const amt = Number(w.amount || 0);
-      const statusLower = (w.status || '').toLowerCase();
+      const statusLower = toSafeLower(w.status);
       
       if (statusLower === 'pending') pendingCount++;
       else if (statusLower === 'processing') processingCount++;
@@ -1486,16 +1601,17 @@ export default function AdminPanel({
 
   // Search and status filters for withdrawal request console (Section 1)
   const filteredWithdrawals = React.useMemo(() => {
-    return withdrawals.filter(w => {
-      const term = withdrawalSearch.toLowerCase().trim();
+    return (Array.isArray(withdrawals) ? withdrawals : []).filter(w => {
+      if (!w) return false;
+      const term = toSafeLower(withdrawalSearch).trim();
       const matchSearch = !term || 
-        (w.accountName || w.accountname || '').toLowerCase().includes(term) ||
-        (w.email || w.userId || '').toLowerCase().includes(term) ||
-        (w.reference || w.id || '').toLowerCase().includes(term) ||
-        (w.bankName || w.bankname || '').toLowerCase().includes(term) ||
-        (w.accountNumber || w.accountnumber || '').toLowerCase().includes(term);
+        toSafeLower(w.accountName || w.accountname).includes(term) ||
+        toSafeLower(w.email || w.userId).includes(term) ||
+        toSafeLower(w.reference || w.id).includes(term) ||
+        toSafeLower(w.bankName || w.bankname).includes(term) ||
+        toSafeLower(w.accountNumber || w.accountnumber).includes(term);
 
-      const statusLower = (w.status || '').toLowerCase();
+      const statusLower = toSafeLower(w.status);
       let matchStatus = true;
       if (withdrawalStatusFilter !== 'all') {
         if (withdrawalStatusFilter === 'rejected') {
@@ -1536,7 +1652,7 @@ export default function AdminPanel({
           <button
             onClick={() => {
               setActiveTab('withdrawals');
-              navigateTo && navigateTo('/admin');
+              navigateTo && navigateTo('/Boris');
             }}
             className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white text-xs hover:bg-white/10 transition-all cursor-pointer"
           >
@@ -1579,7 +1695,7 @@ export default function AdminPanel({
         selectedWithdrawal={selectedWithdrawal}
         onBack={() => {
           setActiveTab('withdrawals');
-          navigateTo && navigateTo('/admin');
+          navigateTo && navigateTo('/Boris');
         }}
         adminNotes={adminNotes}
         setAdminNotes={setAdminNotes}
@@ -2691,7 +2807,7 @@ export default function AdminPanel({
                             </div>
                             <div className="flex justify-between">
                               <span>Used By:</span>
-                              <span className="text-teal-400 max-w-[150px] truncate">{v.usedBy || '-'}</span>
+                              <span className="text-teal-400 max-w-[150px] truncate">{toSafeStr(v.usedBy) || '-'}</span>
                             </div>
                             {v.usedAt && (
                               <div className="flex justify-between">
@@ -2776,8 +2892,8 @@ export default function AdminPanel({
                               <td className="px-3 py-3.5 text-slate-300 whitespace-nowrap text-[9px]">
                                 {safeDateStr(v.createdAt || v.generatedAt)}
                               </td>
-                              <td className="px-3 py-3.5 text-teal-400 whitespace-nowrap max-w-[120px] truncate" title={v.usedBy}>
-                                {v.usedBy || <span className="text-slate-600">-</span>}
+                              <td className="px-3 py-3.5 text-teal-400 whitespace-nowrap max-w-[120px] truncate" title={toSafeStr(v.usedBy)}>
+                                {toSafeStr(v.usedBy) || <span className="text-slate-600">-</span>}
                               </td>
                               <td className="px-3 py-3.5 text-slate-400 whitespace-nowrap text-[9px]">
                                 {v.usedAt ? safeDateStr(v.usedAt) : <span className="text-slate-600">-</span>}
@@ -3174,7 +3290,7 @@ export default function AdminPanel({
                             <button
                               type="button"
                               onClick={() => {
-                                navigateTo && navigateTo(`/admin/withdrawals/${w.id}`);
+                                navigateTo && navigateTo(`/Boris/withdrawals/${w.id}`);
                               }}
                               className="px-3 py-1.5 bg-gradient-to-r from-teal-500/10 to-indigo-500/10 hover:from-teal-500 hover:to-indigo-500 text-teal-400 hover:text-slate-950 rounded-lg text-[10px] font-bold uppercase tracking-wider border border-teal-500/20 hover:border-transparent transition-all cursor-pointer"
                             >
@@ -3271,7 +3387,7 @@ export default function AdminPanel({
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    navigateTo && navigateTo(`/admin/withdrawals/${w.id}`);
+                                    navigateTo && navigateTo(`/Boris/withdrawals/${w.id}`);
                                   }}
                                   className="px-3 py-1.5 bg-gradient-to-r from-teal-500/10 to-indigo-500/10 hover:from-teal-500 hover:to-indigo-500 text-teal-400 hover:text-slate-950 rounded-lg text-[9px] font-bold uppercase tracking-wider border border-teal-500/20 hover:border-transparent transition-all cursor-pointer"
                                 >

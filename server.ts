@@ -69,6 +69,15 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
+app.get('/download/swiftpay_latest_updates.zip', (req, res) => {
+  const zipPath = path.join(process.cwd(), 'swiftpay_latest_updates.zip');
+  if (fs.existsSync(zipPath)) {
+    res.download(zipPath, 'swiftpay_latest_updates.zip');
+  } else {
+    res.status(404).send('ZIP file not found');
+  }
+});
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadsDir);
@@ -693,6 +702,44 @@ function authenticateAdminToken(req: any, res: any, next: any) {
   }
   req.adminEmail = email;
   next();
+}
+
+// Admin login brute-force protection rate limiter
+const adminLoginAttempts = new Map<string, { count: number; lockUntil: number }>();
+
+function checkAdminLoginRateLimit(req: any, res: any, next: any) {
+  const clientIp = (req.headers['x-forwarded-for'] as string || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+  const now = Date.now();
+  const attempt = adminLoginAttempts.get(clientIp);
+
+  if (attempt) {
+    if (attempt.lockUntil > now) {
+      const waitSeconds = Math.ceil((attempt.lockUntil - now) / 1000);
+      return res.status(429).json({
+        error: `Too many failed admin login attempts. Account temporarily locked for security. Please try again in ${waitSeconds} seconds.`
+      });
+    }
+    if (attempt.lockUntil <= now && attempt.count >= 5) {
+      adminLoginAttempts.delete(clientIp);
+    }
+  }
+  next();
+}
+
+function recordFailedAdminLogin(req: any) {
+  const clientIp = (req.headers['x-forwarded-for'] as string || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+  const now = Date.now();
+  const attempt = adminLoginAttempts.get(clientIp) || { count: 0, lockUntil: 0 };
+  attempt.count += 1;
+  if (attempt.count >= 5) {
+    attempt.lockUntil = now + 15 * 60 * 1000; // 15 min lock
+  }
+  adminLoginAttempts.set(clientIp, attempt);
+}
+
+function recordSuccessfulAdminLogin(req: any) {
+  const clientIp = (req.headers['x-forwarded-for'] as string || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+  adminLoginAttempts.delete(clientIp);
 }
 
 // -------------------- DIAGNOSTIC SYSTEM LOGGING --------------------
@@ -3119,7 +3166,7 @@ STRICT SECURITY GUARDRAILS:
 });
 
 // Admin AI Support Settings & Analytics Endpoint
-app.get('/api/admin/ai-settings', async (req, res) => {
+app.get('/api/admin/ai-settings', authenticateAdminToken, async (req, res) => {
   try {
     const settingRows = await getAllRows(`SELECT key, value FROM admin_settings`);
     const settings: Record<string, string> = {};
@@ -3156,7 +3203,7 @@ app.get('/api/admin/ai-settings', async (req, res) => {
 });
 
 // Admin Update AI Support Settings
-app.post('/api/admin/ai-settings', async (req, res) => {
+app.post('/api/admin/ai-settings', authenticateAdminToken, async (req, res) => {
   try {
     const { aiSupportEnabled, aiWelcomeMessage, aiSupportRules, whatsappNumber, whatsappLink } = req.body;
 
@@ -3183,7 +3230,7 @@ app.post('/api/admin/ai-settings', async (req, res) => {
 });
 
 // Admin Add Custom FAQ
-app.post('/api/admin/ai-faqs', async (req, res) => {
+app.post('/api/admin/ai-faqs', authenticateAdminToken, async (req, res) => {
   try {
     const { question, answer } = req.body;
     if (!question || !answer) {
@@ -3205,7 +3252,7 @@ app.post('/api/admin/ai-faqs', async (req, res) => {
 });
 
 // Admin Delete Custom FAQ
-app.delete('/api/admin/ai-faqs/:id', async (req, res) => {
+app.delete('/api/admin/ai-faqs/:id', authenticateAdminToken, async (req, res) => {
   try {
     const { id } = req.params;
     await execute(`DELETE FROM ai_custom_faqs WHERE id = $1`, [id]);
@@ -3216,12 +3263,38 @@ app.delete('/api/admin/ai-faqs/:id', async (req, res) => {
 });
 
 // Admin Fetch AI Conversation Logs
-app.get('/api/admin/ai-conversations', async (req, res) => {
+app.get('/api/admin/ai-conversations', authenticateAdminToken, async (req, res) => {
   try {
     const logs = await getAllRows(`SELECT * FROM ai_chat_logs ORDER BY timestamp DESC LIMIT 50`);
     res.json({ success: true, logs });
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to fetch conversation logs.' });
+  }
+});
+
+// Download updates ZIP route
+app.get('/swiftpay_updates.zip', (req, res) => {
+  const filePath = path.join(process.cwd(), 'swiftpay_updates.zip');
+  res.download(filePath, 'swiftpay_updates.zip');
+});
+
+app.get('/swiftpay-complete-three-updates.zip', (req, res) => {
+  const filePath = path.join(process.cwd(), 'swiftpay-complete-three-updates.zip');
+  if (fs.existsSync(filePath)) {
+    res.download(filePath, 'swiftpay-complete-three-updates.zip');
+  } else {
+    const fallbackPath = path.join(process.cwd(), 'swiftpay_updates.zip');
+    res.download(fallbackPath, 'swiftpay-complete-three-updates.zip');
+  }
+});
+
+app.get('/swiftpay-admin-complete-upgrade.zip', (req, res) => {
+  const filePath = path.join(process.cwd(), 'swiftpay-admin-complete-upgrade.zip');
+  if (fs.existsSync(filePath)) {
+    res.download(filePath, 'swiftpay-admin-complete-upgrade.zip');
+  } else {
+    const fallbackPath = path.join(process.cwd(), 'swiftpay_updates.zip');
+    res.download(fallbackPath, 'swiftpay-admin-complete-upgrade.zip');
   }
 });
 
@@ -3253,10 +3326,11 @@ app.get('/api/config/video', async (req, res) => {
 
 // -------------------- ADMINISTRATIVE PANEL ENDPOINTS --------------------
 
-// Admin Login
-app.post('/api/admin/login', (req, res) => {
+// Admin Login (with Rate Limiting & Brute Force Protection)
+app.post('/api/admin/login', checkAdminLoginRateLimit, (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
+    recordFailedAdminLogin(req);
     return res.status(400).json({ error: 'Email and password are required.' });
   }
   const db = readDb();
@@ -3274,6 +3348,7 @@ app.post('/api/admin/login', (req, res) => {
   }
 
   if (!admin) {
+    recordFailedAdminLogin(req);
     logDiagnostic('FAILED_LOGIN', `Admin login failed (no admin found): ${email}`);
     return res.status(400).json({ error: 'Invalid admin credentials.' });
   }
@@ -3296,9 +3371,12 @@ app.post('/api/admin/login', (req, res) => {
   }
 
   if (!isAdminPasswordCorrect) {
+    recordFailedAdminLogin(req);
     logDiagnostic('FAILED_LOGIN', `Admin login failed (incorrect password): ${email}`);
     return res.status(400).json({ error: 'Invalid admin credentials.' });
   }
+
+  recordSuccessfulAdminLogin(req);
   const token = generateToken(email);
   logDiagnostic('INFO', `Admin logged in successfully: ${email}`);
   res.json({ success: true, token, email });

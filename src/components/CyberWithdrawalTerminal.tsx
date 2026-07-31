@@ -69,7 +69,7 @@ export function CyberWithdrawalTerminal({
   statusUpdating,
   maskAccountNumber
 }: CyberWithdrawalTerminalProps) {
-  const statusLower = (selectedWithdrawal.status || '').toLowerCase();
+  const statusLower = (selectedWithdrawal?.status ? String(selectedWithdrawal.status) : '').toLowerCase();
   const dateObj = new Date(selectedWithdrawal.timestamp || selectedWithdrawal.created_at || Date.now());
   const dateStr = dateObj.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   const timeStr = dateObj.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });

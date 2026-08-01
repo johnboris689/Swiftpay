@@ -1,5 +1,6 @@
 import React from 'react';
 import { Download, Share2, CheckCircle2, X, ShieldCheck } from 'lucide-react';
+import jsPDF from 'jspdf';
 import { Transaction } from '../types';
 import GlassCard from './GlassCard';
 
@@ -22,16 +23,17 @@ export default function TransactionReceipt({
     const d = new Date(dateStr);
     return {
       date: d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
-      time: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      time: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      isoDate: d.toISOString().split('T')[0]
     };
   };
 
-  const { date, time } = getFormattedDate(transaction.date);
+  const { date, time, isoDate } = getFormattedDate(transaction.date);
   const refNum = transaction.reference || transaction.refNum || transaction.id;
   const newBalanceVal = transaction.newBalance ?? (transaction as any).balanceAfter ?? 0;
 
   let title = "Transaction Receipt";
-  let contentRows = [];
+  let contentRows: { label: string; value: string; bold?: boolean; highlight?: boolean; selectAll?: boolean }[] = [];
 
   const type = transaction.type;
 
@@ -98,76 +100,137 @@ export default function TransactionReceipt({
   }
 
   const handleDownload = () => {
-    const printWindow = window.open('', '_blank');
-    const receiptText = `
-=========================================
-            SWIFTPAY RECEIPT             
-=========================================
-${title.toUpperCase()}
------------------------------------------
-${contentRows.map(row => `${row.label.padEnd(25)}: ${row.value}`).join('\n')}
------------------------------------------
-Thank you for choosing SwiftPay!
-=========================================
-    `;
+    try {
+      const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
 
-    if (printWindow) {
-      printWindow.document.write(`
-        <html>
-          <head>
-            <title>SwiftPay Receipt - ${transaction.id}</title>
-            <style>
-              body { font-family: 'Courier New', Courier, monospace; padding: 40px; color: #111; max-width: 500px; margin: 0 auto; line-height: 1.5; }
-              .header { text-align: center; margin-bottom: 30px; border-bottom: 2px dashed #ccc; padding-bottom: 20px; }
-              .amount { font-size: 24px; font-weight: bold; margin: 10px 0; }
-              .details { margin-bottom: 30px; }
-              .row { display: flex; justify-content: space-between; margin-bottom: 8px; }
-              .label { color: #555; }
-              .value { font-weight: bold; }
-              .footer { text-align: center; border-top: 2px dashed #ccc; padding-top: 20px; font-size: 12px; color: #777; margin-top: 30px; }
-              @media print {
-                body { padding: 20px; }
-              }
-            </style>
-          </head>
-          <body>
-            <div class="header">
-              <h2>SWIFTPAY DIGITAL BANKING</h2>
-              <div class="amount">₦${transaction.amount.toLocaleString()}</div>
-              <div>${title}</div>
-            </div>
-            <div class="details">
-              ${contentRows.map(row => `
-                <div class="row">
-                  <span class="label">${row.label}:</span>
-                  <span class="value">${row.value}</span>
-                </div>
-              `).join('')}
-            </div>
-            <div class="footer">
-              <p>Fully Encrypted & Verified Settlement Receipt</p>
-              <p>Thank you for choosing SwiftPay!</p>
-            </div>
-            <script>
-              window.onload = function() {
-                window.print();
-                setTimeout(function() { window.close(); }, 500);
-              }
-            </script>
-          </body>
-        </html>
-      `);
-      printWindow.document.close();
-      onToast('Receipt print window opened! Select Save as PDF.', 'success');
-    } else {
-      const element = document.createElement('a');
-      const file = new Blob([receiptText], { type: 'text/plain' });
-      element.href = URL.createObjectURL(file);
-      element.download = `SwiftPay_Receipt_${transaction.id}.txt`;
-      document.body.appendChild(element);
-      element.click();
-      document.body.removeChild(element);
-      onToast('Popup was blocked. Downloaded receipt as text file!', 'success');
+      // Colors
+      const primaryDark = [12, 12, 20]; // #0c0c14
+      const tealAccent = [45, 212, 191]; // #2dd4bf
+      const slateDark = [15, 23, 42]; // #0f172a
+      const borderGray = [226, 232, 240]; // #e2e8f0
+      const textDark = [30, 41, 59]; // #1e293b
+      const textMuted = [100, 116, 139]; // #64748b
+
+      // Header Banner
+      doc.setFillColor(primaryDark[0], primaryDark[1], primaryDark[2]);
+      doc.rect(0, 0, 210, 48, 'F');
+
+      // Top Header Accent Bar
+      doc.setFillColor(tealAccent[0], tealAccent[1], tealAccent[2]);
+      doc.rect(0, 0, 210, 4, 'F');
+
+      // Header Brand Text
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(22);
+      doc.setTextColor(255, 255, 255);
+      doc.text('SWIFTPAY DIGITAL BANKING', 20, 22);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(tealAccent[0], tealAccent[1], tealAccent[2]);
+      doc.text('Official Settlement Confirmation & Transaction Receipt', 20, 31);
+
+      // Status Badge
+      doc.setFillColor(16, 185, 129); // Emerald 500
+      doc.roundedRect(150, 18, 40, 10, 2, 2, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(255, 255, 255);
+      doc.text('SUCCESSFUL', 156, 24.5);
+
+      // Amount Display Box
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(borderGray[0], borderGray[1], borderGray[2]);
+      doc.roundedRect(20, 56, 170, 28, 3, 3, 'FD');
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+      doc.text('TOTAL TRANSACTION SETTLEMENT', 30, 66);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(20);
+      doc.setTextColor(slateDark[0], slateDark[1], slateDark[2]);
+      const amountStr = `NGN ${transaction.amount.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+      doc.text(amountStr, 30, 77);
+
+      // Receipt Title
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.setTextColor(slateDark[0], slateDark[1], slateDark[2]);
+      doc.text(title.toUpperCase(), 20, 96);
+
+      // Items Card Table
+      let startY = 104;
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(borderGray[0], borderGray[1], borderGray[2]);
+      doc.roundedRect(20, startY, 170, (contentRows.length * 12) + 12, 3, 3, 'D');
+
+      let currentY = startY + 10;
+
+      // Table Rows
+      contentRows.forEach((row, idx) => {
+        // Label
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9.5);
+        doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+        doc.text(row.label, 26, currentY);
+
+        // Value
+        doc.setFont('helvetica', row.bold || row.highlight ? 'bold' : 'normal');
+        doc.setFontSize(9.5);
+        if (row.highlight) {
+          doc.setTextColor(13, 148, 136); // Teal 600
+        } else {
+          doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+        }
+
+        // Clean value string for PDF compatibility
+        const cleanVal = row.value.replace(/₦/g, 'NGN ');
+        doc.text(cleanVal, 184, currentY, { align: 'right' });
+
+        currentY += 12;
+
+        // Row Separator Line
+        if (idx < contentRows.length - 1) {
+          doc.setDrawColor(241, 245, 249);
+          doc.line(26, currentY - 6, 184, currentY - 6);
+        }
+      });
+
+      // Security / Support Footer Section
+      const footerY = currentY + 15;
+      doc.setFillColor(248, 250, 252);
+      doc.setDrawColor(borderGray[0], borderGray[1], borderGray[2]);
+      doc.roundedRect(20, footerY, 170, 32, 3, 3, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(slateDark[0], slateDark[1], slateDark[2]);
+      doc.text('SECURITY & COMPLIANCE VERIFICATION', 28, footerY + 10);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
+      doc.text('• End-to-end encrypted transaction settlement record.', 28, footerY + 17);
+      doc.text('• Support: support@swiftpay.com | Website: www.swiftpay.com', 28, footerY + 23);
+
+      // Bottom Watermark & Time
+      doc.setFontSize(7.5);
+      doc.setTextColor(148, 163, 184);
+      doc.text(`Generated on ${new Date().toLocaleString()} • SwiftPay Enterprise Engine`, 105, 280, { align: 'center' });
+
+      // Save PDF file cleanly triggering direct download
+      const filename = `${type === 'withdraw' ? 'Withdrawal' : 'SwiftPay'}-Receipt-${isoDate}.pdf`;
+      doc.save(filename);
+      onToast(`PDF receipt downloaded: ${filename}`, 'success');
+    } catch (err) {
+      console.error('PDF Generation Error:', err);
+      onToast('Error generating PDF receipt', 'error');
     }
   };
 
@@ -230,10 +293,11 @@ Thank you for choosing SwiftPay!
 
           <div className="flex gap-2">
             <button
+              id="btn-download-pdf-receipt"
               onClick={handleDownload}
               className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 text-white text-xs font-bold uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2"
             >
-              <Download className="h-3.5 w-3.5" /> Download
+              <Download className="h-3.5 w-3.5" /> Download PDF
             </button>
             <button
               onClick={handleShareClick}
@@ -252,3 +316,4 @@ Thank you for choosing SwiftPay!
     </div>
   );
 }
+

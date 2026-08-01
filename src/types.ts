@@ -14,6 +14,7 @@ export interface User {
     id: string;
     rawId?: string;
     type?: string;
+    deviceName?: string;
   };
   phone?: string;
   profilePic?: string;
@@ -22,6 +23,9 @@ export interface User {
   tier?: number; // Verification tier, e.g. 1, 2, 3
   is2faEnabled?: boolean;
   welcomeRewardShown?: boolean;
+  wdvVerified?: boolean;
+  isWdvVerified?: boolean;
+  notifications?: NotificationItem[];
 }
 
 export type WdvStatus = 'unused' | 'redeemed';

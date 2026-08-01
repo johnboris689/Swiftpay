@@ -1,61 +1,44 @@
-# SwiftPay Installation & Deployment Guide
+# SwiftPay Enterprise Update — Installation Guide
 
-Follow these steps to apply this update package to your existing SwiftPay project.
+## Package Name
+`swiftpay-paystack-auto-wdv-update.zip`
 
 ---
 
-## Installation Steps
+## How to Install this Update
 
-1. **Extract the ZIP Archive**:
-   Extract all contents from `swiftpay-update.zip` on your computer.
+1. **Extract the ZIP Archive**
+   Unzip `swiftpay-paystack-auto-wdv-update.zip` on your computer.
 
-2. **Open the Extracted Folder**:
-   Locate all files and folders inside the extracted directory (`src/`, `server.ts`, `db.ts`, `CHANGELOG.md`, `INSTALL.md`, etc.).
+2. **Overwrite Project Files**
+   Copy all extracted files directly into the root directory of your existing SwiftPay project repository, overwriting existing files:
+   - `server.ts`
+   - `db.ts`
+   - `.env.example`
+   - `src/App.tsx`
+   - `CHANGELOG.md`
+   - `INSTALL.md`
+   - `ENVIRONMENT_VARIABLES.md`
+   - `PAYSTACK_SETUP.md`
 
-3. **Copy All Files**:
-   Select and copy every file and folder from the extracted package.
+3. **Configure Environment Variables**
+   Set the following variables in your hosting environment (e.g., Render, Railway, Heroku, or `.env` file):
+   - `PAYSTACK_SECRET_KEY`: Your Paystack Secret Key (e.g. `sk_live_...` or `sk_test_...`)
+   - `PAYSTACK_PUBLIC_KEY`: Your Paystack Public Key (e.g. `pk_live_...` or `pk_test_...`)
+   - `PAYSTACK_WEBHOOK_SECRET`: Your Paystack Webhook Secret Key
 
-4. **Paste Into SwiftPay Root Directory**:
-   Paste the copied files into the root folder of your existing SwiftPay project codebase.
-
-5. **Overwrite Existing Files**:
-   When prompted by your operating system or file manager, select **Replace / Overwrite** to replace existing files.
-
-6. **Install Dependencies** (if needed):
-   Open your terminal in the SwiftPay project directory and run:
-   ```bash
-   npm install
-   ```
-
-7. **Verify & Build Locally**:
-   To test the build locally before deploying:
-   ```bash
-   npm run build
-   ```
-
-8. **Commit & Push to GitHub**:
+4. **Git Commit & Push**
    ```bash
    git add .
-   git commit -m "Feat: Complete SwiftPay balance card, 2-step transfer/withdrawal, and 24h wallet engine update"
+   git commit -m "Apply SwiftPay Paystack Dedicated Virtual Account & Auto WDV Voucher update"
    git push origin main
    ```
 
-9. **Redeploy on Render / Cloud Run**:
-   - Trigger a manual deployment or allow automatic build from your `main` branch.
-   - Verify that your application builds and starts cleanly.
+5. **Deploy on Render**
+   - Trigger a new deployment on Render or your cloud provider.
+   - Build Command: `npm run build`
+   - Start Command: `npm run start`
 
----
-
-## Included Modified Files in This Update Package
-- `src/App.tsx`
-- `src/components/BottomNav.tsx`
-- `src/components/AdminPanel.tsx`
-- `src/components/CyberWithdrawalTerminal.tsx`
-- `src/components/ErrorBoundary.tsx`
-- `server.ts`
-- `db.ts`
-- `CHANGELOG.md`
-- `INSTALL.md`
-
----
-*For support or questions regarding WDV configuration or database migrations, refer to the project documentation in `CHANGELOG.md`.*
+6. **Configure Paystack Webhook URL**
+   In your Paystack Dashboard -> Settings -> API Keys & Webhooks:
+   - Set **Webhook URL** to: `https://your-domain.onrender.com/api/paystack/webhook`

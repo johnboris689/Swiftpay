@@ -4677,11 +4677,25 @@ export default function AdminPanel({
                   <p className="text-[11px] text-slate-400 mt-0.5">Comprehensive transaction summaries, voucher revenue analytics, and exportable financial reports.</p>
                 </div>
                 <button
-                  onClick={() => window.print()}
+                  onClick={() => {
+                    const csvContent = "data:text/csv;charset=utf-8," 
+                      + "Metric,Value\n"
+                      + `Total Users Registered,${totalUsersCount}\n`
+                      + `Total System Balance,NGN ${totalSystemBalance}\n`
+                      + `Total Revenue Generated,NGN ${totalRevenue}\n`
+                      + `Total System Transactions,${totalTxsCount}`;
+                    const encodedUri = encodeURI(csvContent);
+                    const link = document.createElement("a");
+                    link.setAttribute("href", encodedUri);
+                    link.setAttribute("download", `SwiftPay_Audit_Report_${new Date().toISOString().split('T')[0]}.csv`);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }}
                   className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-white border border-white/10 rounded-lg text-[10px] font-bold uppercase transition-all cursor-pointer flex items-center gap-1.5"
                 >
                   <FileText className="h-3.5 w-3.5 text-teal-400" />
-                  Print Report
+                  Export Audit CSV
                 </button>
               </div>
 

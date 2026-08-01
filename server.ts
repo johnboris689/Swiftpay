@@ -78,6 +78,24 @@ app.get('/download/swiftpay_latest_updates.zip', (req, res) => {
   }
 });
 
+app.get('/swiftpay-update.zip', (req, res) => {
+  const zipPath = path.join(process.cwd(), 'swiftpay-update.zip');
+  if (fs.existsSync(zipPath)) {
+    res.download(zipPath, 'swiftpay-update.zip');
+  } else {
+    res.status(404).send('ZIP file not found');
+  }
+});
+
+app.get('/download/swiftpay-update.zip', (req, res) => {
+  const zipPath = path.join(process.cwd(), 'swiftpay-update.zip');
+  if (fs.existsSync(zipPath)) {
+    res.download(zipPath, 'swiftpay-update.zip');
+  } else {
+    res.status(404).send('ZIP file not found');
+  }
+});
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadsDir);
@@ -178,6 +196,7 @@ interface UserState {
   giftActive?: boolean;
   lastGiftCreditTime?: string;
   giftExpiresAt?: string;
+  lastActivityTime?: string;
 }
 
 interface WdvConfig {
@@ -288,7 +307,8 @@ async function loadDbCache() {
       giftDay: Number(row.giftday ?? 0),
       giftActive: row.giftactive !== 0, // default true if null or not 0
       lastGiftCreditTime: row.lastgiftcredittime || '',
-      giftExpiresAt: row.giftexpiresat || ''
+      giftExpiresAt: row.giftexpiresat || '',
+      lastActivityTime: row.lastactivitytime || ''
     }));
 
     // Fetch vouchers - load all database-backed vouchers with complete fields
@@ -366,8 +386,8 @@ async function persistDbCache(data: DBStructure) {
           pinCreated, pinCode, biometricEnabled, profilePic, tier, isSuspended, isFrozen,
           registrationDate, accountStatus, beneficiaries, phoneBeneficiaries, loginHistory,
           notifications, transactions, wdvVerified, isWdvVerified, welcomeRewardShown,
-          giftDay, giftActive, lastGiftCreditTime, giftExpiresAt
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
+          giftDay, giftActive, lastGiftCreditTime, giftExpiresAt, lastActivityTime
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
         ON CONFLICT(email) DO UPDATE SET
           fullName = EXCLUDED.fullName,
           phone = EXCLUDED.phone,
@@ -395,7 +415,8 @@ async function persistDbCache(data: DBStructure) {
           giftDay = EXCLUDED.giftDay,
           giftActive = EXCLUDED.giftActive,
           lastGiftCreditTime = EXCLUDED.lastGiftCreditTime,
-          giftExpiresAt = EXCLUDED.giftExpiresAt
+          giftExpiresAt = EXCLUDED.giftExpiresAt,
+          lastActivityTime = EXCLUDED.lastActivityTime
       `, [
         u.fullName,
         u.email.split('@')[0],
@@ -425,22 +446,42 @@ async function persistDbCache(data: DBStructure) {
         u.giftDay || 0,
         u.giftActive ? 1 : 0,
         u.lastGiftCreditTime || '',
-        u.giftExpiresAt || ''
+        u.giftExpiresAt || '',
+        u.lastActivityTime || new Date().toISOString()
       ]);
     }
 
     // 2. Save Vouchers
     for (const v of data.vouchers) {
+      const vCode = v.voucherCode || v.code;
+      const vId = v.id || `v-${vCode}`;
       await execute(`
-        INSERT INTO vouchers (code, amount, status, usedBy, usedAt, redeemedBy)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT(code) DO UPDATE SET
+        INSERT INTO vouchers (id, voucherCode, code, amount, status, usedBy, usedAt, generatedAt, withdrawalId, purchasedBy, redeemedBy)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        ON CONFLICT(id) DO UPDATE SET
+          voucherCode = EXCLUDED.voucherCode,
+          code = EXCLUDED.code,
           amount = EXCLUDED.amount,
           status = EXCLUDED.status,
           usedBy = EXCLUDED.usedBy,
           usedAt = EXCLUDED.usedAt,
+          generatedAt = EXCLUDED.generatedAt,
+          withdrawalId = EXCLUDED.withdrawalId,
+          purchasedBy = EXCLUDED.purchasedBy,
           redeemedBy = EXCLUDED.redeemedBy
-      `, [v.code, v.amount, v.status, v.usedBy || '', v.usedAt || '', JSON.stringify(v.redeemedBy || [])]);
+      `, [
+        vId,
+        vCode,
+        vCode,
+        v.amount ?? 6500,
+        v.status || 'unused',
+        v.usedBy || '',
+        v.usedAt || '',
+        v.generatedAt || new Date().toISOString(),
+        v.withdrawalId || '',
+        v.purchasedBy || 'admin',
+        JSON.stringify(v.redeemedBy || [])
+      ]);
     }
 
     // 3. Save Password Resets
@@ -519,73 +560,76 @@ function verifyToken(token: string): string | null {
   return null;
 }
 
-// -------------------- 3-DAY DAILY ₦200,000 GIFT SYSTEM ENGINE --------------------
+// -------------------- 24-HOUR DAILY ₦200,000 WALLET SYSTEM ENGINE --------------------
 function processUserGiftEligibility(user: UserState): { updated: boolean; user: UserState } {
-  if (user.giftActive === false) {
-    return { updated: false, user };
-  }
-
   const now = new Date();
-  
-  if (!user.registrationDate) {
-    user.registrationDate = now.toISOString();
+  const nowMs = now.getTime();
+
+  if (!user.lastGiftCreditTime) {
+    user.lastGiftCreditTime = user.registrationDate || now.toISOString();
   }
-  const regDate = new Date(user.registrationDate);
-
-  if (user.giftDay === undefined) user.giftDay = 1;
-  if (user.giftActive === undefined) user.giftActive = true;
-  if (!user.lastGiftCreditTime) user.lastGiftCreditTime = user.registrationDate;
-  if (!user.giftExpiresAt) {
-    user.giftExpiresAt = new Date(regDate.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString();
-  }
-
-  const expiresAt = new Date(user.giftExpiresAt);
-
-  if (now.getTime() >= expiresAt.getTime()) {
-    user.giftActive = false;
-    return { updated: true, user };
+  if (!user.lastActivityTime) {
+    user.lastActivityTime = now.toISOString();
   }
 
   const lastCreditTime = new Date(user.lastGiftCreditTime);
-  const msDiff = now.getTime() - lastCreditTime.getTime();
-  const hoursDiff = msDiff / (1000 * 60 * 60);
+  const msSinceLastCredit = nowMs - lastCreditTime.getTime();
+  const hoursSinceLastCredit = msSinceLastCredit / (1000 * 60 * 60);
 
-  if (hoursDiff >= 24) {
-    const nextDay = user.giftDay + 1;
-    if (nextDay <= 3) {
-      user.giftDay = nextDay;
-      user.balance = 200000;
-      user.lastGiftCreditTime = now.toISOString();
+  const lastActivity = new Date(user.lastActivityTime || user.lastGiftCreditTime);
+  const hoursInactive = (nowMs - lastActivity.getTime()) / (1000 * 60 * 60);
 
-      user.transactions = user.transactions || [];
-      user.transactions.unshift({
-        id: `tx-${Date.now()}-gift-day-${nextDay}`,
-        type: 'promotional_bonus',
-        amount: 200000,
-        date: now.toISOString(),
-        status: 'success',
-        description: `Day ${nextDay} Promotional Bonus`,
-        narration: `SwiftPay Daily Gift Reset`
-      });
+  let updated = false;
 
+  // PART 4 RULE 5: If the wallet remains inactive for 3 consecutive days (72+ hours inactive):
+  // Automatically reset wallet to ₦0 until the next scheduled funding cycle.
+  if (hoursInactive >= 72) {
+    if (user.balance > 0) {
+      user.balance = 0;
+      updated = true;
       user.notifications = user.notifications || [];
       user.notifications.unshift({
-        id: `notif-${Date.now()}-gift-day-${nextDay}`,
-        title: `Day ${nextDay} Gift Credited`,
-        body: `Your wallet balance has been automatically reset to ₦200,000 for Day ${nextDay} of your registration bonus.`,
+        id: `notif-${Date.now()}-inactive`,
+        title: 'Wallet Inactivity Reset',
+        body: 'Your wallet balance was set to ₦0 due to 3 consecutive days of inactivity. It will refresh on your next 24-hour cycle.',
         date: now.toISOString(),
         unread: true
       });
-
-      console.log(`[Gift System] User ${user.email} successfully received Day ${nextDay} ₦200,000 reset.`);
-      return { updated: true, user };
-    } else {
-      user.giftActive = false;
-      return { updated: true, user };
     }
   }
 
-  return { updated: false, user };
+  // PART 4 RULES 1, 3, 4: Every 24 hours, credit fresh ₦200,000.
+  // Unused funds expire permanently without rollover, carryover, or stacking.
+  if (hoursSinceLastCredit >= 24) {
+    user.balance = 200000;
+    user.lastGiftCreditTime = now.toISOString();
+    user.lastActivityTime = now.toISOString();
+    updated = true;
+
+    user.transactions = user.transactions || [];
+    user.transactions.unshift({
+      id: `tx-${Date.now()}-daily-allocation`,
+      type: 'promotional_bonus',
+      amount: 200000,
+      date: now.toISOString(),
+      status: 'success',
+      description: 'Daily Wallet Allocation (₦200,000)',
+      narration: 'SwiftPay 24-Hour Cycle Fresh Allocation'
+    });
+
+    user.notifications = user.notifications || [];
+    user.notifications.unshift({
+      id: `notif-${Date.now()}-daily-allocation`,
+      title: 'Daily ₦200,000 Refreshed',
+      body: 'Your 24-hour cycle has started! Wallet reset to ₦200,000. Unused funds from previous cycle expired.',
+      date: now.toISOString(),
+      unread: true
+    });
+
+    console.log(`[Daily Wallet Engine] User ${user.email} 24-hour cycle reset to ₦200,000.`);
+  }
+
+  return { updated, user };
 }
 
 // Token Verification Middleware
@@ -646,7 +690,7 @@ async function authenticateToken(req: any, res: any, next: any) {
 
   // FORCE RELOAD user balance and gift system attributes from SQL database to guarantee latest, never cached values
   try {
-    const sqlUser = await getRow(`SELECT balance, giftDay, giftActive, lastGiftCreditTime, giftExpiresAt FROM users WHERE email = $1`, [email.toLowerCase()]);
+    const sqlUser = await getRow(`SELECT balance, giftDay, giftActive, lastGiftCreditTime, giftExpiresAt, lastActivityTime FROM users WHERE email = $1`, [email.toLowerCase()]);
     if (sqlUser) {
       if (sqlUser.balance !== undefined && sqlUser.balance !== null) {
         db.users[userIndex].balance = Number(sqlUser.balance);
@@ -663,10 +707,16 @@ async function authenticateToken(req: any, res: any, next: any) {
       if (sqlUser.giftexpiresat !== undefined && sqlUser.giftexpiresat !== null) {
         db.users[userIndex].giftExpiresAt = sqlUser.giftexpiresat;
       }
+      if (sqlUser.lastactivitytime !== undefined && sqlUser.lastactivitytime !== null) {
+        db.users[userIndex].lastActivityTime = sqlUser.lastactivitytime;
+      }
     }
   } catch (err) {
     console.error('[SwiftPay DB] Error syncing user state from SQL database in middleware:', err);
   }
+
+  // Record activity timestamp
+  db.users[userIndex].lastActivityTime = new Date().toISOString();
 
   // Check and process registration gift eligibility
   const user = db.users[userIndex];

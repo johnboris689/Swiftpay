@@ -447,6 +447,7 @@ export default function App() {
   const [selectedDataPlan, setSelectedDataPlan] = useState<any>(null);
 
   // Transfer fields
+  const [transferStep, setTransferStep] = useState<1 | 2>(1);
   const [transferBank, setTransferBank] = useState('9PSB');
   const [transferAccNum, setTransferAccNum] = useState('');
   const [transferAccName, setTransferAccName] = useState('');
@@ -1952,12 +1953,11 @@ export default function App() {
       showToast('Please enter a verified 10-digit account number', 'error');
       return;
     }
-    if (!transferAmount || parseInt(transferAmount) <= 0) {
-      showToast('Please specify a valid transfer amount', 'error');
+    const price = parseInt(transferAmount);
+    if (!transferAmount || isNaN(price) || price < 50 || price > 200000) {
+      showToast('Transfer amount must be between ₦50 and ₦200,000', 'error');
       return;
     }
-
-    const price = parseInt(transferAmount);
     const codeToUse = transferWdvCode.trim();
 
     // MANDATORY WDV Voucher Verification (Point 7)
@@ -3127,48 +3127,50 @@ export default function App() {
                       </div>
 
                       {/* COMPACT FINTECH BALANCE CARD */}
-                      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#1e1b4b] via-[#312e81] to-[#4c1d95] p-4 sm:p-5 text-white border border-indigo-500/20 shadow-lg shadow-indigo-950/40">
+                      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#1e1b4b] via-[#312e81] to-[#4c1d95] p-5 sm:p-6 text-white border border-indigo-500/20 shadow-xl shadow-indigo-950/50">
                         {/* Subtle background glow elements */}
-                        <div className="absolute -right-12 -top-12 w-32 h-32 rounded-full bg-teal-400/10 blur-xl" />
-                        <div className="absolute -left-12 -bottom-12 w-28 h-28 rounded-full bg-indigo-400/10 blur-xl" />
+                        <div className="absolute -right-12 -top-12 w-36 h-36 rounded-full bg-teal-400/10 blur-2xl pointer-events-none" />
+                        <div className="absolute -left-12 -bottom-12 w-32 h-32 rounded-full bg-indigo-400/15 blur-2xl pointer-events-none" />
 
                         <div className="relative z-10 flex items-center justify-between">
-                          <span className="text-[9px] sm:text-[10px] tracking-widest uppercase font-mono text-indigo-200">Available Balance</span>
-                          <span className="text-[9px] font-mono px-2 py-0.5 bg-white/10 rounded-full border border-white/10 text-teal-300 font-bold">Basic Tier</span>
+                          <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest uppercase text-indigo-200/90">Available Balance</span>
+                          <span className="text-[10px] font-mono px-2.5 py-0.5 bg-teal-500/15 border border-teal-500/30 rounded-full text-teal-300 font-extrabold tracking-wide">Tier 3 Verified</span>
                         </div>
 
-                        <div className="relative z-10 my-2">
-                          <span className="text-2xl sm:text-3xl font-extrabold font-display tracking-tight text-white">
-                            {nairaFormat(user?.balance || 200000)}
+                        <div className="relative z-10 my-3">
+                          <span className="text-3xl sm:text-4xl font-extrabold font-display tracking-tight text-white drop-shadow-sm">
+                            {nairaFormat(user?.balance ?? 0)}
                           </span>
                         </div>
 
-                        <div className="relative z-10 border-t border-white/10 pt-3 flex items-center justify-between gap-3">
-                          <div className="flex-1">
-                            <div className="flex items-center justify-between text-[9px] text-indigo-200 mb-1 font-mono">
-                              <span>Daily Spend Target</span>
-                              <span>{nairaFormat(user?.dailySpent || 0)} / {nairaFormat(user?.dailyTarget || 50000)}</span>
-                            </div>
-                            {/* Progress Bar */}
-                            <div className="w-full h-1 bg-white/15 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-teal-400 transition-all duration-500"
-                                style={{ width: `${Math.min(100, ((user?.dailySpent || 0) / (user?.dailyTarget || 50000)) * 100)}%` }}
-                              />
-                            </div>
-                          </div>
-
-                          {/* Direct Withdraw Trigger */}
+                        {/* Action Buttons: [ Withdraw ]  [ Transfer ] */}
+                        <div className="relative z-10 border-t border-white/10 pt-4 mt-4 grid grid-cols-2 gap-3 sm:gap-4">
                           <button
                             id="btn-withdraw-trigger"
+                            type="button"
                             onClick={() => {
                               setWithdrawStep(1);
                               setCurrentScreen('withdraw');
                               navigateTo('/dashboard/withdraw');
                             }}
-                            className="py-1.5 px-3 rounded-lg bg-teal-400 hover:bg-teal-300 text-slate-950 text-[11px] font-bold shadow-sm active:scale-95 transition-all shrink-0 cursor-pointer"
+                            className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-teal-400 to-emerald-400 hover:from-teal-300 hover:to-emerald-300 text-slate-950 text-xs font-black shadow-md shadow-teal-500/20 active:scale-95 hover:scale-[1.02] transition-all duration-200 flex items-center justify-center gap-1.5 cursor-pointer"
                           >
-                            Withdraw
+                            <ArrowRight className="h-4 w-4 stroke-[2.5]" />
+                            <span>Withdraw</span>
+                          </button>
+
+                          <button
+                            id="btn-transfer-trigger"
+                            type="button"
+                            onClick={() => {
+                              setTransferStep(1);
+                              setCurrentScreen('transfer_bank');
+                              navigateTo('/dashboard/transfer');
+                            }}
+                            className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white text-xs font-black shadow-md shadow-indigo-500/25 active:scale-95 hover:scale-[1.02] transition-all duration-200 flex items-center justify-center gap-1.5 cursor-pointer border border-indigo-400/30"
+                          >
+                            <Send className="h-4 w-4 stroke-[2.5]" />
+                            <span>Transfer</span>
                           </button>
                         </div>
                       </div>
@@ -5054,60 +5056,84 @@ export default function App() {
                 </div>
               )}
 
-              {/* -------------------- FLOW 6: TRANSFER TO BANK SCREEN -------------------- */}
+              {/* -------------------- FLOW 6: BANK CASHOUT TRANSFER (/dashboard/transfer) -------------------- */}
               {currentScreen === 'transfer_bank' && (
-                <div className="p-5 space-y-5 animate-[fadeIn_0.2s_ease-out]">
-                  <div className="flex items-center gap-3">
-                    <button
-                      id="btn-transfer-back"
-                      onClick={() => setCurrentScreen('dashboard')}
-                      className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-500"
-                    >
-                      <ArrowLeft className="h-4 w-4" />
-                    </button>
-                    <h4 className="text-base font-bold font-display text-slate-800 dark:text-white">Bank Cashout Transfer</h4>
+                <div className="p-4 sm:p-6 space-y-6 animate-[fadeIn_0.2s_ease-out] max-w-3xl mx-auto w-full">
+                  {/* Page Header */}
+                  <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                    <div className="flex items-center gap-3">
+                      <button
+                        id="btn-transfer-back"
+                        type="button"
+                        onClick={() => {
+                          setCurrentScreen('dashboard');
+                          navigateTo('/');
+                        }}
+                        className="p-2 rounded-xl bg-slate-900 border border-white/10 text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                      >
+                        <ArrowLeft className="h-5 w-5" />
+                      </button>
+                      <div>
+                        <h2 className="text-lg font-black font-display text-white">Bank Cashout Transfer</h2>
+                        <p className="text-[10px] font-mono text-slate-400">Route: /dashboard/transfer</p>
+                      </div>
+                    </div>
+                    <div className="bg-indigo-500/10 border border-indigo-500/20 px-3 py-1 rounded-full text-[10px] font-mono font-bold text-indigo-400">
+                      Step {transferStep} of 2
+                    </div>
                   </div>
 
-                  <div className="p-4 bg-white/40 dark:bg-slate-900/30 rounded-2xl border border-slate-150 dark:border-slate-800/40 flex items-center justify-between">
+                  {/* Wallet Balance Summary Card */}
+                  <div className="p-5 bg-gradient-to-r from-slate-900/90 to-indigo-950/80 border border-white/10 rounded-2xl flex items-center justify-between shadow-xl">
                     <div>
-                      <span className="text-[10px] font-mono text-slate-400 block uppercase">Wallet Balance</span>
-                      <span className="text-sm font-bold text-slate-800 dark:text-teal-400 font-mono mt-0.5 block">
-                        {nairaFormat(user?.balance || 0)}
+                      <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Available Balance</span>
+                      <span className="text-xl font-black text-teal-400 font-mono mt-0.5 block">
+                        {nairaFormat(user?.balance ?? 0)}
                       </span>
                     </div>
-                    <span className="text-[9px] font-mono text-slate-400">Limits: N100,000 daily</span>
+                    <div className="text-right">
+                      <span className="text-[9px] font-mono text-slate-400 block uppercase">Transfer Limits</span>
+                      <span className="text-xs font-bold text-slate-300 font-mono mt-0.5 block">Min ₦50 • Max ₦200,000</span>
+                    </div>
                   </div>
 
-                  <GlassCard className="p-5">
-                    <form onSubmit={handleBankTransfer} className="space-y-4">
-                      {/* Select Bank Dropdown */}
-                      <div>
-                        <label className="text-[10px] font-mono text-slate-400 block mb-1">Select Recipient Bank</label>
-                        <select
-                          id="transfer-select-bank"
-                          value={transferBank}
-                          onChange={(e) => {
-                            setTransferBank(e.target.value);
-                            setTransferError(null);
-                          }}
-                          className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400"
-                        >
-                          {SUPPORTED_BANKS.map((b) => (
-                            <option key={b} value={b}>
-                              {b}
-                            </option>
-                          ))}
-                        </select>
+                  {/* STEP 1: Account Information */}
+                  {transferStep === 1 && (
+                    <GlassCard className="p-6 space-y-5 border-white/10">
+                      <div className="border-b border-white/5 pb-3">
+                        <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                          <span className="h-6 w-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-mono font-bold">1</span>
+                          Step 1: Account Information
+                        </h3>
+                        <p className="text-[11px] text-slate-400 mt-1">Select recipient bank and enter account details manually.</p>
                       </div>
 
-                      {/* Account Number */}
-                      <div>
-                        <label className="text-[10px] font-mono text-slate-400 block mb-1">10-Digit Account Number</label>
-                        <div className="relative">
+                      <div className="space-y-4">
+                        {/* 1. Select Bank */}
+                        <div>
+                          <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold">1. Select Destination Bank</label>
+                          <select
+                            id="transfer-select-bank"
+                            value={transferBank}
+                            onChange={(e) => setTransferBank(e.target.value)}
+                            className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-1 focus:ring-indigo-400 font-sans"
+                          >
+                            {SUPPORTED_BANKS.map((b) => (
+                              <option key={b} value={b}>
+                                {b}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* 2. Account Number */}
+                        <div>
+                          <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold">2. Account Number (10 Digits)</label>
                           <input
                             id="input-transfer-acc"
                             type="text"
                             inputMode="numeric"
+                            maxLength={10}
                             placeholder="e.g. 8960723295"
                             required
                             value={transferAccNum}
@@ -5117,148 +5143,158 @@ export default function App() {
                                 setTransferAccNum(val);
                               }
                             }}
-                            className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono pr-10"
+                            className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white font-mono tracking-widest focus:outline-none focus:ring-1 focus:ring-indigo-400"
                           />
-                          {isVerifyingAccount && (
-                            <div className="absolute right-3 top-2.5 flex items-center">
-                              <div className="h-4 w-4 border-2 border-teal-400 border-t-transparent rounded-full animate-spin" />
-                            </div>
-                          )}
                         </div>
-                      </div>
 
-                      {/* Real-Time Bank Verification Status Indicator */}
-                      {isVerifyingAccount && (
-                        <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl flex items-center gap-2.5 text-xs text-indigo-600 dark:text-teal-400 font-medium animate-pulse">
-                          <div className="h-4 w-4 border-2 border-indigo-500 dark:border-teal-400 border-t-transparent rounded-full animate-spin shrink-0" />
-                          <span>Verifying account details with {transferBank}...</span>
+                        {/* 3. Account Name - MANUALLY ENTERED */}
+                        <div>
+                          <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold">3. Account Name (Manual Entry)</label>
+                          <input
+                            id="transfer-acc-name-manual"
+                            type="text"
+                            placeholder="Enter full name matching recipient account"
+                            required
+                            value={transferAccName}
+                            onChange={(e) => setTransferAccName(e.target.value)}
+                            className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-1 focus:ring-indigo-400 font-sans"
+                          />
                         </div>
-                      )}
-
-                      {transferVerified && transferAccName && !isVerifyingAccount && (
-                        <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/25 rounded-xl space-y-1 animate-[fadeIn_0.15s_ease-out]">
-                          <div className="flex justify-between items-center text-[10px] text-emerald-600 dark:text-emerald-400 font-mono font-bold">
-                            <span className="flex items-center gap-1">
-                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                              VERIFIED ACCOUNT HOLDER
-                            </span>
-                            <span className="bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 px-2 py-0.5 rounded text-[9px] uppercase font-bold">
-                              Verified ✓
-                            </span>
-                          </div>
-                          <div className="text-sm font-extrabold text-emerald-700 dark:text-emerald-300 tracking-wide font-mono uppercase">
-                            {transferAccName}
-                          </div>
-                        </div>
-                      )}
-
-                      {transferError && !isVerifyingAccount && transferAccNum.length === 10 && (
-                        <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-center gap-2 text-xs text-rose-600 dark:text-rose-400 font-medium">
-                          <AlertCircle className="h-4 w-4 text-rose-500 shrink-0" />
-                          <span>{transferError}</span>
-                        </div>
-                      )}
-
-                      {/* Amount */}
-                      <div>
-                        <label className="text-[10px] font-mono text-slate-400 block mb-1">Cashout Amount (₦)</label>
-                        <input
-                          id="input-transfer-amount"
-                          type="number"
-                          placeholder="Voucher amount limit matches"
-                          required
-                          value={transferAmount}
-                          onChange={(e) => setTransferAmount(e.target.value)}
-                          disabled={!transferVerified || isVerifyingAccount}
-                          className={`w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-mono ${(!transferVerified || isVerifyingAccount) ? 'opacity-40 cursor-not-allowed select-none' : ''}`}
-                        />
-                      </div>
-
-                      {/* WDV Code field */}
-                      <div className={(!transferVerified || isVerifyingAccount) ? 'opacity-40 pointer-events-none select-none' : ''}>
-                        {(user?.wdvVerified || user?.isWdvVerified) ? (
-                          <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-2.5">
-                            <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                            <div>
-                              <p className="font-bold">✓ Account WDV Verified</p>
-                              <p className="text-[9px] opacity-80 mt-0.5">Your master WDV voucher is active. No code required.</p>
-                            </div>
-                          </div>
-                        ) : (
-                          <div>
-                            <div className="flex items-center justify-between mb-1">
-                              <label className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-bold text-rose-500">Apply WDV Code (MANDATORY)</label>
-                              <button
-                                id="btn-goto-buy-wdv-transfer"
-                                type="button"
-                                onClick={() => changeScreen('buy_wdv')}
-                                disabled={!transferVerified || isVerifyingAccount}
-                                className="text-[9px] font-bold text-indigo-600 dark:text-teal-400 hover:underline inline-flex items-center gap-1"
-                              >
-                                Buy WDV code <ExternalLink className="h-2.5 w-2.5" />
-                              </button>
-                            </div>
-                            <input
-                              id="input-transfer-wdv"
-                              type="text"
-                              placeholder="Example: WDV-XXXX-XXXX-XXXX"
-                              value={transferWdvCode}
-                              onChange={(e) => setTransferWdvCode(e.target.value)}
-                              disabled={!transferVerified || isVerifyingAccount}
-                              className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-rose-500 font-mono tracking-widest uppercase"
-                            />
-                            {!transferWdvCode ? (
-                              <div className="mt-1.5 p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[10px] text-amber-600 dark:text-amber-400 leading-normal font-sans">
-                                WDV voucher is required. If you don't have one, tap{' '}
-                                <button
-                                  type="button"
-                                  onClick={() => changeScreen('buy_wdv')}
-                                  className="font-extrabold underline text-indigo-600 dark:text-teal-400"
-                                >
-                                  'Buy WDV Voucher'
-                                </button>.
-                              </div>
-                            ) : !isVoucherValid(transferWdvCode) ? (
-                              <div className="mt-1.5 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[10px] text-rose-600 dark:text-rose-400 font-medium font-sans">
-                                Invalid WDV voucher.
-                              </div>
-                            ) : (
-                              <div className="mt-1.5 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] text-emerald-600 dark:text-emerald-400 font-medium font-sans">
-                                ✓ WDV Voucher code format verified.
-                              </div>
-                            )}
-                          </div>
-                        )}
                       </div>
 
                       <button
-                        id="btn-submit-transfer"
-                        type="submit"
-                        disabled={
-                          !transferAccNum ||
-                          transferAccNum.length !== 10 ||
-                          !transferVerified ||
-                          !transferAccName ||
-                          !transferAmount ||
-                          parseInt(transferAmount) <= 0 ||
-                          (!(user?.wdvVerified || user?.isWdvVerified) && !isVoucherValid(transferWdvCode)) ||
-                          isSubmitting
-                        }
-                        className={`w-full text-xs font-bold uppercase tracking-widest py-3.5 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 text-white rounded-xl shadow-lg shadow-indigo-500/20 active:scale-95 transition-all mt-2 flex items-center justify-center gap-2 ${
-                          (!transferAccNum || transferAccNum.length !== 10 || !transferVerified || !transferAccName || !transferAmount || parseInt(transferAmount) <= 0 || (!(user?.wdvVerified || user?.isWdvVerified) && !isVoucherValid(transferWdvCode)) || isSubmitting) ? 'opacity-50 cursor-not-allowed' : ''
+                        id="btn-transfer-step1-continue"
+                        type="button"
+                        disabled={!transferBank || transferAccNum.length !== 10 || transferAccName.trim().length < 3}
+                        onClick={() => setTransferStep(2)}
+                        className={`w-full py-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer ${
+                          (!transferBank || transferAccNum.length !== 10 || transferAccName.trim().length < 3) ? 'opacity-40 cursor-not-allowed' : ''
                         }`}
                       >
-                        {isSubmitting ? (
-                          <>
-                            <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                            <span>Processing Securely...</span>
-                          </>
-                        ) : (
-                          'Submit Cashout'
-                        )}
+                        <span>Continue to Step 2</span>
+                        <ArrowRight className="h-4 w-4" />
                       </button>
-                    </form>
-                  </GlassCard>
+                    </GlassCard>
+                  )}
+
+                  {/* STEP 2: Amount & Voucher Authorization */}
+                  {transferStep === 2 && (
+                    <GlassCard className="p-6 space-y-5 border-white/10">
+                      <div className="border-b border-white/5 pb-3 flex items-center justify-between">
+                        <div>
+                          <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                            <span className="h-6 w-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-mono font-bold">2</span>
+                            Step 2: Amount & Authorization
+                          </h3>
+                          <p className="text-[11px] text-slate-400 mt-1">Specify transfer amount and enter WDV voucher code.</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setTransferStep(1)}
+                          className="text-[10px] font-mono text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <Edit3 className="h-3 w-3" /> Edit Details
+                        </button>
+                      </div>
+
+                      {/* Recipient Summary */}
+                      <div className="p-4 bg-slate-950/60 border border-white/10 rounded-2xl space-y-2 font-mono text-xs">
+                        <div className="flex justify-between text-slate-400 text-[10px]">
+                          <span>BANK: <strong className="text-white">{transferBank}</strong></span>
+                          <span>ACCOUNT: <strong className="text-white">{transferAccNum}</strong></span>
+                        </div>
+                        <div className="text-indigo-400 font-extrabold uppercase text-sm border-t border-white/5 pt-2">
+                          {transferAccName}
+                        </div>
+                      </div>
+
+                      <form onSubmit={handleBankTransfer} className="space-y-4">
+                        {/* Amount */}
+                        <div>
+                          <div className="flex justify-between items-center mb-1.5">
+                            <label className="text-[11px] font-mono text-slate-300 font-bold">Transfer Amount (₦)</label>
+                            <span className="text-[10px] font-mono text-slate-400">Min: ₦50 • Max: ₦200,000</span>
+                          </div>
+                          <input
+                            id="input-transfer-amount"
+                            type="number"
+                            min={50}
+                            max={200000}
+                            placeholder="Min ₦50 - Max ₦200,000"
+                            required
+                            value={transferAmount}
+                            onChange={(e) => setTransferAmount(e.target.value)}
+                            className="w-full text-sm bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                          />
+                          {transferAmount && (parseInt(transferAmount) < 50 || parseInt(transferAmount) > 200000) && (
+                            <p className="text-[10px] text-rose-400 font-mono mt-1">Amount must be between ₦50 and ₦200,000.</p>
+                          )}
+                        </div>
+
+                        {/* WDV Code field */}
+                        <div>
+                          {(user?.wdvVerified || user?.isWdvVerified) ? (
+                            <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-400 font-medium flex items-center gap-2.5">
+                              <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                              <div>
+                                <p className="font-bold">✓ Account WDV Verified</p>
+                                <p className="text-[9px] opacity-80 mt-0.5">Your master WDV voucher is active. No code required.</p>
+                              </div>
+                            </div>
+                          ) : (
+                            <div>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <label className="text-[11px] font-mono text-rose-400 font-bold uppercase tracking-wider">WDV Voucher Code (MANDATORY)</label>
+                                <button
+                                  id="btn-goto-buy-wdv-transfer"
+                                  type="button"
+                                  onClick={() => changeScreen('buy_wdv')}
+                                  className="text-[10px] font-bold text-indigo-400 hover:underline cursor-pointer flex items-center gap-1"
+                                >
+                                  Buy WDV Voucher <ExternalLink className="h-3 w-3" />
+                                </button>
+                              </div>
+                              <input
+                                id="input-transfer-wdv"
+                                type="text"
+                                placeholder="Example: WDV-XXXX-XXXX-XXXX"
+                                value={transferWdvCode}
+                                onChange={(e) => setTransferWdvCode(e.target.value)}
+                                className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white font-mono tracking-widest uppercase focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        <button
+                          id="btn-submit-transfer"
+                          type="submit"
+                          disabled={
+                            !transferAccNum ||
+                            transferAccNum.length !== 10 ||
+                            !transferAccName ||
+                            !transferAmount ||
+                            parseInt(transferAmount) < 50 ||
+                            parseInt(transferAmount) > 200000 ||
+                            (!transferWdvCode && !user?.wdvVerified && !user?.isWdvVerified) ||
+                            isSubmitting
+                          }
+                          className={`w-full py-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer ${
+                            (!transferAccNum || transferAccNum.length !== 10 || !transferAccName || !transferAmount || parseInt(transferAmount) < 50 || parseInt(transferAmount) > 200000 || (!transferWdvCode && !user?.wdvVerified && !user?.isWdvVerified) || isSubmitting) ? 'opacity-50 cursor-not-allowed' : ''
+                          }`}
+                        >
+                          {isSubmitting ? (
+                            <>
+                              <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              <span>Processing Transfer...</span>
+                            </>
+                          ) : (
+                            'Submit Bank Transfer'
+                          )}
+                        </button>
+                      </form>
+                    </GlassCard>
+                  )}
                 </div>
               )}
 
@@ -5463,13 +5499,19 @@ export default function App() {
             </div>
 
             {/* Fixed Bottom Navigation Bar (Never Scroll) */}
-            {currentScreen === 'dashboard' && (
+            {(currentScreen === 'dashboard' || currentScreen === 'buy_data') && (
               <div className="shrink-0 z-30 w-full bg-[#0c0c14] border-t border-white/5 pb-safe">
                 <BottomNav
                   activeTab={activeTab}
+                  currentScreen={currentScreen}
                   onTabChange={(tab) => {
-                    setActiveTab(tab);
-                    setCurrentScreen('dashboard');
+                    if (tab === 'data') {
+                      setCurrentScreen('buy_data');
+                      setActiveTab('data');
+                    } else {
+                      setActiveTab(tab);
+                      setCurrentScreen('dashboard');
+                    }
                   }}
                   onFabClick={() => setIsFabMenuOpen(true)}
                 />

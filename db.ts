@@ -30,6 +30,8 @@ interface JsonData {
   admins: any[];
   withdraw_requests: any[];
   wdv_payments: any[];
+  ai_chat_logs: any[];
+  ai_custom_faqs: any[];
 }
 
 // -------------------- JSON DATABASE ENGINE FALLBACK --------------------
@@ -110,7 +112,9 @@ function getJsonDb(): JsonData {
         }
       ],
       withdraw_requests: [],
-      wdv_payments: []
+      wdv_payments: [],
+      ai_chat_logs: [],
+      ai_custom_faqs: []
     };
     fs.writeFileSync(JSON_FILE, JSON.stringify(initial, null, 2));
     return initial;
@@ -145,19 +149,41 @@ function getJsonDb(): JsonData {
         loginhistory: safeStringifyJsonField(u.loginhistory || u.loginHistory),
         notifications: safeStringifyJsonField(u.notifications),
         transactions: safeStringifyJsonField(u.transactions),
+        wdvverified: u.wdvVerified || u.wdvverified ? 1 : 0,
         iswdvverified: u.isWdvVerified || u.iswdvverified ? 1 : 0,
-        welcomerewardshown: u.welcomeRewardShown || u.welcomerewardshown ? 1 : 0
+        welcomerewardshown: u.welcomeRewardShown || u.welcomerewardshown ? 1 : 0,
+        giftday: Number(u.giftDay ?? u.giftday ?? 0),
+        giftactive: u.giftActive !== 0 && u.giftactive !== 0 ? 1 : 0,
+        lastgiftcredittime: u.lastGiftCreditTime || u.lastgiftcredittime || '',
+        giftexpiresat: u.giftExpiresAt || u.giftexpiresat || ''
       })),
-      vouchers: (parsed.vouchers || []).map((v: any) => ({
-        code: v.code,
-        amount: Number(v.amount ?? 0),
-        status: v.status || 'unused',
-        usedby: v.usedBy || v.usedby || '',
-        usedat: v.usedAt || v.usedat || ''
-      })),
+      vouchers: (parsed.vouchers || []).map((v: any) => {
+        const c = v.code || v.voucherCode || v.vouchercode || '';
+        const idVal = v.id || c || `v-${Date.now()}`;
+        return {
+          id: idVal,
+          vouchercode: c,
+          code: c,
+          voucherCode: c,
+          amount: Number(v.amount ?? 6500),
+          status: v.status || 'unused',
+          usedby: v.usedBy || v.usedby || '',
+          usedBy: v.usedBy || v.usedby || '',
+          usedat: v.usedAt || v.usedat || '',
+          usedAt: v.usedAt || v.usedat || '',
+          generatedat: v.generatedAt || v.generatedat || new Date().toISOString(),
+          generatedAt: v.generatedAt || v.generatedat || new Date().toISOString(),
+          withdrawalid: v.withdrawalId || v.withdrawalid || '',
+          withdrawalId: v.withdrawalId || v.withdrawalid || '',
+          purchasedby: v.purchasedBy || v.purchasedby || 'admin',
+          purchasedBy: v.purchasedBy || v.purchasedby || 'admin',
+          redeemedby: safeStringifyJsonField(v.redeemedBy || v.redeemedby),
+          redeemedBy: safeStringifyJsonField(v.redeemedBy || v.redeemedby)
+        };
+      }),
       password_resets: (parsed.password_resets || parsed.passwordResets || []).map((r: any) => ({
         id: r.id || r.token || '',
-        emailorphone: r.emailorphone || r.email || '',
+        emailorphone: (r.emailorphone || r.email || '').toLowerCase(),
         otp: r.otp || '',
         expiresat: Number(r.expiresAt || r.expiresat || 0),
         used: r.used ? 1 : 0,
@@ -177,36 +203,57 @@ function getJsonDb(): JsonData {
       withdraw_requests: (parsed.withdraw_requests || parsed.withdrawRequests || []).map((w: any) => ({
         id: w.id || '',
         userId: w.userId || w.userid || '',
+        userid: w.userId || w.userid || '',
         email: w.email || '',
         phone: w.phone || '',
         amount: Number(w.amount || 0),
         bankName: w.bankName || w.bankname || '',
+        bankname: w.bankName || w.bankname || '',
         accountNumber: w.accountNumber || w.accountnumber || '',
+        accountnumber: w.accountNumber || w.accountnumber || '',
         accountName: w.accountName || w.accountname || '',
+        accountname: w.accountName || w.accountname || '',
         reference: w.reference || '',
-        status: w.status || 'Pending',
+        status: w.status || 'pending',
         timestamp: w.timestamp || w.created_at || new Date().toISOString(),
         created_at: w.created_at || w.timestamp || new Date().toISOString(),
-        adminNotes: w.adminNotes || w.adminnotes || '',
+        notes: w.notes || w.adminNotes || w.adminnotes || '',
+        vouchercode: w.voucherCode || w.vouchercode || '',
+        voucherCode: w.voucherCode || w.vouchercode || '',
         posSlipPath: w.posSlipPath || w.posslippath || '',
-        posSlipUploadedAt: w.posSlipUploadedAt || w.posslipuploadedat || ''
+        posSlippath: w.posSlipPath || w.posslippath || '',
+        posSlipUploadedAt: w.posSlipUploadedAt || w.posslipuploadedat || '',
+        posSlipuploadedAt: w.posSlipUploadedAt || w.posslipuploadedat || '',
+        posSlipUploadedBy: w.posSlipUploadedBy || w.posslipuploadedby || '',
+        posSlipuploadedBy: w.posSlipUploadedBy || w.posslipuploadedby || ''
       })),
       wdv_payments: (parsed.wdv_payments || parsed.wdvPayments || []).map((p: any) => ({
         id: p.id || '',
         reference: p.reference || '',
         userEmail: (p.userEmail || p.useremail || '').toLowerCase(),
+        useremail: (p.userEmail || p.useremail || '').toLowerCase(),
         amount: Number(p.amount || 0),
         bankName: p.bankName || p.bankname || '',
+        bankname: p.bankName || p.bankname || '',
         accountNumber: p.accountNumber || p.accountnumber || '',
+        accountnumber: p.accountNumber || p.accountnumber || '',
         accountName: p.accountName || p.accountname || '',
+        accountname: p.accountName || p.accountname || '',
         status: p.status || 'pending',
         createdAt: p.createdAt || p.createdat || new Date().toISOString(),
+        createdat: p.createdAt || p.createdat || new Date().toISOString(),
         expiresAt: p.expiresAt || p.expiresat || '',
+        expiresat: p.expiresAt || p.expiresat || '',
         paidAt: p.paidAt || p.paidat || '',
+        paidat: p.paidAt || p.paidat || '',
         voucherCode: p.voucherCode || p.vouchercode || '',
+        vouchercode: p.voucherCode || p.vouchercode || '',
         provider: p.provider || 'manual_transfer',
-        webhookData: p.webhookData || p.webhookdata || ''
-      }))
+        webhookData: p.webhookData || p.webhookdata || '',
+        webhookdata: p.webhookData || p.webhookdata || ''
+      })),
+      ai_chat_logs: parsed.ai_chat_logs || [],
+      ai_custom_faqs: parsed.ai_custom_faqs || []
     };
 
     // Migrations
@@ -253,7 +300,9 @@ function getJsonDb(): JsonData {
       logs: [],
       admins: [],
       withdraw_requests: [],
-      wdv_payments: []
+      wdv_payments: [],
+      ai_chat_logs: [],
+      ai_custom_faqs: []
     };
   }
 }
@@ -264,6 +313,12 @@ function saveJsonDb(data: JsonData) {
   } catch (err) {
     console.error('Error saving JSON DB:', err);
   }
+}
+
+// Helper to normalize voucher codes for lookup
+function normVCode(codeStr: string | undefined): string {
+  if (!codeStr) return '';
+  return codeStr.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
 // -------------------- DATABASE INITIALIZATION --------------------
@@ -322,7 +377,8 @@ export async function initDb() {
       giftDay INTEGER DEFAULT 0,
       giftActive INTEGER DEFAULT 1,
       lastGiftCreditTime TEXT,
-      giftExpiresAt TEXT
+      giftExpiresAt TEXT,
+      lastActivityTime TEXT
     )
   `);
 
@@ -346,6 +402,9 @@ export async function initDb() {
   } catch (e) {}
   try {
     await execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS giftExpiresAt TEXT`);
+  } catch (e) {}
+  try {
+    await execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS lastActivityTime TEXT`);
   } catch (e) {}
   try {
     await execute(`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS redeemedBy TEXT DEFAULT '[]'`);
@@ -531,75 +590,51 @@ export async function initDb() {
 
   // Run ALTER TABLE migrations for existing databases
   try {
-    await execute(`ALTER TABLE withdraw_requests ADD COLUMN email TEXT`);
+    await execute(`ALTER TABLE withdraw_requests ADD COLUMN IF NOT EXISTS email TEXT`);
   } catch (e) {}
   try {
-    await execute(`ALTER TABLE withdraw_requests ADD COLUMN accountName TEXT`);
+    await execute(`ALTER TABLE withdraw_requests ADD COLUMN IF NOT EXISTS accountName TEXT`);
   } catch (e) {}
   try {
-    await execute(`ALTER TABLE withdraw_requests ADD COLUMN reference TEXT`);
+    await execute(`ALTER TABLE withdraw_requests ADD COLUMN IF NOT EXISTS reference TEXT`);
   } catch (e) {}
   try {
-    await execute(`ALTER TABLE withdraw_requests ADD COLUMN voucherCode TEXT`);
+    await execute(`ALTER TABLE withdraw_requests ADD COLUMN IF NOT EXISTS voucherCode TEXT`);
   } catch (e) {}
   try {
-    await execute(`ALTER TABLE withdraw_requests ADD COLUMN notes TEXT`);
+    await execute(`ALTER TABLE withdraw_requests ADD COLUMN IF NOT EXISTS notes TEXT`);
   } catch (e) {}
   try {
-    await execute(`ALTER TABLE withdraw_requests ADD COLUMN posSlipPath TEXT`);
+    await execute(`ALTER TABLE withdraw_requests ADD COLUMN IF NOT EXISTS posSlipPath TEXT`);
   } catch (e) {}
   try {
-    await execute(`ALTER TABLE withdraw_requests ADD COLUMN posSlipUploadedAt TEXT`);
+    await execute(`ALTER TABLE withdraw_requests ADD COLUMN IF NOT EXISTS posSlipUploadedAt TEXT`);
   } catch (e) {}
   try {
-    await execute(`ALTER TABLE withdraw_requests ADD COLUMN posSlipUploadedBy TEXT`);
+    await execute(`ALTER TABLE withdraw_requests ADD COLUMN IF NOT EXISTS posSlipUploadedBy TEXT`);
   } catch (e) {}
 
   try {
-    await execute(`ALTER TABLE users ADD COLUMN wdvVerified INTEGER DEFAULT 0`);
-  } catch (e) {
-    // Column already exists
-  }
+    await execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS wdvVerified INTEGER DEFAULT 0`);
+  } catch (e) {}
   try {
-    await execute(`ALTER TABLE vouchers ADD COLUMN redeemedBy TEXT DEFAULT '[]'`);
-  } catch (e) {
-    // Column already exists
-  }
+    await execute(`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS redeemedBy TEXT DEFAULT '[]'`);
+  } catch (e) {}
   try {
-    await execute(`ALTER TABLE vouchers ADD COLUMN id TEXT`);
-  } catch (e) {
-    // Column already exists
-  }
+    await execute(`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS id TEXT`);
+  } catch (e) {}
   try {
-    await execute(`ALTER TABLE vouchers ADD COLUMN voucherCode TEXT`);
-  } catch (e) {
-    // Column already exists
-  }
+    await execute(`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS voucherCode TEXT`);
+  } catch (e) {}
   try {
-    await execute(`ALTER TABLE vouchers ADD COLUMN generatedAt TEXT`);
-  } catch (e) {
-    // Column already exists
-  }
+    await execute(`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS generatedAt TEXT`);
+  } catch (e) {}
   try {
-    await execute(`ALTER TABLE vouchers ADD COLUMN withdrawalId TEXT`);
-  } catch (e) {
-    // Column already exists
-  }
+    await execute(`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS withdrawalId TEXT`);
+  } catch (e) {}
   try {
-    await execute(`ALTER TABLE vouchers ADD COLUMN purchasedBy TEXT`);
-  } catch (e) {
-    // Column already exists
-  }
-  try {
-    await execute(`UPDATE vouchers SET id = code WHERE id IS NULL`);
-  } catch (e) {
-    // Update failed
-  }
-  try {
-    await execute(`UPDATE vouchers SET voucherCode = code WHERE voucherCode IS NULL`);
-  } catch (e) {
-    // Update failed
-  }
+    await execute(`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS purchasedBy TEXT`);
+  } catch (e) {}
 
   await execute(`
     CREATE TABLE IF NOT EXISTS password_resets (
@@ -658,8 +693,6 @@ export async function initDb() {
     );
     console.log('[SwiftPay DB] Default user seeded.');
   }
-
-  // Seed vouchers if empty (no hardcoded vouchers should be seeded)
 
   // Seed default admin settings if not present
   const settingsCount = await getRow(`SELECT COUNT(*) as count FROM admin_settings`);
@@ -726,7 +759,7 @@ export function execute(sql: string, params: any[] = []): Promise<any> {
         resolve(res);
       });
     } else {
-      // In-memory pure JS simulator for development mode
+      // In-memory pure JS simulator for JSON mode
       try {
         const db = getJsonDb();
         const sqlUpper = sql.toUpperCase();
@@ -755,11 +788,11 @@ export function execute(sql: string, params: any[] = []): Promise<any> {
             isfrozen: Number(params[14] ?? 0),
             registrationdate: params[15] || new Date().toISOString(),
             accountstatus: params[16] || 'active',
-            beneficiaries: params[17] || '[]',
-            phonebeneficiaries: params[18] || '[]',
-            loginhistory: params[19] || '[]',
-            notifications: params[20] || '[]',
-            transactions: params[21] || '[]',
+            beneficiaries: safeStringifyJsonField(params[17]),
+            phonebeneficiaries: safeStringifyJsonField(params[18]),
+            loginhistory: safeStringifyJsonField(params[19]),
+            notifications: safeStringifyJsonField(params[20]),
+            transactions: safeStringifyJsonField(params[21]),
             wdvverified: Number(params[22] ?? 0),
             iswdvverified: Number(params[23] ?? 0),
             welcomerewardshown: Number(params[24] ?? 0),
@@ -770,39 +803,141 @@ export function execute(sql: string, params: any[] = []): Promise<any> {
           };
           db.users = db.users.filter(x => x.email !== u.email);
           db.users.push(u);
+        } else if (sqlUpper.includes('UPDATE USERS')) {
+          const emailParam = params[params.length - 1];
+          if (emailParam) {
+            const lowerEmail = String(emailParam).toLowerCase();
+            const u = db.users.find(x => x.email === lowerEmail);
+            if (u) {
+              if (sqlUpper.includes('BALANCE =')) {
+                u.balance = Number(params[0]);
+              }
+            }
+          }
+        } else if (sqlUpper.includes('DELETE FROM USERS')) {
+          const email = (params[0] || '').toLowerCase();
+          db.users = db.users.filter(u => u.email !== email);
         } else if (sqlUpper.includes('INSERT INTO VOUCHERS')) {
-          const v = {
-            code: params[0],
-            amount: Number(params[1] ?? 0),
-            status: params[2] || 'unused',
-            usedby: params[3] || '',
-            usedat: params[4] || ''
+          // Flexible mapping for vouchers insert
+          let vId = '';
+          let vCode = '';
+          let amt = 6500;
+          let st = 'unused';
+          let uBy = '';
+          let uAt = '';
+          let genAt = new Date().toISOString();
+          let wId = '';
+          let pBy = 'admin';
+          let rBy = '[]';
+
+          if (params.length >= 11) {
+            vId = params[0];
+            vCode = params[1] || params[2];
+            amt = Number(params[3] ?? 6500);
+            st = params[4] || 'unused';
+            uBy = params[5] || '';
+            uAt = params[6] || '';
+            genAt = params[7] || new Date().toISOString();
+            wId = params[8] || '';
+            pBy = params[9] || 'admin';
+            rBy = safeStringifyJsonField(params[10]);
+          } else {
+            vCode = params[0];
+            amt = Number(params[1] ?? 6500);
+            st = params[2] || 'unused';
+            uBy = params[3] || '';
+            uAt = params[4] || '';
+            rBy = safeStringifyJsonField(params[5]);
+            vId = `v-${normVCode(vCode) || Date.now()}`;
+          }
+
+          const voucherObj = {
+            id: vId || `v-${normVCode(vCode)}`,
+            vouchercode: vCode,
+            code: vCode,
+            voucherCode: vCode,
+            amount: amt,
+            status: st,
+            usedby: uBy,
+            usedBy: uBy,
+            usedat: uAt,
+            usedAt: uAt,
+            generatedat: genAt,
+            generatedAt: genAt,
+            withdrawalid: wId,
+            withdrawalId: wId,
+            purchasedby: pBy,
+            purchasedBy: pBy,
+            redeemedby: rBy,
+            redeemedBy: rBy
           };
-          db.vouchers = db.vouchers.filter(x => x.code !== v.code);
-          db.vouchers.push(v);
+
+          db.vouchers = db.vouchers.filter(x => x.id !== voucherObj.id && normVCode(x.code) !== normVCode(vCode));
+          db.vouchers.push(voucherObj);
+        } else if (sqlUpper.includes('UPDATE VOUCHERS')) {
+          // Match voucher by ID or code at end of params
+          const target = params[params.length - 1];
+          const normTarget = normVCode(String(target));
+
+          const v = db.vouchers.find(x => x.id === target || normVCode(x.code) === normTarget || normVCode(x.voucherCode) === normTarget);
+          if (v) {
+            if (sqlUpper.includes('STATUS =') || sqlUpper.includes('STATUS=')) {
+              v.status = params[0];
+            }
+            if (sqlUpper.includes('USEDAT =') || sqlUpper.includes('USEDAT=')) {
+              v.usedat = params[1] || new Date().toISOString();
+              v.usedAt = v.usedat;
+            }
+            if (sqlUpper.includes('USEDBY =') || sqlUpper.includes('USEDBY=')) {
+              v.usedby = params[2] || '';
+              v.usedBy = v.usedby;
+            }
+            if (sqlUpper.includes('WITHDRAWALID =') || sqlUpper.includes('WITHDRAWALID=')) {
+              v.withdrawalid = params[3] || '';
+              v.withdrawalId = v.withdrawalid;
+            }
+            if (sqlUpper.includes('REDEEMEDBY =') || sqlUpper.includes('REDEEMEDBY=')) {
+              const rVal = params[3] || params[2] || '[]';
+              v.redeemedby = safeStringifyJsonField(rVal);
+              v.redeemedBy = v.redeemedby;
+            }
+          }
+        } else if (sqlUpper.includes('DELETE FROM VOUCHERS')) {
+          const target = params[0];
+          const normTarget = normVCode(String(target));
+          db.vouchers = db.vouchers.filter(v => v.id !== target && normVCode(v.code) !== normTarget && normVCode(v.voucherCode) !== normTarget);
         } else if (sqlUpper.includes('INSERT INTO WDV_PAYMENTS')) {
           const p = {
             id: params[0],
             reference: params[1],
             useremail: (params[2] || '').toLowerCase(),
+            userEmail: (params[2] || '').toLowerCase(),
             amount: Number(params[3] ?? 0),
             bankname: params[4],
+            bankName: params[4],
             accountnumber: params[5],
+            accountNumber: params[5],
             accountname: params[6],
+            accountName: params[6],
             status: params[7] || 'pending',
             createdat: params[8] || new Date().toISOString(),
+            createdAt: params[8] || new Date().toISOString(),
             expiresat: params[9] || '',
+            expiresAt: params[9] || '',
             paidat: params[10] || '',
+            paidAt: params[10] || '',
             vouchercode: params[11] || '',
+            voucherCode: params[11] || '',
             provider: params[12] || 'manual_transfer',
-            webhookdata: params[13] || ''
+            webhookdata: params[13] || '',
+            webhookData: params[13] || ''
           };
           db.wdv_payments = db.wdv_payments || [];
           db.wdv_payments = db.wdv_payments.filter((x: any) => x.reference !== p.reference && x.id !== p.id);
           db.wdv_payments.push(p);
         } else if (sqlUpper.includes('UPDATE WDV_PAYMENTS')) {
           db.wdv_payments = db.wdv_payments || [];
-          const refParam = params[params.length - 1]; // reference is usually last param
+          const refParam = params[params.length - 1];
           const p = db.wdv_payments.find((x: any) => x.reference === refParam || x.id === refParam);
           if (p) {
             if (sqlUpper.includes('STATUS =') || sqlUpper.includes('STATUS=')) {
@@ -810,37 +945,48 @@ export function execute(sql: string, params: any[] = []): Promise<any> {
             }
             if (sqlUpper.includes('PAIDAT =') || sqlUpper.includes('PAIDAT=')) {
               p.paidat = params[1] || new Date().toISOString();
+              p.paidAt = p.paidat;
             }
             if (sqlUpper.includes('VOUCHERCODE =') || sqlUpper.includes('VOUCHERCODE=')) {
               p.vouchercode = params[2] || params[1] || '';
+              p.voucherCode = p.vouchercode;
             }
           }
         } else if (sqlUpper.includes('INSERT INTO WITHDRAW_REQUESTS')) {
           const w = {
             id: params[0],
             userid: params[1],
+            userId: params[1],
             email: params[2],
             amount: Number(params[3] ?? 0),
             bankname: params[4],
+            bankName: params[4],
             accountnumber: params[5],
+            accountNumber: params[5],
             accountname: params[6],
+            accountName: params[6],
             status: params[7] || 'pending',
             timestamp: params[8] || new Date().toISOString(),
+            created_at: params[8] || new Date().toISOString(),
             reference: params[9],
             vouchercode: params[10] || '',
+            voucherCode: params[10] || '',
             notes: params[11] || '',
             posSlippath: params[12] || '',
+            posSlipPath: params[12] || '',
             posSlipuploadedAt: params[13] || '',
-            posSlipuploadedBy: params[14] || ''
+            posSlipUploadedAt: params[13] || '',
+            posSlipuploadedBy: params[14] || '',
+            posSlipUploadedBy: params[14] || ''
           };
           db.withdraw_requests = db.withdraw_requests || [];
           db.withdraw_requests = db.withdraw_requests.filter((x: any) => x.id !== w.id);
           db.withdraw_requests.push(w);
         } else if (sqlUpper.includes('UPDATE WITHDRAW_REQUESTS')) {
           db.withdraw_requests = db.withdraw_requests || [];
-          const idParam = params.find(p => typeof p === 'string' && p.startsWith('tx-'));
-          if (idParam) {
-            const req = db.withdraw_requests.find((x: any) => x.id === idParam);
+          const targetId = params[params.length - 1];
+          if (targetId) {
+            const req = db.withdraw_requests.find((x: any) => x.id === targetId);
             if (req) {
               if (sqlUpper.includes('STATUS =') || sqlUpper.includes('STATUS=')) {
                 if (sqlUpper.includes('STATUS =') && sqlUpper.includes('NOTES =')) {
@@ -857,8 +1003,11 @@ export function execute(sql: string, params: any[] = []): Promise<any> {
               }
               if (sqlUpper.includes('POSSLIPPATH =') || sqlUpper.includes('POSSLIPPATH=')) {
                 req.posSlippath = params[0];
+                req.posSlipPath = params[0];
                 req.posSlipuploadedAt = params[1];
+                req.posSlipUploadedAt = params[1];
                 req.posSlipuploadedBy = params[2];
+                req.posSlipUploadedBy = params[2];
               }
             }
           }
@@ -875,6 +1024,11 @@ export function execute(sql: string, params: any[] = []): Promise<any> {
           db.password_resets.push(r);
         } else if (sqlUpper.includes('INSERT INTO ADMIN_SETTINGS')) {
           db.admin_settings[params[0]] = String(params[1] ?? '');
+        } else if (sqlUpper.includes('DELETE FROM ADMIN_SETTINGS')) {
+          const k = params[0];
+          if (k) {
+            delete db.admin_settings[k];
+          }
         } else if (sqlUpper.includes('INSERT INTO LOGS')) {
           const log = {
             id: params[0],
@@ -886,6 +1040,29 @@ export function execute(sql: string, params: any[] = []): Promise<any> {
           if (db.logs.length > 500) {
             db.logs.pop();
           }
+        } else if (sqlUpper.includes('INSERT INTO AI_CHAT_LOGS')) {
+          db.ai_chat_logs = db.ai_chat_logs || [];
+          db.ai_chat_logs.unshift({
+            id: params[0],
+            session_id: params[1],
+            user_email: params[2],
+            user_message: params[3],
+            ai_response: params[4],
+            escalated_to_whatsapp: params[5],
+            is_unanswered: params[6],
+            timestamp: params[7]
+          });
+        } else if (sqlUpper.includes('INSERT INTO AI_CUSTOM_FAQS')) {
+          db.ai_custom_faqs = db.ai_custom_faqs || [];
+          db.ai_custom_faqs.push({
+            id: params[0],
+            question: params[1],
+            answer: params[2],
+            created_at: params[3]
+          });
+        } else if (sqlUpper.includes('DELETE FROM AI_CUSTOM_FAQS')) {
+          db.ai_custom_faqs = db.ai_custom_faqs || [];
+          db.ai_custom_faqs = db.ai_custom_faqs.filter((f: any) => f.id !== params[0]);
         }
         
         saveJsonDb(db);
@@ -912,41 +1089,49 @@ export function getRow(sql: string, params: any[] = []): Promise<any> {
         const db = getJsonDb();
         const sqlUpper = sql.toUpperCase();
 
-        if (sqlUpper.includes('SELECT COUNT(*) AS COUNT FROM USERS')) {
+        if (sqlUpper.includes('SELECT COUNT(*) AS COUNT FROM USERS') || sqlUpper.includes('COUNT(*) AS COUNT FROM USERS')) {
           return resolve({ count: db.users.length });
         }
-        if (sqlUpper.includes('SELECT COUNT(*) AS COUNT FROM VOUCHERS')) {
+        if (sqlUpper.includes('SELECT COUNT(*) AS COUNT FROM VOUCHERS') || sqlUpper.includes('COUNT(*) AS COUNT FROM VOUCHERS')) {
           return resolve({ count: db.vouchers.length });
         }
-        if (sqlUpper.includes('SELECT COUNT(*) AS COUNT FROM ADMIN_SETTINGS')) {
+        if (sqlUpper.includes('SELECT COUNT(*) AS COUNT FROM ADMIN_SETTINGS') || sqlUpper.includes('COUNT(*) AS COUNT FROM ADMIN_SETTINGS')) {
           return resolve({ count: Object.keys(db.admin_settings).length });
         }
-        if (sqlUpper.includes('FROM ADMINS WHERE EMAIL')) {
+        if (sqlUpper.includes('FROM ADMINS')) {
           const email = (params[0] || '').toLowerCase();
           const row = db.admins.find(a => a.email === email);
           return resolve(row || null);
         }
-        if (sqlUpper.includes('FROM USERS WHERE EMAIL')) {
-          const email = (params[0] || '').toLowerCase();
-          const row = db.users.find(u => u.email === email);
+        if (sqlUpper.includes('FROM USERS')) {
+          const target = (params[0] || '').toLowerCase();
+          const row = db.users.find(u => u.email === target || u.phone === target);
           return resolve(row || null);
         }
-        if (sqlUpper.includes('FROM VOUCHERS WHERE CODE')) {
-          const code = params[0] || '';
-          const row = db.vouchers.find(v => v.code === code);
+        if (sqlUpper.includes('FROM VOUCHERS')) {
+          const rawCode = params[0] || params[1] || '';
+          const normCode = normVCode(String(rawCode));
+          const row = db.vouchers.find(v => v.id === rawCode || normVCode(v.code) === normCode || normVCode(v.voucherCode) === normCode);
           return resolve(row || null);
         }
-        if (sqlUpper.includes('FROM WITHDRAW_REQUESTS WHERE ID')) {
+        if (sqlUpper.includes('FROM WITHDRAW_REQUESTS')) {
           db.withdraw_requests = db.withdraw_requests || [];
           const idVal = params[0];
           const row = db.withdraw_requests.find((w: any) => w.id === idVal);
           return resolve(row || null);
         }
-        if (sqlUpper.includes('FROM WDV_PAYMENTS WHERE REFERENCE')) {
+        if (sqlUpper.includes('FROM WDV_PAYMENTS')) {
           db.wdv_payments = db.wdv_payments || [];
           const refVal = params[0];
           const row = db.wdv_payments.find((p: any) => p.reference === refVal || p.id === refVal);
           return resolve(row || null);
+        }
+        if (sqlUpper.includes('FROM ADMIN_SETTINGS')) {
+          const keyVal = params[0];
+          if (keyVal && db.admin_settings[keyVal] !== undefined) {
+            return resolve({ key: keyVal, value: db.admin_settings[keyVal] });
+          }
+          return resolve(null);
         }
         
         resolve(null);
@@ -996,6 +1181,14 @@ export function getAllRows(sql: string, params: any[] = []): Promise<any[]> {
           db.wdv_payments = db.wdv_payments || [];
           return resolve(db.wdv_payments);
         }
+        if (sqlUpper.includes('FROM AI_CHAT_LOGS')) {
+          db.ai_chat_logs = db.ai_chat_logs || [];
+          return resolve(db.ai_chat_logs);
+        }
+        if (sqlUpper.includes('FROM AI_CUSTOM_FAQS')) {
+          db.ai_custom_faqs = db.ai_custom_faqs || [];
+          return resolve(db.ai_custom_faqs);
+        }
 
         resolve([]);
       } catch (err) {
@@ -1004,3 +1197,4 @@ export function getAllRows(sql: string, params: any[] = []): Promise<any[]> {
     }
   });
 }
+

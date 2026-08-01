@@ -3,11 +3,12 @@ import { Wallet, Users, Plus, Smartphone, User } from 'lucide-react';
 
 interface BottomNavProps {
   activeTab: string;
+  currentScreen?: string;
   onTabChange: (tab: string) => void;
   onFabClick: () => void;
 }
 
-export default function BottomNav({ activeTab, onTabChange, onFabClick }: BottomNavProps) {
+export default function BottomNav({ activeTab, currentScreen, onTabChange, onFabClick }: BottomNavProps) {
   const tabs = [
     { id: 'wallet', label: 'Wallet', icon: Wallet },
     { id: 'social', label: 'Social', icon: Users },
@@ -39,7 +40,9 @@ export default function BottomNav({ activeTab, onTabChange, onFabClick }: Bottom
           }
 
           const Icon = tab.icon!;
-          const isActive = activeTab === tab.id;
+          const isActive = tab.id === 'data' 
+            ? (activeTab === 'data' || currentScreen === 'buy_data')
+            : (activeTab === tab.id && (currentScreen === 'dashboard' || !currentScreen));
 
           return (
             <button

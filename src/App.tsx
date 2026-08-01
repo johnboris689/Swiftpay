@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import jsPDF from 'jspdf';
 import {
   Bell,
   Menu,
@@ -41,7 +42,8 @@ import {
   Wallet,
   Download,
   Fingerprint,
-  Bot
+  Bot,
+  RefreshCw
 } from 'lucide-react';
 
 import { registerDeviceBiometric, loginWithBiometric, isWebAuthnSupported } from './lib/webauthn';
@@ -1768,45 +1770,6 @@ export default function App() {
     return () => clearInterval(pollInterval);
   }, [currentScreen, activeWdvPayment]);
 
-  // Simulate Payment Confirmation (for testing or immediate verification)
-  const handleSimulatePaystackPayment = async () => {
-    if (!activeWdvPayment?.reference) return;
-    setIsVerifyingWdv(true);
-    try {
-      const token = localStorage.getItem('swiftpay_auth_token');
-      const res = await fetch('/api/paystack/simulate-payment', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({ reference: activeWdvPayment.reference })
-      });
-      const data = await res.json();
-      if (res.ok && data.success && data.data?.voucherCode) {
-        const vCode = data.data.voucherCode;
-        const newVoucher: WdvCode = {
-          id: `v-${Date.now()}`,
-          code: vCode,
-          voucherCode: vCode,
-          amount: 6500,
-          status: 'unused',
-          generatedAt: new Date().toISOString()
-        };
-        setGeneratedWdv(newVoucher);
-        setVouchers(prev => [newVoucher, ...prev]);
-        showToast('Payment Verified! WDV Voucher Code Issued.', 'success');
-        setCurrentScreen('wdv_success');
-      } else {
-        showToast(data.error || 'Failed to verify payment', 'error');
-      }
-    } catch (err) {
-      showToast('Network error verifying payment', 'error');
-    } finally {
-      setIsVerifyingWdv(false);
-    }
-  };
-
   // Generate and Download PDF Receipt for WDV Voucher
   const handleDownloadWdvPdfReceipt = () => {
     if (!generatedWdv) return;
@@ -1924,43 +1887,6 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, [currentScreen]);
-
-  // "I Have Made This Transfer" -> Redirects to configured WhatsApp support with pre-filled transfer details
-  const handleConfirmBankTransfer = () => {
-    const userName = user?.fullName || wdvFormName || 'Client User';
-    const userEmail = user?.email || wdvFormEmail || 'user@example.com';
-    const priceStr = nairaFormat(wdvConfig.voucherPrice || Number(buyWdvAmount) || 6500);
-    const refNum = `WDV-${Date.now().toString().slice(-6)}`;
-
-    const text = `Hello Admin, I have made a manual bank transfer for WDV Voucher.\n\nUser Name: ${userName}\nEmail: ${userEmail}\nAmount Paid: ${priceStr}\nBank Name: ${wdvConfig.bankName}\nAccount Number: ${wdvConfig.accountNumber}\nAccount Name: ${wdvConfig.accountName}\nReference: ${refNum}\n\nPlease confirm my payment and issue my WDV Voucher code. Thank you!`;
-
-    let waBase = wdvConfig.whatsappLink || 'https://wa.me/2349162845073';
-    if (!waBase.startsWith('http')) {
-      const cleanNum = waBase.replace(/\D/g, '');
-      waBase = `https://wa.me/${cleanNum}`;
-    }
-    const fullWaUrl = waBase.includes('?')
-      ? `${waBase}&text=${encodeURIComponent(text)}`
-      : `${waBase}?text=${encodeURIComponent(text)}`;
-
-    window.open(fullWaUrl, '_blank');
-
-    showToast('Redirected to WhatsApp support. Please send proof of payment to confirm!', 'success');
-
-    if (user) {
-      const newNotif = {
-        id: `notif-${Date.now()}`,
-        title: 'WDV Transfer Notification Sent',
-        body: `Bank transfer of ${priceStr} reported. Please notify Admin via WhatsApp with proof of payment.`,
-        date: new Date().toISOString(),
-        unread: true
-      };
-      const updatedNotifs = [newNotif, ...(user.notifications || [])];
-      setUser({ ...user, notifications: updatedNotifs });
-    }
-
-    setCurrentScreen('dashboard');
-  };
 
   // Helper to persist balance update on server and sync locally
   const updateBalanceOnServer = async (newBalance: number) => {
@@ -3415,27 +3341,6 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Direct Update Package Download Banner */}
-                      <div className="rounded-xl bg-slate-900/90 border border-teal-500/30 p-3.5 flex items-center justify-between text-xs shadow-lg">
-                        <div className="flex items-center gap-2.5">
-                          <div className="p-2 rounded-lg bg-teal-500/10 border border-teal-500/20 text-teal-400">
-                            <Download className="h-4 w-4" />
-                          </div>
-                          <div>
-                            <p className="font-bold text-white text-xs">SwiftPay Update ZIP Package</p>
-                            <p className="text-[10px] text-slate-400">Contains Transfer 404 fix & PDF Receipt engine</p>
-                          </div>
-                        </div>
-                        <a
-                          id="btn-download-app-zip-banner"
-                          href="/swiftpay-final-transfer-dashboard-update.zip"
-                          download="swiftpay-final-transfer-dashboard-update.zip"
-                          className="px-3.5 py-2 bg-gradient-to-r from-teal-400 to-emerald-400 hover:from-teal-300 hover:to-emerald-300 text-slate-950 font-black rounded-lg text-[11px] shadow-md shadow-teal-500/20 active:scale-95 transition-all cursor-pointer flex items-center gap-1"
-                        >
-                          <span>Download ZIP</span>
-                        </a>
-                      </div>
-
                       {/* QUICK ACTIONS GRID (4 Circle Icons) */}
                       <div>
                         <h5 className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-2">Quick Actions</h5>
@@ -4113,47 +4018,16 @@ export default function App() {
                 <div className="p-5 space-y-5 animate-[fadeIn_0.2s_ease-out]">
                   <div className="flex items-center justify-between">
                     <h4 className="text-base font-bold font-display text-slate-800 dark:text-white">Paystack Virtual Account</h4>
-                    <span className="text-[10px] font-mono font-bold text-teal-400 bg-teal-500/10 px-2.5 py-1 rounded-full border border-teal-500/20 flex items-center gap-1.5">
-                      <span className="h-2 w-2 rounded-full bg-teal-400 animate-pulse" />
-                      Auto-Verification Active
+                    <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20 flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                      Paystack Live Gateway
                     </span>
                   </div>
 
-                  {/* Countdown Banner */}
-                  <div className="p-3.5 rounded-xl bg-gradient-to-r from-slate-900 to-indigo-950 border border-indigo-500/30 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-amber-400 animate-pulse" />
-                      <div>
-                        <span className="text-[10px] font-mono uppercase text-slate-400 block">Payment Window</span>
-                        <span className="text-xs text-slate-200 font-semibold">Virtual account expires in:</span>
-                      </div>
-                    </div>
-                    <div className="text-lg font-mono font-extrabold text-amber-400 bg-amber-500/10 px-3 py-1 rounded-lg border border-amber-500/20">
-                      {Math.floor(paymentCountdown / 60).toString().padStart(2, '0')}:{Math.floor(paymentCountdown % 60).toString().padStart(2, '0')}
-                    </div>
-                  </div>
-
-                  {/* Expired Warning */}
-                  {paymentCountdown <= 0 ? (
-                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center space-y-3">
-                      <div className="text-xs font-bold text-red-400 uppercase tracking-wider">Payment Session Expired</div>
-                      <p className="text-xs text-slate-300">
-                        The virtual account transfer timer has expired. Tap below to generate a new payment account.
-                      </p>
-                      <button
-                        onClick={handleInitiateWdv}
-                        disabled={isInitiatingWdv}
-                        className="w-full py-2.5 bg-gradient-to-r from-indigo-600 to-teal-500 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-md"
-                      >
-                        Generate New Virtual Account
-                      </button>
-                    </div>
-                  ) : null}
-
                   {/* Instructions */}
                   <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800/80 leading-relaxed text-xs text-slate-600 dark:text-slate-300 space-y-1">
-                    <div className="font-semibold text-[10px] font-mono uppercase text-teal-400 tracking-wider">Instructions:</div>
-                    <p>Transfer exactly ₦6,500 to your Dedicated Virtual Account below. Your WDV Voucher code will be automatically issued and activated instantly upon payment confirmation.</p>
+                    <div className="font-semibold text-[10px] font-mono uppercase text-teal-400 tracking-wider">Payment Instructions:</div>
+                    <p>Transfer exactly ₦6,500 to your Paystack Dedicated Virtual Account below. Paystack will automatically process your payment and issue your unique WDV Voucher instantly.</p>
                   </div>
 
                   {/* ACCOUNT DETAILS CARD */}
@@ -4183,12 +4057,12 @@ export default function App() {
                       <span className="text-xs text-slate-400">Bank Name:</span>
                       <div className="flex items-center gap-1.5">
                         <span className="text-sm font-mono font-bold text-white">
-                          {activeWdvPayment?.bankName || wdvConfig.bankName || "Wema Bank / Paystack DVA"}
+                          {activeWdvPayment?.bankName || "Paystack DVA"}
                         </span>
                         <button
                           id="btn-copy-bank"
                           onClick={() => {
-                            navigator.clipboard.writeText(activeWdvPayment?.bankName || wdvConfig.bankName || "Wema Bank");
+                            navigator.clipboard.writeText(activeWdvPayment?.bankName || "Paystack DVA");
                             showToast('Bank copied!', 'success');
                           }}
                           className="p-1 text-[9px] font-mono font-bold bg-white/10 rounded border border-white/10 text-slate-300 hover:bg-white/20 active:scale-95 transition-all"
@@ -4203,12 +4077,12 @@ export default function App() {
                       <span className="text-xs text-slate-400">Account Number:</span>
                       <div className="flex items-center gap-1.5">
                         <span className="text-lg font-mono font-extrabold text-amber-400 tracking-wider">
-                          {activeWdvPayment?.accountNumber || wdvConfig.accountNumber || "8960723295"}
+                          {activeWdvPayment?.accountNumber || "Generating..."}
                         </span>
                         <button
                           id="btn-copy-acc-num"
                           onClick={() => {
-                            navigator.clipboard.writeText(activeWdvPayment?.accountNumber || wdvConfig.accountNumber || "8960723295");
+                            navigator.clipboard.writeText(activeWdvPayment?.accountNumber || "");
                             showToast('Account Number copied!', 'success');
                           }}
                           className="p-1 text-[9px] font-mono font-bold bg-white/10 rounded border border-white/10 text-slate-300 hover:bg-white/20 active:scale-95 transition-all"
@@ -4223,12 +4097,12 @@ export default function App() {
                       <span className="text-xs text-slate-400">Account Name:</span>
                       <div className="flex items-center gap-1.5">
                         <span className="text-xs font-mono font-bold text-white uppercase text-right max-w-[180px] truncate">
-                          {activeWdvPayment?.accountName || wdvConfig.accountName || "SWIFTPAY / PAYSTACK DVA"}
+                          {activeWdvPayment?.accountName || "SWIFTPAY / PAYSTACK"}
                         </span>
                         <button
                           id="btn-copy-acc-name"
                           onClick={() => {
-                            navigator.clipboard.writeText(activeWdvPayment?.accountName || wdvConfig.accountName || "SWIFTPAY");
+                            navigator.clipboard.writeText(activeWdvPayment?.accountName || "");
                             showToast('Account Name copied!', 'success');
                           }}
                           className="p-1 text-[9px] font-mono font-bold bg-white/10 rounded border border-white/10 text-slate-300 hover:bg-white/20 active:scale-95 transition-all"
@@ -4239,48 +4113,26 @@ export default function App() {
                     </div>
                   </GlassCard>
 
-                  {/* Auto-Verification Live Pulse */}
-                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between">
+                  {/* Real Gateway Live Indicator */}
+                  <div className="p-3 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-teal-500"></span>
                       </span>
-                      <span className="text-[11px] font-mono text-emerald-300">Listening for Paystack webhook...</span>
+                      <span className="text-[11px] font-mono text-teal-300 font-bold">Paystack Webhook Settlement Engine Active</span>
                     </div>
-                    <span className="text-[10px] font-mono text-emerald-400 font-bold uppercase">Auto Check</span>
+                    <span className="text-[10px] font-mono text-teal-400 font-extrabold uppercase">Live</span>
                   </div>
 
                   {/* Primary actions */}
                   <div className="pt-2 space-y-2">
                     <button
-                      id="btn-simulate-payment"
-                      onClick={handleSimulatePaystackPayment}
-                      disabled={isVerifyingWdv || paymentCountdown <= 0}
-                      className="w-full py-3.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 disabled:opacity-50 text-slate-950 font-extrabold uppercase tracking-widest text-xs rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
-                    >
-                      {isVerifyingWdv ? (
-                        <>
-                          <div className="h-4 w-4 rounded-full border-2 border-slate-950/30 border-t-slate-950 animate-spin" />
-                          <span>Verifying Payment...</span>
-                        </>
-                      ) : (
-                        <span>Simulate / Check Payment Received</span>
-                      )}
-                    </button>
-                    <button
-                      id="btn-confirm-transfer-whatsapp"
-                      onClick={handleConfirmBankTransfer}
-                      className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2"
-                    >
-                      <span>Send Proof on WhatsApp (Manual Check)</span>
-                    </button>
-                    <button
                       id="btn-cancel-transfer"
                       onClick={() => setCurrentScreen('dashboard')}
-                      className="w-full text-center text-xs text-slate-400 py-2 font-bold hover:text-slate-600 dark:hover:text-slate-200"
+                      className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2 cursor-pointer"
                     >
-                      Cancel and Return Home
+                      <span>Return to Dashboard</span>
                     </button>
                   </div>
                 </div>
@@ -5207,28 +5059,49 @@ export default function App() {
                           />
                         </div>
 
-                        {/* 3. Account Name - MANUALLY ENTERED */}
+                        {/* 3. Account Name - AUTOMATIC PAYSTACK VERIFICATION */}
                         <div>
-                          <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold">3. Account Name (Manual Entry)</label>
-                          <input
-                            id="withdraw-acc-name-manual"
-                            type="text"
-                            placeholder="Enter full name matching account"
-                            required
-                            value={withdrawAccName}
-                            onChange={(e) => setWithdrawAccName(e.target.value)}
-                            className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-sans"
-                          />
+                          <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold flex items-center justify-between">
+                            <span>3. Account Holder Name (Paystack Verified)</span>
+                            {isVerifyingWithdrawAccount && (
+                              <span className="text-[10px] text-teal-400 font-mono flex items-center gap-1">
+                                <RefreshCw className="h-3 w-3 animate-spin" /> Resolving...
+                              </span>
+                            )}
+                          </label>
+                          {isVerifyingWithdrawAccount ? (
+                            <div className="w-full text-xs bg-slate-950 border border-teal-500/30 rounded-xl px-4 py-3 text-teal-400 font-mono flex items-center gap-2 animate-pulse">
+                              <RefreshCw className="h-4 w-4 animate-spin shrink-0" />
+                              <span>Resolving account holder name via Paystack API...</span>
+                            </div>
+                          ) : withdrawVerified && withdrawAccName ? (
+                            <div className="w-full text-xs bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-3 text-emerald-300 font-mono font-bold flex items-center justify-between shadow-inner">
+                              <div className="flex items-center gap-2 truncate">
+                                <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                                <span className="truncate">{withdrawAccName}</span>
+                              </div>
+                              <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded font-bold uppercase shrink-0">VERIFIED</span>
+                            </div>
+                          ) : withdrawError ? (
+                            <div className="w-full text-xs bg-rose-500/10 border border-rose-500/30 rounded-xl px-4 py-3 text-rose-400 font-mono flex items-center gap-2">
+                              <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
+                              <span>{withdrawError}</span>
+                            </div>
+                          ) : (
+                            <div className="w-full text-[11px] bg-slate-950/60 border border-white/5 rounded-xl px-4 py-3 text-slate-500 font-mono italic">
+                              Enter a 10-digit account number to resolve verified account holder name automatically.
+                            </div>
+                          )}
                         </div>
                       </div>
 
                       <button
                         id="btn-withdraw-step1-continue"
                         type="button"
-                        disabled={!withdrawBank || withdrawAccount.length !== 10 || withdrawAccName.trim().length < 3}
+                        disabled={!withdrawBank || withdrawAccount.length !== 10 || !withdrawVerified || !withdrawAccName}
                         onClick={() => setWithdrawStep(2)}
                         className={`w-full py-4 bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-400 hover:to-indigo-500 text-slate-950 font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer ${
-                          (!withdrawBank || withdrawAccount.length !== 10 || withdrawAccName.trim().length < 3) ? 'opacity-40 cursor-not-allowed' : ''
+                          (!withdrawBank || withdrawAccount.length !== 10 || !withdrawVerified || !withdrawAccName) ? 'opacity-40 cursor-not-allowed' : ''
                         }`}
                       >
                         <span>Continue to Step 2</span>
@@ -5441,28 +5314,49 @@ export default function App() {
                           />
                         </div>
 
-                        {/* 3. Account Name - MANUALLY ENTERED */}
+                        {/* 3. Account Name - AUTOMATIC PAYSTACK VERIFICATION */}
                         <div>
-                          <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold">3. Account Name (Manual Entry)</label>
-                          <input
-                            id="transfer-acc-name-manual"
-                            type="text"
-                            placeholder="Enter full name matching recipient account"
-                            required
-                            value={transferAccName}
-                            onChange={(e) => setTransferAccName(e.target.value)}
-                            className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-1 focus:ring-indigo-400 font-sans"
-                          />
+                          <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold flex items-center justify-between">
+                            <span>3. Account Holder Name (Paystack Verified)</span>
+                            {isVerifyingAccount && (
+                              <span className="text-[10px] text-indigo-400 font-mono flex items-center gap-1">
+                                <RefreshCw className="h-3 w-3 animate-spin" /> Resolving...
+                              </span>
+                            )}
+                          </label>
+                          {isVerifyingAccount ? (
+                            <div className="w-full text-xs bg-slate-950 border border-indigo-500/30 rounded-xl px-4 py-3 text-indigo-400 font-mono flex items-center gap-2 animate-pulse">
+                              <RefreshCw className="h-4 w-4 animate-spin shrink-0" />
+                              <span>Resolving account holder name via Paystack API...</span>
+                            </div>
+                          ) : transferVerified && transferAccName ? (
+                            <div className="w-full text-xs bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-3 text-emerald-300 font-mono font-bold flex items-center justify-between shadow-inner">
+                              <div className="flex items-center gap-2 truncate">
+                                <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                                <span className="truncate">{transferAccName}</span>
+                              </div>
+                              <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded font-bold uppercase shrink-0">VERIFIED</span>
+                            </div>
+                          ) : transferError ? (
+                            <div className="w-full text-xs bg-rose-500/10 border border-rose-500/30 rounded-xl px-4 py-3 text-rose-400 font-mono flex items-center gap-2">
+                              <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
+                              <span>{transferError}</span>
+                            </div>
+                          ) : (
+                            <div className="w-full text-[11px] bg-slate-950/60 border border-white/5 rounded-xl px-4 py-3 text-slate-500 font-mono italic">
+                              Enter a 10-digit account number to resolve verified account holder name automatically.
+                            </div>
+                          )}
                         </div>
                       </div>
 
                       <button
                         id="btn-transfer-step1-continue"
                         type="button"
-                        disabled={!transferBank || transferAccNum.length !== 10 || transferAccName.trim().length < 3}
+                        disabled={!transferBank || transferAccNum.length !== 10 || !transferVerified || !transferAccName}
                         onClick={() => setTransferStep(2)}
                         className={`w-full py-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer ${
-                          (!transferBank || transferAccNum.length !== 10 || transferAccName.trim().length < 3) ? 'opacity-40 cursor-not-allowed' : ''
+                          (!transferBank || transferAccNum.length !== 10 || !transferVerified || !transferAccName) ? 'opacity-40 cursor-not-allowed' : ''
                         }`}
                       >
                         <span>Continue to Step 2</span>

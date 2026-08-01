@@ -663,6 +663,14 @@ export async function initDb() {
     )
   `);
 
+  // Ensure unique indexes for ON CONFLICT target resolution in PostgreSQL
+  try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_uniq ON users(email)`); } catch (e) {}
+  try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vouchers_id_uniq ON vouchers(id)`); } catch (e) {}
+  try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vouchers_code_uniq ON vouchers(voucherCode)`); } catch (e) {}
+  try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_settings_key_uniq ON admin_settings(key)`); } catch (e) {}
+  try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_password_resets_id_uniq ON password_resets(id)`); } catch (e) {}
+  try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_wdv_payments_ref_uniq ON wdv_payments(reference)`); } catch (e) {}
+
   // Seed default admin if not exists
   const secureAdminPasswordHash = crypto.createHash('sha256').update('Boris$689').digest('hex');
   const existingAdmin = await getRow(`SELECT * FROM admins WHERE email = $1`, ['talkdavidjohn@gmail.com']);
@@ -714,7 +722,11 @@ export async function initDb() {
     };
 
     for (const [key, value] of Object.entries(defaultSettings)) {
-      await execute(`INSERT INTO admin_settings (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = $2`, [key, value]);
+      try {
+        await execute(`INSERT INTO admin_settings (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = $2`, [key, value]);
+      } catch (_) {
+        try { await execute(`UPDATE admin_settings SET value = $1 WHERE key = $2`, [value, key]); } catch (e2) {}
+      }
     }
     console.log('[SwiftPay DB] Default admin settings seeded.');
   }

@@ -33,10 +33,12 @@ export type WdvStatus = 'unused' | 'redeemed';
 export interface WdvCode {
   id: string;
   code: string;
+  voucherCode?: string;
   amount: number;
-  fullName: string;
-  email: string;
-  createdAt: string;
+  fullName?: string;
+  email?: string;
+  createdAt?: string;
+  generatedAt?: string;
   status: WdvStatus;
   redeemedFor?: string; // e.g. "Airtime to 08012345678" or "Bank Transfer"
 }

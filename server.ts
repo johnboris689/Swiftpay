@@ -452,119 +452,135 @@ async function persistDbCache(data: DBStructure) {
 
     // 1. Save Users
     for (const u of data.users) {
-      await execute(`
-        INSERT INTO users (
-          fullName, username, email, phone, passwordHash, balance, dailyTarget, dailySpent,
-          pinCreated, pinCode, biometricEnabled, profilePic, tier, isSuspended, isFrozen,
-          registrationDate, accountStatus, beneficiaries, phoneBeneficiaries, loginHistory,
-          notifications, transactions, wdvVerified, isWdvVerified, welcomeRewardShown,
-          giftDay, giftActive, lastGiftCreditTime, giftExpiresAt, lastActivityTime
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
-        ON CONFLICT(email) DO UPDATE SET
-          fullName = EXCLUDED.fullName,
-          phone = EXCLUDED.phone,
-          passwordHash = EXCLUDED.passwordHash,
-          balance = EXCLUDED.balance,
-          dailyTarget = EXCLUDED.dailyTarget,
-          dailySpent = EXCLUDED.dailySpent,
-          pinCreated = EXCLUDED.pinCreated,
-          pinCode = EXCLUDED.pinCode,
-          biometricEnabled = EXCLUDED.biometricEnabled,
-          profilePic = EXCLUDED.profilePic,
-          tier = EXCLUDED.tier,
-          isSuspended = EXCLUDED.isSuspended,
-          isFrozen = EXCLUDED.isFrozen,
-          registrationDate = EXCLUDED.registrationDate,
-          accountStatus = EXCLUDED.accountStatus,
-          beneficiaries = EXCLUDED.beneficiaries,
-          phoneBeneficiaries = EXCLUDED.phoneBeneficiaries,
-          loginHistory = EXCLUDED.loginHistory,
-          notifications = EXCLUDED.notifications,
-          transactions = EXCLUDED.transactions,
-          wdvVerified = EXCLUDED.wdvVerified,
-          isWdvVerified = EXCLUDED.isWdvVerified,
-          welcomeRewardShown = EXCLUDED.welcomeRewardShown,
-          giftDay = EXCLUDED.giftDay,
-          giftActive = EXCLUDED.giftActive,
-          lastGiftCreditTime = EXCLUDED.lastGiftCreditTime,
-          giftExpiresAt = EXCLUDED.giftExpiresAt,
-          lastActivityTime = EXCLUDED.lastActivityTime
-      `, [
-        u.fullName,
-        u.email.split('@')[0],
-        u.email.toLowerCase(),
-        u.phone || '',
-        u.passwordHash,
-        u.balance,
-        u.dailyTarget,
-        u.dailySpent,
-        u.pinCreated ? 1 : 0,
-        u.pinCode || '',
-        u.biometricEnabled ? 1 : 0,
-        u.profilePic || '',
-        u.tier || 3,
-        u.isSuspended ? 1 : 0,
-        u.isFrozen ? 1 : 0,
-        u.registrationDate || new Date().toISOString(),
-        u.accountStatus || 'active',
-        JSON.stringify(u.beneficiaries || []),
-        JSON.stringify(u.phoneBeneficiaries || []),
-        JSON.stringify(u.loginHistory || []),
-        JSON.stringify(u.notifications || []),
-        JSON.stringify(u.transactions || []),
-        u.wdvVerified || u.isWdvVerified ? 1 : 0,
-        u.isWdvVerified || u.wdvVerified ? 1 : 0,
-        u.welcomeRewardShown ? 1 : 0,
-        u.giftDay || 0,
-        u.giftActive ? 1 : 0,
-        u.lastGiftCreditTime || '',
-        u.giftExpiresAt || '',
-        u.lastActivityTime || new Date().toISOString()
-      ]);
+      try {
+        await execute(`
+          INSERT INTO users (
+            fullName, username, email, phone, passwordHash, balance, dailyTarget, dailySpent,
+            pinCreated, pinCode, biometricEnabled, profilePic, tier, isSuspended, isFrozen,
+            registrationDate, accountStatus, beneficiaries, phoneBeneficiaries, loginHistory,
+            notifications, transactions, wdvVerified, isWdvVerified, welcomeRewardShown,
+            giftDay, giftActive, lastGiftCreditTime, giftExpiresAt, lastActivityTime
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
+          ON CONFLICT(email) DO UPDATE SET
+            fullName = EXCLUDED.fullName,
+            phone = EXCLUDED.phone,
+            passwordHash = EXCLUDED.passwordHash,
+            balance = EXCLUDED.balance,
+            dailyTarget = EXCLUDED.dailyTarget,
+            dailySpent = EXCLUDED.dailySpent,
+            pinCreated = EXCLUDED.pinCreated,
+            pinCode = EXCLUDED.pinCode,
+            biometricEnabled = EXCLUDED.biometricEnabled,
+            profilePic = EXCLUDED.profilePic,
+            tier = EXCLUDED.tier,
+            isSuspended = EXCLUDED.isSuspended,
+            isFrozen = EXCLUDED.isFrozen,
+            registrationDate = EXCLUDED.registrationDate,
+            accountStatus = EXCLUDED.accountStatus,
+            beneficiaries = EXCLUDED.beneficiaries,
+            phoneBeneficiaries = EXCLUDED.phoneBeneficiaries,
+            loginHistory = EXCLUDED.loginHistory,
+            notifications = EXCLUDED.notifications,
+            transactions = EXCLUDED.transactions,
+            wdvVerified = EXCLUDED.wdvVerified,
+            isWdvVerified = EXCLUDED.isWdvVerified,
+            welcomeRewardShown = EXCLUDED.welcomeRewardShown,
+            giftDay = EXCLUDED.giftDay,
+            giftActive = EXCLUDED.giftActive,
+            lastGiftCreditTime = EXCLUDED.lastGiftCreditTime,
+            giftExpiresAt = EXCLUDED.giftExpiresAt,
+            lastActivityTime = EXCLUDED.lastActivityTime
+        `, [
+          u.fullName,
+          u.email.split('@')[0],
+          u.email.toLowerCase(),
+          u.phone || '',
+          u.passwordHash,
+          u.balance,
+          u.dailyTarget,
+          u.dailySpent,
+          u.pinCreated ? 1 : 0,
+          u.pinCode || '',
+          u.biometricEnabled ? 1 : 0,
+          u.profilePic || '',
+          u.tier || 3,
+          u.isSuspended ? 1 : 0,
+          u.isFrozen ? 1 : 0,
+          u.registrationDate || new Date().toISOString(),
+          u.accountStatus || 'active',
+          JSON.stringify(u.beneficiaries || []),
+          JSON.stringify(u.phoneBeneficiaries || []),
+          JSON.stringify(u.loginHistory || []),
+          JSON.stringify(u.notifications || []),
+          JSON.stringify(u.transactions || []),
+          u.wdvVerified || u.isWdvVerified ? 1 : 0,
+          u.isWdvVerified || u.wdvVerified ? 1 : 0,
+          u.welcomeRewardShown ? 1 : 0,
+          u.giftDay || 0,
+          u.giftActive ? 1 : 0,
+          u.lastGiftCreditTime || '',
+          u.giftExpiresAt || '',
+          u.lastActivityTime || new Date().toISOString()
+        ]);
+      } catch (uErr) {
+        try {
+          await execute(`UPDATE users SET balance = $1, pinCode = $2, notifications = $3, transactions = $4 WHERE email = $5`,
+            [u.balance, u.pinCode || '', JSON.stringify(u.notifications || []), JSON.stringify(u.transactions || []), u.email.toLowerCase()]);
+        } catch (_) {}
+      }
     }
 
     // 2. Save Vouchers
     for (const v of data.vouchers) {
       const vCode = v.voucherCode || v.code;
       const vId = v.id || `v-${vCode}`;
-      await execute(`
-        INSERT INTO vouchers (id, voucherCode, code, amount, status, usedBy, usedAt, generatedAt, withdrawalId, purchasedBy, redeemedBy)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        ON CONFLICT(id) DO UPDATE SET
-          voucherCode = EXCLUDED.voucherCode,
-          code = EXCLUDED.code,
-          amount = EXCLUDED.amount,
-          status = EXCLUDED.status,
-          usedBy = EXCLUDED.usedBy,
-          usedAt = EXCLUDED.usedAt,
-          generatedAt = EXCLUDED.generatedAt,
-          withdrawalId = EXCLUDED.withdrawalId,
-          purchasedBy = EXCLUDED.purchasedBy,
-          redeemedBy = EXCLUDED.redeemedBy
-      `, [
-        vId,
-        vCode,
-        vCode,
-        v.amount ?? 6500,
-        v.status || 'unused',
-        v.usedBy || '',
-        v.usedAt || '',
-        v.generatedAt || new Date().toISOString(),
-        v.withdrawalId || '',
-        v.purchasedBy || 'admin',
-        JSON.stringify(v.redeemedBy || [])
-      ]);
+      try {
+        await execute(`
+          INSERT INTO vouchers (id, voucherCode, code, amount, status, usedBy, usedAt, generatedAt, withdrawalId, purchasedBy, redeemedBy)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          ON CONFLICT(id) DO UPDATE SET
+            voucherCode = EXCLUDED.voucherCode,
+            code = EXCLUDED.code,
+            amount = EXCLUDED.amount,
+            status = EXCLUDED.status,
+            usedBy = EXCLUDED.usedBy,
+            usedAt = EXCLUDED.usedAt,
+            generatedAt = EXCLUDED.generatedAt,
+            withdrawalId = EXCLUDED.withdrawalId,
+            purchasedBy = EXCLUDED.purchasedBy,
+            redeemedBy = EXCLUDED.redeemedBy
+        `, [
+          vId,
+          vCode,
+          vCode,
+          v.amount ?? 6500,
+          v.status || 'unused',
+          v.usedBy || '',
+          v.usedAt || '',
+          v.generatedAt || new Date().toISOString(),
+          v.withdrawalId || '',
+          v.purchasedBy || 'admin',
+          JSON.stringify(v.redeemedBy || [])
+        ]);
+      } catch (vErr) {
+        try {
+          await execute(`UPDATE vouchers SET status = $1, usedBy = $2, usedAt = $3 WHERE voucherCode = $4 OR code = $4`,
+            [v.status || 'unused', v.usedBy || '', v.usedAt || '', vCode]);
+        } catch (_) {}
+      }
     }
 
     // 3. Save Password Resets
     for (const r of data.passwordResets || []) {
       const id = r.token || `reset-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-      await execute(`
-        INSERT INTO password_resets (id, emailOrPhone, otp, expiresAt, used, createdAt)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT(id) DO UPDATE SET
-          used = EXCLUDED.used
-      `, [id, r.email.toLowerCase(), r.otp, r.expiresAt, r.used ? 1 : 0, Date.now()]);
+      try {
+        await execute(`
+          INSERT INTO password_resets (id, emailOrPhone, otp, expiresAt, used, createdAt)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          ON CONFLICT(id) DO UPDATE SET
+            used = EXCLUDED.used
+        `, [id, r.email.toLowerCase(), r.otp, r.expiresAt, r.used ? 1 : 0, Date.now()]);
+      } catch (_) {}
     }
 
     // 4. Save Wdv Config Settings to admin_settings
@@ -580,10 +596,16 @@ async function persistDbCache(data: DBStructure) {
         wdvMaintenanceNotice: c.maintenanceNotice
       };
       for (const [key, value] of Object.entries(settingsMap)) {
-        await execute(`
-          INSERT INTO admin_settings (key, value) VALUES ($1, $2)
-          ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
-        `, [key, value]);
+        try {
+          await execute(`
+            INSERT INTO admin_settings (key, value) VALUES ($1, $2)
+            ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
+          `, [key, value]);
+        } catch (_) {
+          try {
+            await execute(`UPDATE admin_settings SET value = $1 WHERE key = $2`, [value, key]);
+          } catch (_) {}
+        }
       }
     }
   } catch (err) {
@@ -2317,23 +2339,55 @@ async function verifyBankAccountService(bankName: string, accountNumber: string)
   const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY || '';
   if (paystackSecretKey && paystackSecretKey.startsWith('sk_')) {
     try {
-      // Map bank name to standard Paystack bank code if possible
       const bankCodeMap: Record<string, string> = {
         'access bank': '044',
-        'gtbank': '058',
-        'guaranty trust bank': '058',
+        'access bank limited': '044',
+        'access holdings plc': '044',
+        'citibank nigeria limited': '023',
+        'ecobank nigeria limited': '050',
+        'fbn holdings plc': '011',
+        'first bank of nigeria limited': '011',
         'first bank': '011',
-        'zenith bank': '057',
+        'first city monument bank limited (fcmb)': '214',
+        'fcmb group plc': '214',
+        'fidelity bank plc': '070',
+        'globus bank limited': '000027',
+        'guaranty trust bank limited (gtbank)': '058',
+        'guaranty trust holding company plc': '058',
+        'gtbank': '058',
+        'heritage bank plc': '030',
+        'jaiz bank plc': '035',
+        'keystone bank limited': '082',
+        'kuda bank': '50211',
         'kuda': '50211',
-        'palmpay': '999991',
-        'opay': '999992',
         'moniepoint': '50515',
-        'wema bank': '035',
+        'opay': '999992',
+        'palmpay': '999991',
+        'polaris bank limited': '076',
+        'providus bank limited': '101',
+        'stanbic ibtc bank limited': '221',
+        'standard chartered bank limited': '068',
+        'sterling bank limited': '232',
+        'suntrust bank nigeria limited': '100',
+        'taj bank limited': '000026',
+        'union bank of nigeria plc': '032',
+        'united bank for africa plc': '033',
         'uba': '033',
-        'united bank for africa': '033'
+        'unity bank plc': '215',
+        'wema bank plc': '035',
+        'zenith bank plc': '057',
+        '9psb': '120001',
+        'rubies': '125'
       };
 
-      const bCode = bankCodeMap[bankName.toLowerCase()] || '058';
+      const normalizedBank = bankName.toLowerCase().trim();
+      let bCode = bankCodeMap[normalizedBank];
+      if (!bCode) {
+        // Find partial key match
+        const matchedKey = Object.keys(bankCodeMap).find(k => normalizedBank.includes(k) || k.includes(normalizedBank));
+        bCode = matchedKey ? bankCodeMap[matchedKey] : '058';
+      }
+
       const pRes = await fetch(`https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bCode}`, {
         headers: { Authorization: `Bearer ${paystackSecretKey}` }
       });
@@ -2343,9 +2397,14 @@ async function verifyBankAccountService(bankName: string, accountNumber: string)
           success: true,
           accountName: pData.data.account_name.toUpperCase()
         };
+      } else if (pData.message) {
+        return {
+          success: false,
+          error: pData.message || "Invalid account number or bank combination."
+        };
       }
     } catch (pErr) {
-      console.warn('[Bank Verification Service] Paystack API fallback triggered:', pErr);
+      console.warn('[Bank Verification Service] Paystack API request error:', pErr);
     }
   }
 
@@ -2780,10 +2839,9 @@ app.post('/api/auth/update-balance', authenticateToken, (req: any, res) => {
 
 // Helper to generate a unique WDV voucher code
 function generateVoucherCode(): string {
-  const part1 = Math.floor(1000 + Math.random() * 9000);
-  const part2 = Math.floor(1000 + Math.random() * 9000);
-  const part3 = Math.floor(1000 + Math.random() * 9000);
-  return `WDV-${part1}-${part2}-${part3}`;
+  const hex = crypto.randomBytes(6).toString('hex').toUpperCase();
+  const parts = hex.match(/.{1,4}/g) || ['8A72', 'X9LK', 'PQ11'];
+  return `WDV-${parts.join('-')}`;
 }
 
 // Purchase WDV Voucher Price Lock API
@@ -3046,16 +3104,36 @@ app.post('/api/paystack/virtual-account', authenticateToken, async (req: any, re
 app.get('/api/paystack/payment-status/:reference', authenticateToken, async (req, res) => {
   const { reference } = req.params;
   try {
-    const payment = await getRow(`SELECT * FROM wdv_payments WHERE reference = $1`, [reference]);
+    let payment = await getRow(`SELECT * FROM wdv_payments WHERE reference = $1`, [reference]);
     if (!payment) {
       return res.status(404).json({ error: 'Payment reference not found.' });
     }
 
-    const code = payment.vouchercode || payment.voucherCode || '';
+    let code = payment.vouchercode || payment.voucherCode || '';
+    let currentStatus = payment.status || 'pending';
+
+    // If still pending, query Paystack API directly if key is available
+    const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY || '';
+    if (currentStatus === 'pending' && paystackSecretKey && paystackSecretKey.startsWith('sk_')) {
+      try {
+        const verifyRes = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
+          headers: { Authorization: `Bearer ${paystackSecretKey}` }
+        });
+        const verifyData = await verifyRes.json();
+        if (verifyData.status && verifyData.data && verifyData.data.status === 'success') {
+          const result = await processSuccessfulWdvPayment(reference, 'paystack_api_verify', JSON.stringify(verifyData.data));
+          currentStatus = 'successful';
+          code = result.voucherCode || code;
+        }
+      } catch (verErr) {
+        console.warn('[Paystack Verify API] Failed live transaction verification check:', verErr);
+      }
+    }
+
     res.json({
       success: true,
       reference: payment.reference,
-      status: payment.status,
+      status: currentStatus,
       voucherCode: code,
       paidAt: payment.paidat || payment.paidAt || '',
       amount: Number(payment.amount || 6500)
@@ -3122,25 +3200,6 @@ app.post('/api/paystack/webhook', express.raw({ type: 'application/json' }), asy
   } catch (err: any) {
     console.error('Error processing Paystack Webhook:', err);
     res.status(500).send('Webhook Processing Error');
-  }
-});
-
-// Paystack Payment Simulation (for testing or manual verification)
-app.post('/api/paystack/simulate-payment', authenticateToken, async (req: any, res) => {
-  try {
-    const { reference } = req.body;
-    if (!reference) {
-      return res.status(400).json({ error: 'Reference is required.' });
-    }
-
-    const result = await processSuccessfulWdvPayment(reference, 'paystack_simulation');
-    res.json({
-      success: true,
-      message: 'Payment verified and WDV voucher automatically generated!',
-      data: result
-    });
-  } catch (err: any) {
-    res.status(400).json({ error: err.message || 'Simulation failed' });
   }
 });
 
@@ -3663,10 +3722,14 @@ app.post('/api/admin/ai-settings', authenticateAdminToken, async (req, res) => {
     ];
 
     for (const [k, v] of pairs) {
-      await execute(`
-        INSERT INTO admin_settings (key, value) VALUES ($1, $2)
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-      `, [k, v]);
+      try {
+        await execute(`
+          INSERT INTO admin_settings (key, value) VALUES ($1, $2)
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+        `, [k, v]);
+      } catch (_) {
+        try { await execute(`UPDATE admin_settings SET value = $1 WHERE key = $2`, [v, k]); } catch (_) {}
+      }
     }
 
     await loadDbCache();
@@ -3859,10 +3922,14 @@ const updateAdminSettingsHandler = async (req: any, res: any) => {
     }
 
     for (const [key, val] of Object.entries(settingsToSave)) {
-      await execute(
-        `INSERT INTO admin_settings (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = $2`,
-        [key, String(val)]
-      );
+      try {
+        await execute(
+          `INSERT INTO admin_settings (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = $2`,
+          [key, String(val)]
+        );
+      } catch (_) {
+        try { await execute(`UPDATE admin_settings SET value = $1 WHERE key = $2`, [String(val), key]); } catch (_) {}
+      }
     }
 
     // Sync wdvConfig in DB if present
@@ -3939,10 +4006,14 @@ const handleAdminConfigUpdate = async (req: any, res: any) => {
       wdvMaintenanceNotice: db.wdvConfig.maintenanceNotice
     };
     for (const [key, val] of Object.entries(settingsMap)) {
-      await execute(`
-        INSERT INTO admin_settings (key, value) VALUES ($1, $2)
-        ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
-      `, [key, val || '']);
+      try {
+        await execute(`
+          INSERT INTO admin_settings (key, value) VALUES ($1, $2)
+          ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
+        `, [key, val || '']);
+      } catch (_) {
+        try { await execute(`UPDATE admin_settings SET value = $1 WHERE key = $2`, [val || '', key]); } catch (_) {}
+      }
     }
     await loadDbCache();
   } catch (err) {
@@ -3965,10 +4036,14 @@ app.post('/api/admin/video/upload', authenticateAdminToken, upload.single('video
     const videoPath = `/uploads/${req.file.filename}`;
     
     // Save to admin_settings
-    await execute(`
-      INSERT INTO admin_settings (key, value) VALUES ($1, $2)
-      ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
-    `, ['videoUrl', videoPath]);
+    try {
+      await execute(`
+        INSERT INTO admin_settings (key, value) VALUES ($1, $2)
+        ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
+      `, ['videoUrl', videoPath]);
+    } catch (_) {
+      try { await execute(`UPDATE admin_settings SET value = $1 WHERE key = $2`, [videoPath, 'videoUrl']); } catch (_) {}
+    }
 
     logDiagnostic('SECURITY_ALERT', 'Admin uploaded new video guide', { videoPath });
     await loadDbCache();

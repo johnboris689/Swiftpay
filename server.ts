@@ -31,11 +31,23 @@ app.use('/public', express.static(path.join(process.cwd(), 'public')));
 
 // Download complete source code ZIP archive route
 app.get('/download-source', (req, res) => {
-  const zipPath = path.join(process.cwd(), 'public', 'swiftpay_complete_source.zip');
+  const zipPath = path.join(process.cwd(), 'public', 'swiftpay_complete_source_v2.zip');
+  const fallbackPath = path.join(process.cwd(), 'public', 'swiftpay_complete_source.zip');
   if (fs.existsSync(zipPath)) {
-    res.download(zipPath, 'swiftpay_complete_source.zip');
+    res.download(zipPath, 'swiftpay_complete_source_v2.zip');
+  } else if (fs.existsSync(fallbackPath)) {
+    res.download(fallbackPath, 'swiftpay_complete_source.zip');
   } else {
     res.status(404).json({ error: 'Source code archive is being generated. Please refresh in a moment.' });
+  }
+});
+
+app.get('/download-source-v2', (req, res) => {
+  const zipPath = path.join(process.cwd(), 'public', 'swiftpay_complete_source_v2.zip');
+  if (fs.existsSync(zipPath)) {
+    res.download(zipPath, 'swiftpay_complete_source_v2.zip');
+  } else {
+    res.status(404).json({ error: 'Archive v2 not found.' });
   }
 });
 

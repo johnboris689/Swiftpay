@@ -1531,7 +1531,7 @@ export default function App() {
     setTransferVerified(false);
 
     const controller = new AbortController();
-    const token = localStorage.getItem('swiftpay_auth_token');
+    const token = localStorage.getItem('swiftpay_token');
 
     fetch('/api/verify-account', {
       method: 'POST',
@@ -1628,7 +1628,7 @@ export default function App() {
     setWithdrawVerified(false);
 
     const controller = new AbortController();
-    const token = localStorage.getItem('swiftpay_auth_token');
+    const token = localStorage.getItem('swiftpay_token');
 
     fetch('/api/verify-account', {
       method: 'POST',
@@ -1691,7 +1691,7 @@ export default function App() {
     setCurrentScreen('wdv_processing');
 
     try {
-      const token = localStorage.getItem('swiftpay_auth_token');
+      const token = localStorage.getItem('swiftpay_token');
       const res = await fetch('/api/paystack/virtual-account', {
         method: 'POST',
         headers: {
@@ -1736,7 +1736,7 @@ export default function App() {
       return;
     }
 
-    const token = localStorage.getItem('swiftpay_auth_token');
+    const token = localStorage.getItem('swiftpay_token');
     const pollInterval = setInterval(async () => {
       try {
         const res = await fetch(`/api/paystack/payment-status/${activeWdvPayment.reference}`, {

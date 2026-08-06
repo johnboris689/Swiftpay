@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Users, User, Mail, Phone, Building, CreditCard, Hash, Calendar, Check, Image, Coins, ShoppingBag, ShieldAlert, ArrowLeft, Search, UserMinus, ToggleLeft, ToggleRight, Trash2, Edit2, Key, RefreshCw, Send, FileSpreadsheet, BarChart3, Database, MessageSquare, AlertCircle, Video, Settings, DollarSign, CheckCircle, UploadCloud, Clock, ArrowUpRight, FileText, XCircle, AlertTriangle, Inbox, Menu, X, Globe, Megaphone, Save, Eye, Bot, Sparkles, HelpCircle, Headphones, MessageCircle } from 'lucide-react';
 import GlassCard from './GlassCard';
 import AdminDashboard1To1 from './AdminDashboard1To1';
+import AdminSidebar from './AdminSidebar';
 import { CyberWithdrawalTerminal } from './CyberWithdrawalTerminal';
 
 interface AdminPanelProps {
@@ -1782,205 +1783,16 @@ export default function AdminPanel({
       </div>
 
       <div className="flex flex-col lg:flex-row gap-4 items-start">
-        {/* Compact Sidebar Menu */}
-        <div className={`w-full lg:w-56 shrink-0 flex flex-col space-y-1.5 bg-[#0d0d18] border border-white/10 rounded-xl p-2.5 transition-all duration-300 ${mobileMenuOpen ? 'flex' : 'hidden lg:flex'}`}>
-          <div className="text-[9px] font-mono uppercase tracking-wider text-slate-500 mb-1 px-2 font-bold">Admin Navigation</div>
-          
-          <button
-            onClick={() => {
-              setActiveTab('overview');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full text-left px-3 py-2 rounded-lg font-bold text-[10px] uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer ${
-              (activeTab as string) === 'overview'
-                ? 'bg-gradient-to-r from-teal-500/15 to-indigo-500/15 border border-teal-500/30 text-teal-400'
-                : 'border border-transparent hover:bg-white/5 text-slate-400 hover:text-white'
-            }`}
-          >
-            <BarChart3 className="h-3.5 w-3.5 text-teal-400" />
-            Dashboard Overview
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveTab('users');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full text-left px-3 py-2 rounded-lg font-bold text-[10px] uppercase tracking-wider flex items-center gap-2 justify-between transition-all cursor-pointer ${
-              activeTab === 'users'
-                ? 'bg-gradient-to-r from-teal-500/15 to-indigo-500/15 border border-teal-500/30 text-teal-400'
-                : 'border border-transparent hover:bg-white/5 text-slate-400 hover:text-white'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <Users className="h-3.5 w-3.5 text-teal-400" />
-              User Database
-            </div>
-            <span className="px-1.5 py-0.2 rounded-full bg-teal-500/10 text-teal-400 text-[9px] font-mono font-bold">
-              {users.length}
-            </span>
-          </button>
-          
-          <button
-            onClick={() => {
-              setActiveTab('voucher_generator');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full text-left px-3 py-2 rounded-lg font-bold text-[10px] uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'voucher_generator'
-                ? 'bg-gradient-to-r from-teal-500/15 to-indigo-500/15 border border-teal-500/30 text-teal-400'
-                : 'border border-transparent hover:bg-white/5 text-slate-400 hover:text-white'
-            }`}
-          >
-            <Key className="h-3.5 w-3.5 text-teal-400" />
-            WDV Voucher Generator
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveTab('payments');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full text-left px-3 py-2 rounded-lg font-bold text-[10px] uppercase tracking-wider flex items-center gap-2 justify-between transition-all cursor-pointer ${
-              activeTab === 'payments'
-                ? 'bg-gradient-to-r from-teal-500/15 to-indigo-500/15 border border-teal-500/30 text-teal-400'
-                : 'border border-transparent hover:bg-white/5 text-slate-400 hover:text-white'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <CreditCard className="h-3.5 w-3.5 text-teal-400" />
-              Bank Payments
-            </div>
-            {payments.filter(p => p.status === 'pending').length > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full bg-teal-500/20 text-teal-400 text-[9px] font-mono font-bold animate-pulse">
-                {payments.filter(p => p.status === 'pending').length}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveTab('withdrawals');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full text-left px-3 py-2 rounded-lg font-bold text-[10px] uppercase tracking-wider flex items-center gap-2 justify-between transition-all cursor-pointer ${
-              activeTab === 'withdrawals'
-                ? 'bg-gradient-to-r from-teal-500/15 to-indigo-500/15 border border-teal-500/30 text-teal-400'
-                : 'border border-transparent hover:bg-white/5 text-slate-400 hover:text-white'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <DollarSign className="h-3.5 w-3.5 text-teal-400" />
-              Withdrawals
-            </div>
-            {stats.pendingCount > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full bg-yellow-500/20 text-yellow-400 text-[9px] font-mono font-bold">
-                {stats.pendingCount}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveTab('reports');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full text-left px-3 py-2 rounded-lg font-bold text-[10px] uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'reports'
-                ? 'bg-gradient-to-r from-teal-500/15 to-indigo-500/15 border border-teal-500/30 text-teal-400'
-                : 'border border-transparent hover:bg-white/5 text-slate-400 hover:text-white'
-            }`}
-          >
-            <FileSpreadsheet className="h-3.5 w-3.5 text-teal-400" />
-            System Reports
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveTab('security');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full text-left px-3 py-2 rounded-lg font-bold text-[10px] uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'security'
-                ? 'bg-gradient-to-r from-teal-500/15 to-indigo-500/15 border border-teal-500/30 text-teal-400'
-                : 'border border-transparent hover:bg-white/5 text-slate-400 hover:text-white'
-            }`}
-          >
-            <ShieldAlert className="h-3.5 w-3.5 text-teal-400" />
-            Security Center
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveTab('payment_settings');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full text-left px-3 py-2 rounded-lg font-bold text-[10px] uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'payment_settings'
-                ? 'bg-gradient-to-r from-teal-500/15 to-indigo-500/15 border border-teal-500/30 text-teal-400'
-                : 'border border-transparent hover:bg-white/5 text-slate-400 hover:text-white'
-            }`}
-          >
-            <Building className="h-3.5 w-3.5 text-teal-400" />
-            Payment Account Management
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveTab('settings');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full text-left px-3 py-2 rounded-lg font-bold text-[10px] uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'settings'
-                ? 'bg-gradient-to-r from-teal-500/15 to-indigo-500/15 border border-teal-500/30 text-teal-400'
-                : 'border border-transparent hover:bg-white/5 text-slate-400 hover:text-white'
-            }`}
-          >
-            <Settings className="h-3.5 w-3.5 text-teal-400" />
-            Master Settings
-          </button>
-
-          <button
-            id="btn-admin-tab-ai-support"
-            onClick={() => {
-              setActiveTab('ai_support');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full text-left px-3 py-2 rounded-lg font-bold text-[10px] uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'ai_support'
-                ? 'bg-gradient-to-r from-teal-500/15 to-indigo-500/15 border border-teal-500/30 text-teal-400'
-                : 'border border-transparent hover:bg-white/5 text-slate-400 hover:text-white'
-            }`}
-          >
-            <Bot className="h-3.5 w-3.5 text-teal-400" />
-            AI Assistant &amp; Support
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveTab('logs');
-              setMobileMenuOpen(false);
-            }}
-            className={`w-full text-left px-3 py-2 rounded-lg font-bold text-[10px] uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'logs'
-                ? 'bg-gradient-to-r from-teal-500/15 to-indigo-500/15 border border-teal-500/30 text-teal-400'
-                : 'border border-transparent hover:bg-white/5 text-slate-400 hover:text-white'
-            }`}
-          >
-            <Clock className="h-3.5 w-3.5 text-teal-400" />
-            Audit Trail Logs
-          </button>
-
-          <div className="pt-2 border-t border-white/5 mt-2">
-            <button
-              onClick={onBack}
-              className="w-full text-left px-3 py-1.5 rounded-lg border border-white/5 hover:border-red-500/25 hover:bg-red-500/10 text-slate-400 hover:text-red-400 font-bold text-[10px] uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer"
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              Exit Console
-            </button>
-          </div>
-        </div>
+        <AdminSidebar
+          activeTab={activeTab as any}
+          onNavigateTab={(tab) => setActiveTab(tab)}
+          usersCount={users.length}
+          pendingPaymentsCount={payments.filter(p => p.status === 'pending').length}
+          pendingWithdrawalsCount={stats.pendingCount}
+          mobileMenuOpen={mobileMenuOpen}
+          setMobileMenuOpen={setMobileMenuOpen}
+          onExit={onBack}
+        />
 
         {/* Content Workspace */}
         <div className="flex-1 w-full space-y-4 min-w-0">

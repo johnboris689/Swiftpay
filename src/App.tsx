@@ -931,8 +931,15 @@ export default function App() {
             if (data.user.transactions) {
               setTransactions(data.user.transactions);
             }
-            if (data.user.notifications) {
-              setNotifications(data.user.notifications);
+            if (data.user.notifications && Array.isArray(data.user.notifications)) {
+              setNotifications(prev => {
+                const readSet = new Set(prev.filter(n => !n.unread).map(n => n.id));
+                const merged = data.user.notifications.map((n: any) => 
+                  readSet.has(n.id) ? { ...n, unread: false } : n
+                );
+                localStorage.setItem('swiftpay_notifications', JSON.stringify(merged));
+                return merged;
+              });
             }
             if (data.user.loginHistory) {
               setLoginHistory(data.user.loginHistory);
@@ -2424,12 +2431,28 @@ export default function App() {
 
   // Mark single notification read
   const handleMarkNotifRead = (id: string) => {
-    setNotifications(notifications.map(n => n.id === id ? { ...n, unread: false } : n));
+    setNotifications(prev => {
+      const updated = prev.map(n => n.id === id ? { ...n, unread: false } : n);
+      try {
+        localStorage.setItem('swiftpay_notifications', JSON.stringify(updated));
+      } catch (e) {
+        console.error("Failed to save notifications to localStorage", e);
+      }
+      return updated;
+    });
   };
 
   // Mark all notifications read
   const handleMarkAllNotifsRead = () => {
-    setNotifications(notifications.map(n => ({ ...n, unread: false })));
+    setNotifications(prev => {
+      const updated = prev.map(n => ({ ...n, unread: false }));
+      try {
+        localStorage.setItem('swiftpay_notifications', JSON.stringify(updated));
+      } catch (e) {
+        console.error("Failed to save notifications to localStorage", e);
+      }
+      return updated;
+    });
     showToast('All notifications marked as read', 'info');
   };
 

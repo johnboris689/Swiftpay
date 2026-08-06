@@ -2460,8 +2460,7 @@ async function verifyBankAccountService(bankName: string, accountNumber: string)
   try {
     const requestPayload = {
       bank: bCode,
-      account: accountNumber,
-      currency: "NGN"
+      account: accountNumber
     };
     console.log('[Bank Resolve Request]', JSON.stringify(requestPayload));
 
@@ -2477,24 +2476,26 @@ async function verifyBankAccountService(bankName: string, accountNumber: string)
     let kData = await kRes.json();
     console.log('[Bank Resolve Response Status]', kRes.status, JSON.stringify(kData));
 
-    // Fallback attempt without currency or with account_number if needed
+    // Fallback attempt with account_number if account didn't return data
     if (!kData.status || (!kData.data?.account_name && !kData.data?.accountName)) {
-      const altPayload = {
-        bank: bCode,
-        account: accountNumber
-      };
-      const altRes = await fetch('https://api.korapay.com/merchant/api/v1/misc/banks/resolve', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${korapaySecretKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(altPayload)
-      });
-      const altData = await altRes.json();
-      console.log('[Bank Resolve Alt Response Status]', altRes.status, JSON.stringify(altData));
-      if (altData.status && altData.data && (altData.data.account_name || altData.data.accountName)) {
-        kData = altData;
+      if (kRes.status !== 400) {
+        const altPayload = {
+          bank: bCode,
+          account_number: accountNumber
+        };
+        const altRes = await fetch('https://api.korapay.com/merchant/api/v1/misc/banks/resolve', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${korapaySecretKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(altPayload)
+        });
+        const altData = await altRes.json();
+        console.log('[Bank Resolve Alt Response Status]', altRes.status, JSON.stringify(altData));
+        if (altData.status && altData.data && (altData.data.account_name || altData.data.accountName)) {
+          kData = altData;
+        }
       }
     }
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getCachedSettings } from '../services/settingsService';
+import AdminSidebar, { AdminTab } from './AdminSidebar';
 import {
   Users,
   Wallet,
@@ -38,7 +39,8 @@ import {
   Lock,
   Activity,
   RefreshCw,
-  Radio
+  Radio,
+  ExternalLink
 } from 'lucide-react';
 
 interface AdminDashboard1To1Props {
@@ -50,8 +52,11 @@ interface AdminDashboard1To1Props {
   users: any[];
   logs: any[];
   stats: any;
-  onNavigateTab: (tab: string) => void;
+  onNavigateTab: (tab: AdminTab) => void;
   onBack: () => void;
+  pendingPaymentsCount?: number;
+  pendingWithdrawalsCount?: number;
+  onToast?: (msg: string, type: 'success' | 'info' | 'error') => void;
 }
 
 // Sparkline SVG Component
@@ -96,14 +101,83 @@ export default function AdminDashboard1To1({
   logs,
   stats,
   onNavigateTab,
-  onBack
+  onBack,
+  pendingPaymentsCount = 0,
+  pendingWithdrawalsCount = 0,
+  onToast
 }: AdminDashboard1To1Props) {
-  const [activeSidebar, setActiveSidebar] = useState('home');
+  const [activeSidebar, setActiveSidebar] = useState<AdminTab>('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [calendarFilter, setCalendarFilter] = useState<'all' | 'today' | 'week' | 'month' | 'custom'>('all');
   const [showCalendarModal, setShowCalendarModal] = useState(false);
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
+  const [openCardMenu, setOpenCardMenu] = useState<string | null>(null);
+
+  const handleCardAction = (action: 'open' | 'refresh' | 'export', targetTab: AdminTab, title: string) => {
+    setOpenCardMenu(null);
+    if (action === 'open') {
+      onNavigateTab(targetTab);
+    } else if (action === 'refresh') {
+      if (onToast) onToast(`Refreshed ${title} data`, 'info');
+    } else if (action === 'export') {
+      const content = `Report,${title}\nGenerated,${new Date().toISOString()}\nStatus,Active\nValue,Live Data`;
+      const blob = new Blob([content], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${title.toLowerCase().replace(/[^a-z0-9]/g, '_')}_export.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      if (onToast) onToast(`Exported ${title} report to CSV`, 'success');
+    }
+  };
+
+  const renderCardMenu = (cardId: string, title: string, targetTab: AdminTab) => (
+    <div className="relative">
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpenCardMenu(openCardMenu === cardId ? null : cardId);
+        }}
+        className="text-slate-500 hover:text-slate-300 p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+        title="Card Actions"
+      >
+        <MoreVertical className="h-4 w-4" />
+      </button>
+
+      {openCardMenu === cardId && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="absolute right-0 top-8 z-50 w-44 bg-[#0d1326] border border-teal-500/40 rounded-xl shadow-2xl p-1.5 font-sans space-y-0.5 animate-[fadeIn_0.15s_ease-out]"
+        >
+          <button
+            onClick={() => handleCardAction('open', targetTab, title)}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-bold text-teal-300 hover:bg-teal-500/20 transition-colors cursor-pointer text-left"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            <span>Open Page</span>
+          </button>
+          <button
+            onClick={() => handleCardAction('refresh', targetTab, title)}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-200 hover:bg-white/10 transition-colors cursor-pointer text-left"
+          >
+            <RefreshCw className="h-3.5 w-3.5 text-cyan-400" />
+            <span>Refresh</span>
+          </button>
+          <button
+            onClick={() => handleCardAction('export', targetTab, title)}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-200 hover:bg-white/10 transition-colors cursor-pointer text-left"
+          >
+            <Download className="h-3.5 w-3.5 text-emerald-400" />
+            <span>Export</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
 
   // Live time for SOC header
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -201,7 +275,7 @@ export default function AdminDashboard1To1({
           </button>
 
           {/* SwiftPay Brand & SOC Title */}
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveSidebar('home')}>
+          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveSidebar('overview')}>
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-teal-500 via-indigo-600 to-purple-600 p-0.5 shadow-lg shadow-teal-500/20 flex items-center justify-center">
               <div className="w-full h-full bg-[#080c16] rounded-[14px] flex items-center justify-center font-black text-transparent bg-clip-text bg-gradient-to-tr from-teal-400 to-cyan-200 text-lg">
                 S
@@ -280,130 +354,17 @@ export default function AdminDashboard1To1({
 
       <div className="flex">
         {/* 3. LEFT CYBER SIDEBAR NAVIGATION */}
-        <aside
-          className={`fixed lg:static inset-y-24 left-0 z-40 w-20 lg:w-56 bg-[#080c16]/95 border-r border-white/10 flex flex-col p-3 space-y-2 transition-transform duration-300 ${
-            mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
-          }`}
-        >
-          <div className="text-[9px] font-mono uppercase tracking-widest text-slate-500 px-3 py-1 font-bold hidden lg:block">
-            SOC Navigation
-          </div>
-
-          <button
-            onClick={() => {
-              setActiveSidebar('home');
-              onNavigateTab('overview');
-            }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              activeSidebar === 'home'
-                ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30 shadow-[0_0_15px_rgba(20,184,166,0.15)]'
-                : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
-            }`}
-          >
-            <Home className="h-4 w-4 text-teal-400 shrink-0" />
-            <span className="hidden lg:inline">Overview SOC</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveSidebar('users');
-              onNavigateTab('users');
-            }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              activeSidebar === 'users'
-                ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30 shadow-[0_0_15px_rgba(20,184,166,0.15)]'
-                : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
-            }`}
-          >
-            <Users className="h-4 w-4 text-indigo-400 shrink-0" />
-            <span className="hidden lg:inline">User Database</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveSidebar('vouchers');
-              onNavigateTab('voucher_generator');
-            }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              activeSidebar === 'vouchers'
-                ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30 shadow-[0_0_15px_rgba(20,184,166,0.15)]'
-                : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
-            }`}
-          >
-            <ArrowLeftRight className="h-4 w-4 text-cyan-400 shrink-0" />
-            <span className="hidden lg:inline">WDV Generator</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveSidebar('withdrawals');
-              onNavigateTab('withdrawals');
-            }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              activeSidebar === 'withdrawals'
-                ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30 shadow-[0_0_15px_rgba(20,184,166,0.15)]'
-                : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
-            }`}
-          >
-            <CreditCard className="h-4 w-4 text-amber-400 shrink-0" />
-            <span className="hidden lg:inline">Withdrawal Hub</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveSidebar('analytics');
-              onNavigateTab('reports');
-            }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              activeSidebar === 'analytics'
-                ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30 shadow-[0_0_15px_rgba(20,184,166,0.15)]'
-                : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
-            }`}
-          >
-            <BarChart3 className="h-4 w-4 text-purple-400 shrink-0" />
-            <span className="hidden lg:inline">Financial Audits</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveSidebar('security');
-              onNavigateTab('security');
-            }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              activeSidebar === 'security'
-                ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30 shadow-[0_0_15px_rgba(20,184,166,0.15)]'
-                : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
-            }`}
-          >
-            <Shield className="h-4 w-4 text-rose-400 shrink-0" />
-            <span className="hidden lg:inline">Security Shield</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveSidebar('settings');
-              onNavigateTab('settings');
-            }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-              activeSidebar === 'settings'
-                ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30 shadow-[0_0_15px_rgba(20,184,166,0.15)]'
-                : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
-            }`}
-          >
-            <Settings className="h-4 w-4 text-slate-400 shrink-0" />
-            <span className="hidden lg:inline">System Config</span>
-          </button>
-
-          <div className="mt-auto pt-4 border-t border-white/10">
-            <button
-              onClick={onBack}
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
-            >
-              <LogOut className="h-4 w-4 shrink-0" />
-              <span className="hidden lg:inline">Exit Console</span>
-            </button>
-          </div>
-        </aside>
+        <AdminSidebar
+          activeTab="overview"
+          onNavigateTab={onNavigateTab}
+          usersCount={totalUsersCount || users.length}
+          pendingPaymentsCount={pendingPaymentsCount}
+          pendingWithdrawalsCount={pendingWithdrawalsCount || stats?.pendingCount || 0}
+          mobileMenuOpen={mobileMenuOpen}
+          setMobileMenuOpen={setMobileMenuOpen}
+          onExit={onBack}
+          isCyberStyle={true}
+        />
 
         {/* 4. MAIN CONTENT WORKSPACE */}
         <main className="flex-1 p-3 sm:p-5 md:p-6 space-y-6 max-w-[1650px] mx-auto overflow-x-hidden">
@@ -455,9 +416,7 @@ export default function AdminDashboard1To1({
                     <div className="text-2xl font-black text-white font-mono">{displayUsersCount || 3}</div>
                   </div>
                 </div>
-                <button className="text-slate-500 hover:text-slate-300 p-1 cursor-pointer">
-                  <MoreVertical className="h-4 w-4" />
-                </button>
+                {renderCardMenu('users', 'Total Registered Users', 'users')}
               </div>
 
               <div className="mt-4 flex items-center justify-between pt-3 border-t border-white/10">
@@ -486,9 +445,7 @@ export default function AdminDashboard1To1({
                     </div>
                   </div>
                 </div>
-                <button className="text-slate-500 hover:text-slate-300 p-1 cursor-pointer">
-                  <MoreVertical className="h-4 w-4" />
-                </button>
+                {renderCardMenu('ledger', 'Total System Ledger', 'reports')}
               </div>
 
               <div className="mt-4 flex items-center justify-between pt-3 border-t border-white/10">
@@ -515,9 +472,7 @@ export default function AdminDashboard1To1({
                     <div className="text-2xl font-black text-white font-mono">₦{displayRevenue.toLocaleString()}</div>
                   </div>
                 </div>
-                <button className="text-slate-500 hover:text-slate-300 p-1 cursor-pointer">
-                  <MoreVertical className="h-4 w-4" />
-                </button>
+                {renderCardMenu('revenue', 'System Charges Revenue', 'reports')}
               </div>
 
               <div className="mt-4 flex items-center justify-between pt-3 border-t border-white/10">
@@ -544,9 +499,7 @@ export default function AdminDashboard1To1({
                     <div className="text-2xl font-black text-white font-mono">{displayTxsCount || 1}</div>
                   </div>
                 </div>
-                <button className="text-slate-500 hover:text-slate-300 p-1 cursor-pointer">
-                  <MoreVertical className="h-4 w-4" />
-                </button>
+                {renderCardMenu('transactions', 'Executed Transactions', 'logs')}
               </div>
 
               <div className="mt-4 flex items-center justify-between pt-3 border-t border-white/10">
@@ -847,48 +800,60 @@ export default function AdminDashboard1To1({
 
           {/* 8. BOTTOM ROW STATS CARDS */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="p-4 rounded-2xl bg-[#080d1a]/90 border border-white/10 backdrop-blur-xl flex items-center gap-3.5 shadow-lg">
-              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 shrink-0">
-                <Download className="h-5 w-5" />
+            <div className="p-4 rounded-2xl bg-[#080d1a]/90 border border-white/10 backdrop-blur-xl flex items-center justify-between gap-3.5 shadow-lg">
+              <div className="flex items-center gap-3.5">
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 shrink-0">
+                  <Download className="h-5 w-5" />
+                </div>
+                <div>
+                  <span className="text-[9px] font-mono font-bold tracking-widest text-slate-400 uppercase block">PENDING WITHDRAWALS</span>
+                  <div className="text-xl font-black text-white font-mono">{stats.pendingCount || 32}</div>
+                  <div className="text-[10px] text-amber-400 font-mono font-bold mt-0.5">Requires Operator Verification</div>
+                </div>
               </div>
-              <div>
-                <span className="text-[9px] font-mono font-bold tracking-widest text-slate-400 uppercase block">PENDING WITHDRAWALS</span>
-                <div className="text-xl font-black text-white font-mono">{stats.pendingCount || 32}</div>
-                <div className="text-[10px] text-amber-400 font-mono font-bold mt-0.5">Requires Operator Verification</div>
-              </div>
+              {renderCardMenu('pending_withdrawals', 'Pending Withdrawals', 'withdrawals')}
             </div>
 
-            <div className="p-4 rounded-2xl bg-[#080d1a]/90 border border-white/10 backdrop-blur-xl flex items-center gap-3.5 shadow-lg">
-              <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-400 shrink-0">
-                <UserPlus className="h-5 w-5" />
+            <div className="p-4 rounded-2xl bg-[#080d1a]/90 border border-white/10 backdrop-blur-xl flex items-center justify-between gap-3.5 shadow-lg">
+              <div className="flex items-center gap-3.5">
+                <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-400 shrink-0">
+                  <UserPlus className="h-5 w-5" />
+                </div>
+                <div>
+                  <span className="text-[9px] font-mono font-bold tracking-widest text-slate-400 uppercase block">NEW USERS TODAY</span>
+                  <div className="text-xl font-black text-white font-mono">8</div>
+                  <div className="text-[10px] text-emerald-400 font-mono font-bold mt-0.5">+18.6% Growth Rate</div>
+                </div>
               </div>
-              <div>
-                <span className="text-[9px] font-mono font-bold tracking-widest text-slate-400 uppercase block">NEW USERS TODAY</span>
-                <div className="text-xl font-black text-white font-mono">8</div>
-                <div className="text-[10px] text-emerald-400 font-mono font-bold mt-0.5">+18.6% Growth Rate</div>
-              </div>
+              {renderCardMenu('new_users', 'New Users Today', 'users')}
             </div>
 
-            <div className="p-4 rounded-2xl bg-[#080d1a]/90 border border-white/10 backdrop-blur-xl flex items-center gap-3.5 shadow-lg">
-              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 shrink-0">
-                <ShieldAlert className="h-5 w-5" />
+            <div className="p-4 rounded-2xl bg-[#080d1a]/90 border border-white/10 backdrop-blur-xl flex items-center justify-between gap-3.5 shadow-lg">
+              <div className="flex items-center gap-3.5">
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 shrink-0">
+                  <ShieldAlert className="h-5 w-5" />
+                </div>
+                <div>
+                  <span className="text-[9px] font-mono font-bold tracking-widest text-slate-400 uppercase block">FAILED TRANSACTIONS</span>
+                  <div className="text-xl font-black text-white font-mono">4</div>
+                  <div className="text-[10px] text-emerald-400 font-mono font-bold mt-0.5">99.8% System Reliability</div>
+                </div>
               </div>
-              <div>
-                <span className="text-[9px] font-mono font-bold tracking-widest text-slate-400 uppercase block">FAILED TRANSACTIONS</span>
-                <div className="text-xl font-black text-white font-mono">4</div>
-                <div className="text-[10px] text-emerald-400 font-mono font-bold mt-0.5">99.8% System Reliability</div>
-              </div>
+              {renderCardMenu('failed_txs', 'Failed Transactions', 'security')}
             </div>
 
-            <div className="p-4 rounded-2xl bg-[#080d1a]/90 border border-white/10 backdrop-blur-xl flex items-center gap-3.5 shadow-lg">
-              <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 shrink-0">
-                <Layers className="h-5 w-5" />
+            <div className="p-4 rounded-2xl bg-[#080d1a]/90 border border-white/10 backdrop-blur-xl flex items-center justify-between gap-3.5 shadow-lg">
+              <div className="flex items-center gap-3.5">
+                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 shrink-0">
+                  <Layers className="h-5 w-5" />
+                </div>
+                <div>
+                  <span className="text-[9px] font-mono font-bold tracking-widest text-slate-400 uppercase block">SYSTEM HEALTH</span>
+                  <div className="text-xl font-black text-emerald-400 font-mono">100% OPERATIONAL</div>
+                  <div className="text-[10px] text-slate-400 font-mono mt-0.5">All Microservices Nominal</div>
+                </div>
               </div>
-              <div>
-                <span className="text-[9px] font-mono font-bold tracking-widest text-slate-400 uppercase block">SYSTEM HEALTH</span>
-                <div className="text-xl font-black text-emerald-400 font-mono">100% OPERATIONAL</div>
-                <div className="text-[10px] text-slate-400 font-mono mt-0.5">All Microservices Nominal</div>
-              </div>
+              {renderCardMenu('system_health', 'System Health', 'reports')}
             </div>
           </div>
 

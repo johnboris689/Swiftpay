@@ -1682,93 +1682,26 @@ export default function App() {
     };
   }, [withdrawBank, withdrawAccount]);
 
-  // Paystack Dedicated Virtual Account & WDV Payment Initiate Handler
+  // WDV Payment Initiate Handler (Manual Bank Transfer)
   const handleInitiateWdv = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setIsInitiatingWdv(true);
     setWdvFormName(user?.fullName || 'Client User');
     setWdvFormEmail(user?.email || 'user@example.com');
-    setCurrentScreen('wdv_processing');
 
-    try {
-      const token = localStorage.getItem('swiftpay_token');
-      const res = await fetch('/api/paystack/virtual-account', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({
-          email: wdvFormEmail || user?.email,
-          fullName: wdvFormName || user?.fullName
-        })
-      });
-
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setActiveWdvPayment({
-          reference: data.reference,
-          bankName: data.bankName,
-          accountNumber: data.accountNumber,
-          accountName: data.accountName,
-          amount: data.amount,
-          expiresAt: new Date(Date.now() + (data.expiresInSeconds || 900) * 1000).toISOString(),
-          status: 'pending'
-        });
-        setPaymentCountdown(data.expiresInSeconds || 900);
-        setCurrentScreen('wdv_instructions');
-      } else {
-        setPaymentCountdown(900);
-        setCurrentScreen('wdv_instructions');
-      }
-    } catch (err) {
-      console.warn('Paystack DVA generation failed, using fallback screen:', err);
-      setPaymentCountdown(900);
-      setCurrentScreen('wdv_instructions');
-    } finally {
-      setIsInitiatingWdv(false);
-    }
+    setActiveWdvPayment({
+      reference: `wdv-${Date.now()}`,
+      bankName: wdvConfig.bankName,
+      accountNumber: wdvConfig.accountNumber,
+      accountName: wdvConfig.accountName,
+      amount: wdvConfig.voucherPrice,
+      expiresAt: new Date(Date.now() + 900000).toISOString(),
+      status: 'pending'
+    });
+    setPaymentCountdown(900);
+    setCurrentScreen('wdv_instructions');
+    setIsInitiatingWdv(false);
   };
-
-  // Live Payment Polling Ticker (Paystack Automatic Payment Verification)
-  useEffect(() => {
-    if (currentScreen !== 'wdv_instructions' || !activeWdvPayment?.reference) {
-      return;
-    }
-
-    const token = localStorage.getItem('swiftpay_token');
-    const pollInterval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/paystack/payment-status/${activeWdvPayment.reference}`, {
-          headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {})
-          }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success && (data.status === 'successful' || data.status === 'settled') && data.voucherCode) {
-            clearInterval(pollInterval);
-            const newVoucher: WdvCode = {
-              id: `v-${Date.now()}`,
-              code: data.voucherCode,
-              voucherCode: data.voucherCode,
-              amount: data.amount || 6500,
-              status: 'unused',
-              generatedAt: data.paidAt || new Date().toISOString()
-            };
-            setGeneratedWdv(newVoucher);
-            setVouchers(prev => [newVoucher, ...prev]);
-            showToast('Paystack Payment Confirmed! WDV Voucher Code Automatically Generated.', 'success');
-            setCurrentScreen('wdv_success');
-          }
-        }
-      } catch (err) {
-        // Silent poll warning
-      }
-    }, 3000);
-
-    return () => clearInterval(pollInterval);
-  }, [currentScreen, activeWdvPayment]);
 
   // Generate and Download PDF Receipt for WDV Voucher
   const handleDownloadWdvPdfReceipt = () => {
@@ -1837,7 +1770,7 @@ export default function App() {
         { label: 'Voucher Status', val: 'UNUSED / ACTIVE' },
         { label: 'Voucher Price', val: `NGN ${(generatedWdv.amount || 6500).toLocaleString()}` },
         { label: 'Purchased By', val: user?.email || wdvFormEmail || 'Customer' },
-        { label: 'Payment Method', val: 'Paystack Dedicated Virtual Account' },
+        { label: 'Payment Method', val: 'Direct Bank Transfer' },
         { label: 'Issue Date', val: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) }
       ];
 
@@ -1859,7 +1792,7 @@ export default function App() {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184);
-      doc.text('SwiftPay Security System • Automatically Verified via Paystack Webhook', 105, 170, { align: 'center' });
+      doc.text('SwiftPay Security System • Automatically Verified', 105, 170, { align: 'center' });
 
       doc.save(`swiftpay-wdv-voucher-${generatedWdv.code || 'code'}.pdf`);
       showToast('WDV Voucher PDF Receipt Downloaded!', 'success');
@@ -4013,39 +3946,47 @@ export default function App() {
                 </div>
               )}
 
-              {/* -------------------- FLOW 4.2: PAYSTACK DEDICATED VIRTUAL ACCOUNT PAYMENT -------------------- */}
+              {/* -------------------- FLOW 4.2: MANUAL BANK TRANSFER PAYMENT -------------------- */}
               {currentScreen === 'wdv_instructions' && (
                 <div className="p-5 space-y-5 animate-[fadeIn_0.2s_ease-out]">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-base font-bold font-display text-slate-800 dark:text-white">Paystack Virtual Account</h4>
-                    <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20 flex items-center gap-1.5">
-                      <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                      Paystack Live Gateway
+                    <h4 className="text-base font-bold font-display text-slate-800 dark:text-white">WDV Voucher Payment Details</h4>
+                    <span className="text-[10px] font-mono font-bold text-teal-400 bg-teal-500/10 px-2.5 py-1 rounded-full border border-teal-500/20 flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full bg-teal-400 animate-pulse" />
+                      Official Bank Transfer
                     </span>
                   </div>
 
                   {/* Instructions */}
                   <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800/80 leading-relaxed text-xs text-slate-600 dark:text-slate-300 space-y-1">
                     <div className="font-semibold text-[10px] font-mono uppercase text-teal-400 tracking-wider">Payment Instructions:</div>
-                    <p>Transfer exactly ₦6,500 to your Paystack Dedicated Virtual Account below. Paystack will automatically process your payment and issue your unique WDV Voucher instantly.</p>
+                    <p>{wdvConfig.instructions || `Transfer exactly ₦${(wdvConfig.voucherPrice || 6500).toLocaleString()} to the official account details below. After completing your bank transfer, tap the "I HAVE MADE THIS TRANSFER" button below to notify support on WhatsApp.`}</p>
                   </div>
+
+                  {/* Maintenance notice if present */}
+                  {wdvConfig.maintenanceNotice && (
+                    <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-600 dark:text-amber-400 font-medium">
+                      ⚠️ {wdvConfig.maintenanceNotice}
+                    </div>
+                  )}
 
                   {/* ACCOUNT DETAILS CARD */}
                   <GlassCard className="p-5 space-y-3.5 bg-gradient-to-tr from-slate-900/80 to-indigo-950/40 border-teal-500/20">
-                    {/* Amount */}
+                    {/* Fixed Voucher Price */}
                     <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
                       <span className="text-xs text-slate-400">Fixed Voucher Price:</span>
                       <div className="flex items-center gap-1.5">
                         <span className="text-base font-mono font-extrabold text-teal-400">
-                          {nairaFormat(6500)}
+                          {nairaFormat(wdvConfig.voucherPrice || 6500)}
                         </span>
                         <button
                           id="btn-copy-amount"
+                          type="button"
                           onClick={() => {
-                            navigator.clipboard.writeText('6500');
+                            navigator.clipboard.writeText(String(wdvConfig.voucherPrice || 6500));
                             showToast('Amount copied!', 'success');
                           }}
-                          className="p-1 text-[9px] font-mono font-bold bg-white/10 rounded border border-white/10 text-slate-300 hover:bg-white/20 active:scale-95 transition-all"
+                          className="p-1 text-[9px] font-mono font-bold bg-white/10 rounded border border-white/10 text-slate-300 hover:bg-white/20 active:scale-95 transition-all cursor-pointer"
                         >
                           Copy
                         </button>
@@ -4057,15 +3998,16 @@ export default function App() {
                       <span className="text-xs text-slate-400">Bank Name:</span>
                       <div className="flex items-center gap-1.5">
                         <span className="text-sm font-mono font-bold text-white">
-                          {activeWdvPayment?.bankName || "Paystack DVA"}
+                          {wdvConfig.bankName || "PalmPay"}
                         </span>
                         <button
                           id="btn-copy-bank"
+                          type="button"
                           onClick={() => {
-                            navigator.clipboard.writeText(activeWdvPayment?.bankName || "Paystack DVA");
+                            navigator.clipboard.writeText(wdvConfig.bankName || "PalmPay");
                             showToast('Bank copied!', 'success');
                           }}
-                          className="p-1 text-[9px] font-mono font-bold bg-white/10 rounded border border-white/10 text-slate-300 hover:bg-white/20 active:scale-95 transition-all"
+                          className="p-1 text-[9px] font-mono font-bold bg-white/10 rounded border border-white/10 text-slate-300 hover:bg-white/20 active:scale-95 transition-all cursor-pointer"
                         >
                           Copy
                         </button>
@@ -4077,15 +4019,16 @@ export default function App() {
                       <span className="text-xs text-slate-400">Account Number:</span>
                       <div className="flex items-center gap-1.5">
                         <span className="text-lg font-mono font-extrabold text-amber-400 tracking-wider">
-                          {activeWdvPayment?.accountNumber || "Generating..."}
+                          {wdvConfig.accountNumber || "8960723295"}
                         </span>
                         <button
                           id="btn-copy-acc-num"
+                          type="button"
                           onClick={() => {
-                            navigator.clipboard.writeText(activeWdvPayment?.accountNumber || "");
+                            navigator.clipboard.writeText(wdvConfig.accountNumber || "8960723295");
                             showToast('Account Number copied!', 'success');
                           }}
-                          className="p-1 text-[9px] font-mono font-bold bg-white/10 rounded border border-white/10 text-slate-300 hover:bg-white/20 active:scale-95 transition-all"
+                          className="p-1 text-[9px] font-mono font-bold bg-white/10 rounded border border-white/10 text-slate-300 hover:bg-white/20 active:scale-95 transition-all cursor-pointer"
                         >
                           Copy
                         </button>
@@ -4097,15 +4040,16 @@ export default function App() {
                       <span className="text-xs text-slate-400">Account Name:</span>
                       <div className="flex items-center gap-1.5">
                         <span className="text-xs font-mono font-bold text-white uppercase text-right max-w-[180px] truncate">
-                          {activeWdvPayment?.accountName || "SWIFTPAY / PAYSTACK"}
+                          {wdvConfig.accountName || "pwamunadi ishaku"}
                         </span>
                         <button
                           id="btn-copy-acc-name"
+                          type="button"
                           onClick={() => {
-                            navigator.clipboard.writeText(activeWdvPayment?.accountName || "");
+                            navigator.clipboard.writeText(wdvConfig.accountName || "pwamunadi ishaku");
                             showToast('Account Name copied!', 'success');
                           }}
-                          className="p-1 text-[9px] font-mono font-bold bg-white/10 rounded border border-white/10 text-slate-300 hover:bg-white/20 active:scale-95 transition-all"
+                          className="p-1 text-[9px] font-mono font-bold bg-white/10 rounded border border-white/10 text-slate-300 hover:bg-white/20 active:scale-95 transition-all cursor-pointer"
                         >
                           Copy
                         </button>
@@ -4113,24 +4057,44 @@ export default function App() {
                     </div>
                   </GlassCard>
 
-                  {/* Real Gateway Live Indicator */}
-                  <div className="p-3 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-teal-500"></span>
-                      </span>
-                      <span className="text-[11px] font-mono text-teal-300 font-bold">Paystack Webhook Settlement Engine Active</span>
-                    </div>
-                    <span className="text-[10px] font-mono text-teal-400 font-extrabold uppercase">Live</span>
-                  </div>
-
                   {/* Primary actions */}
-                  <div className="pt-2 space-y-2">
+                  <div className="pt-2 space-y-3">
+                    <button
+                      id="btn-confirm-transfer-whatsapp"
+                      type="button"
+                      onClick={() => {
+                        const rawWa = wdvConfig.whatsappLink || systemSettings.whatsappLink || systemSettings.whatsappNumber || "+2349162845073";
+                        let waNumber = rawWa.replace(/[^0-9]/g, '');
+                        if (!waNumber && rawWa.includes('wa.me/')) {
+                          waNumber = rawWa.split('wa.me/')[1]?.replace(/[^0-9]/g, '') || '2349162845073';
+                        }
+                        if (!waNumber) waNumber = '2349162845073';
+
+                        const msg = encodeURIComponent(
+                          `Hello Admin, I have made a bank transfer of ₦${(wdvConfig.voucherPrice || 6500).toLocaleString()} for my WDV Voucher.\n` +
+                          `Name: ${wdvFormName || user?.fullName || 'Customer'}\n` +
+                          `Email: ${wdvFormEmail || user?.email || ''}\n` +
+                          `Please confirm my transfer and send my WDV Voucher code.`
+                        );
+
+                        const finalUrl = rawWa.startsWith('http') && !rawWa.includes('?')
+                          ? `${rawWa}?text=${msg}`
+                          : `https://wa.me/${waNumber}?text=${msg}`;
+
+                        window.open(finalUrl, '_blank');
+                        showToast('Opening WhatsApp support to verify transfer...', 'info');
+                      }}
+                      className="w-full py-4 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-indigo-600 hover:from-emerald-400 hover:to-indigo-500 text-slate-950 font-black text-xs uppercase tracking-widest shadow-xl shadow-teal-500/25 active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Send className="h-4 w-4" />
+                      <span>I HAVE MADE THIS TRANSFER</span>
+                    </button>
+
                     <button
                       id="btn-cancel-transfer"
+                      type="button"
                       onClick={() => setCurrentScreen('dashboard')}
-                      className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      className="w-full py-3 bg-slate-800/80 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <span>Return to Dashboard</span>
                     </button>
@@ -4152,7 +4116,7 @@ export default function App() {
                   {/* Voucher Display Card */}
                   <div className="bg-[#0a0a14] border border-emerald-500/30 p-5 rounded-2xl text-center space-y-3 relative overflow-hidden">
                     <div className="inline-block px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-bold uppercase tracking-wider font-mono">
-                      Paystack Verified & Active
+                      SwiftPay Verified & Active
                     </div>
 
                     <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-xl space-y-2">
@@ -5059,10 +5023,10 @@ export default function App() {
                           />
                         </div>
 
-                        {/* 3. Account Name - AUTOMATIC PAYSTACK VERIFICATION */}
+                        {/* 3. Account Name - AUTOMATIC VERIFICATION */}
                         <div>
                           <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold flex items-center justify-between">
-                            <span>3. Account Holder Name (Paystack Verified)</span>
+                            <span>3. Account Holder Name</span>
                             {isVerifyingWithdrawAccount && (
                               <span className="text-[10px] text-teal-400 font-mono flex items-center gap-1">
                                 <RefreshCw className="h-3 w-3 animate-spin" /> Resolving...
@@ -5072,7 +5036,7 @@ export default function App() {
                           {isVerifyingWithdrawAccount ? (
                             <div className="w-full text-xs bg-slate-950 border border-teal-500/30 rounded-xl px-4 py-3 text-teal-400 font-mono flex items-center gap-2 animate-pulse">
                               <RefreshCw className="h-4 w-4 animate-spin shrink-0" />
-                              <span>Resolving account holder name via Paystack API...</span>
+                              <span>Resolving account holder's name...</span>
                             </div>
                           ) : withdrawVerified && withdrawAccName ? (
                             <div className="w-full text-xs bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-3 text-emerald-300 font-mono font-bold flex items-center justify-between shadow-inner">
@@ -5314,10 +5278,10 @@ export default function App() {
                           />
                         </div>
 
-                        {/* 3. Account Name - AUTOMATIC PAYSTACK VERIFICATION */}
+                        {/* 3. Account Name - AUTOMATIC VERIFICATION */}
                         <div>
                           <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold flex items-center justify-between">
-                            <span>3. Account Holder Name (Paystack Verified)</span>
+                            <span>3. Account Holder Name</span>
                             {isVerifyingAccount && (
                               <span className="text-[10px] text-indigo-400 font-mono flex items-center gap-1">
                                 <RefreshCw className="h-3 w-3 animate-spin" /> Resolving...
@@ -5327,7 +5291,7 @@ export default function App() {
                           {isVerifyingAccount ? (
                             <div className="w-full text-xs bg-slate-950 border border-indigo-500/30 rounded-xl px-4 py-3 text-indigo-400 font-mono flex items-center gap-2 animate-pulse">
                               <RefreshCw className="h-4 w-4 animate-spin shrink-0" />
-                              <span>Resolving account holder name via Paystack API...</span>
+                              <span>Resolving account holder's name...</span>
                             </div>
                           ) : transferVerified && transferAccName ? (
                             <div className="w-full text-xs bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-3 text-emerald-300 font-mono font-bold flex items-center justify-between shadow-inner">

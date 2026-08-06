@@ -29,6 +29,24 @@ app.use(express.json());
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 app.use('/public', express.static(path.join(process.cwd(), 'public')));
 
+app.get('/swiftpay_complete_source_v2.zip', (req, res) => {
+  const zipPath = path.join(process.cwd(), 'public', 'swiftpay_complete_source_v2.zip');
+  if (fs.existsSync(zipPath)) {
+    res.download(zipPath, 'swiftpay_complete_source_v2.zip');
+  } else {
+    res.status(404).send('Archive not found');
+  }
+});
+
+app.get('/swiftpay_complete_source.zip', (req, res) => {
+  const zipPath = path.join(process.cwd(), 'public', 'swiftpay_complete_source_v2.zip');
+  if (fs.existsSync(zipPath)) {
+    res.download(zipPath, 'swiftpay_complete_source_v2.zip');
+  } else {
+    res.status(404).send('Archive not found');
+  }
+});
+
 // Download complete source code ZIP archive route
 app.get('/download-source', (req, res) => {
   const zipPath = path.join(process.cwd(), 'public', 'swiftpay_complete_source_v2.zip');
@@ -90,28 +108,28 @@ app.get('/swiftpay_complete_source.zip', (req, res) => {
   }
 });
 
+app.get('/swiftpay_complete_source_v2.zip', (req, res) => {
+  const zipPath = path.join(process.cwd(), 'swiftpay_complete_source_v2.zip');
+  if (fs.existsSync(zipPath)) {
+    res.download(zipPath, 'swiftpay_complete_source_v2.zip');
+  } else {
+    res.status(404).send('ZIP file not found');
+  }
+});
+
+app.get('/download/swiftpay_complete_source_v2.zip', (req, res) => {
+  const zipPath = path.join(process.cwd(), 'swiftpay_complete_source_v2.zip');
+  if (fs.existsSync(zipPath)) {
+    res.download(zipPath, 'swiftpay_complete_source_v2.zip');
+  } else {
+    res.status(404).send('ZIP file not found');
+  }
+});
+
 app.get('/download/swiftpay_complete_source.zip', (req, res) => {
   const zipPath = path.join(process.cwd(), 'swiftpay_complete_source.zip');
   if (fs.existsSync(zipPath)) {
     res.download(zipPath, 'swiftpay_complete_source.zip');
-  } else {
-    res.status(404).send('ZIP file not found');
-  }
-});
-
-app.get('/swiftpay-paystack-auto-wdv-update.zip', (req, res) => {
-  const zipPath = path.join(process.cwd(), 'swiftpay-paystack-auto-wdv-update.zip');
-  if (fs.existsSync(zipPath)) {
-    res.download(zipPath, 'swiftpay-paystack-auto-wdv-update.zip');
-  } else {
-    res.status(404).send('ZIP file not found');
-  }
-});
-
-app.get('/download/swiftpay-paystack-auto-wdv-update.zip', (req, res) => {
-  const zipPath = path.join(process.cwd(), 'swiftpay-paystack-auto-wdv-update.zip');
-  if (fs.existsSync(zipPath)) {
-    res.download(zipPath, 'swiftpay-paystack-auto-wdv-update.zip');
   } else {
     res.status(404).send('ZIP file not found');
   }
@@ -2323,119 +2341,168 @@ async function verifyBankAccountService(bankName: string, accountNumber: string)
     return { success: false, error: "Please select a valid bank." };
   }
 
+  if (!accountNumber || accountNumber.length !== 10) {
+    return { success: false, error: "Please enter a valid 10-digit account number." };
+  }
+
   // Reject obvious invalid account numbers (e.g. 0000000000)
   if (/^(\d)\1{9}$/.test(accountNumber) || accountNumber === '1234567890') {
-    return { success: false, error: "Invalid account number or bank combination." };
+    return { success: false, error: "Unable to verify account name" };
   }
 
-  // Bank Account Name Resolution (Manual Account Name Resolution & Deterministic Mapping)
-  const knownBeneficiaries: Record<string, string> = {
-    '0123456789': 'ALHAJI YUSUF DANGOTE',
-    '8960723295': 'CHIOMA SANDRA OKAFOR',
-    '2001458922': 'ADEBAYO BALOGUN',
-    '9012345678': 'KILANSE IBRAHIM ADEMOLA',
-    '8034567890': 'BLESSING NKECHI EZE',
-    '7055544433': 'EMMANUEL OLUWASEUN ADEYEMI',
-    '0112233445': 'SWIFTPAY SETTLEMENT ACCOUNT',
-    '1234567891': 'SULAIMON OLAWALE SANUSI',
-    '9988776655': 'AISHAT BALIKIS USMAN'
+  const korapaySecretKey = process.env.KORAPAY_SECRET_KEY || process.env.KORAPAY_PUBLIC_KEY || '';
+
+  const bankCodeMap: Record<string, string> = {
+    'access bank': '044',
+    'access bank limited': '044',
+    'access holdings plc': '044',
+    'citibank nigeria limited': '023',
+    'citibank': '023',
+    'ecobank nigeria limited': '050',
+    'ecobank': '050',
+    'fbn holdings plc': '011',
+    'first bank of nigeria limited': '011',
+    'first bank': '011',
+    'fcmb group plc': '214',
+    'first city monument bank limited (fcmb)': '214',
+    'first city monument bank': '214',
+    'fcmb': '214',
+    'fidelity bank plc': '070',
+    'fidelity bank': '070',
+    'globus bank limited': '000027',
+    'globus bank': '000027',
+    'guaranty trust bank limited (gtbank)': '058',
+    'guaranty trust holding company plc': '058',
+    'guaranty trust bank': '058',
+    'gtbank': '058',
+    'gtb': '058',
+    'heritage bank plc': '030',
+    'heritage bank': '030',
+    'jaiz bank plc': '035',
+    'jaiz bank': '035',
+    'keystone bank limited': '082',
+    'keystone bank': '082',
+    'kuda bank': '50211',
+    'kuda': '50211',
+    'moniepoint': '50515',
+    'moniepoint microfinance bank': '50515',
+    'opay': '999992',
+    'opay digital services': '999992',
+    'palmpay': '999991',
+    'polaris bank limited': '076',
+    'polaris bank': '076',
+    'providus bank limited': '101',
+    'providus bank': '101',
+    'stanbic ibtc bank limited': '221',
+    'stanbic ibtc': '221',
+    'standard chartered bank limited': '068',
+    'standard chartered': '068',
+    'sterling bank limited': '232',
+    'sterling bank': '232',
+    'suntrust bank nigeria limited': '100',
+    'suntrust bank': '100',
+    'taj bank limited': '000026',
+    'taj bank': '000026',
+    'union bank of nigeria plc': '032',
+    'union bank': '032',
+    'united bank for africa plc': '033',
+    'united bank for africa': '033',
+    'uba': '033',
+    'unity bank plc': '215',
+    'unity bank': '215',
+    'wema bank plc': '035',
+    'wema bank': '035',
+    'zenith bank plc': '057',
+    'zenith bank': '057',
+    '9psb': '120001',
+    'rubies': '125',
+    'carbon': '565',
+    'fairmoney': '51318',
+    'chipper cash': '50315',
+    'piggyvest': '51229'
   };
 
-  if (knownBeneficiaries[accountNumber]) {
-    return {
-      success: true,
-      accountName: knownBeneficiaries[accountNumber]
-    };
-  }
+  const normalizedBank = bankName.toLowerCase().trim();
+  let bCode = '';
 
-  const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY || '';
-  if (paystackSecretKey && paystackSecretKey.startsWith('sk_')) {
-    try {
-      const bankCodeMap: Record<string, string> = {
-        'access bank': '044',
-        'access bank limited': '044',
-        'access holdings plc': '044',
-        'citibank nigeria limited': '023',
-        'ecobank nigeria limited': '050',
-        'fbn holdings plc': '011',
-        'first bank of nigeria limited': '011',
-        'first bank': '011',
-        'first city monument bank limited (fcmb)': '214',
-        'fcmb group plc': '214',
-        'fidelity bank plc': '070',
-        'globus bank limited': '000027',
-        'guaranty trust bank limited (gtbank)': '058',
-        'guaranty trust holding company plc': '058',
-        'gtbank': '058',
-        'heritage bank plc': '030',
-        'jaiz bank plc': '035',
-        'keystone bank limited': '082',
-        'kuda bank': '50211',
-        'kuda': '50211',
-        'moniepoint': '50515',
-        'opay': '999992',
-        'palmpay': '999991',
-        'polaris bank limited': '076',
-        'providus bank limited': '101',
-        'stanbic ibtc bank limited': '221',
-        'standard chartered bank limited': '068',
-        'sterling bank limited': '232',
-        'suntrust bank nigeria limited': '100',
-        'taj bank limited': '000026',
-        'union bank of nigeria plc': '032',
-        'united bank for africa plc': '033',
-        'uba': '033',
-        'unity bank plc': '215',
-        'wema bank plc': '035',
-        'zenith bank plc': '057',
-        '9psb': '120001',
-        'rubies': '125'
-      };
-
-      const normalizedBank = bankName.toLowerCase().trim();
-      let bCode = bankCodeMap[normalizedBank];
-      if (!bCode) {
-        // Find partial key match
-        const matchedKey = Object.keys(bankCodeMap).find(k => normalizedBank.includes(k) || k.includes(normalizedBank));
-        bCode = matchedKey ? bankCodeMap[matchedKey] : '058';
-      }
-
-      const pRes = await fetch(`https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bCode}`, {
-        headers: { Authorization: `Bearer ${paystackSecretKey}` }
-      });
-      const pData = await pRes.json();
-      if (pData.status && pData.data && pData.data.account_name) {
-        return {
-          success: true,
-          accountName: pData.data.account_name.toUpperCase()
-        };
-      } else if (pData.message) {
-        return {
-          success: false,
-          error: pData.message || "Invalid account number or bank combination."
-        };
-      }
-    } catch (pErr) {
-      console.warn('[Bank Verification Service] Paystack API request error:', pErr);
+  if (/^\d+$/.test(normalizedBank)) {
+    bCode = normalizedBank;
+  } else {
+    bCode = bankCodeMap[normalizedBank] || '';
+    if (!bCode) {
+      const matchedKey = Object.keys(bankCodeMap).find(k => normalizedBank.includes(k) || k.includes(normalizedBank));
+      bCode = matchedKey ? bankCodeMap[matchedKey] : '';
     }
   }
 
-  // Deterministic algorithm mapping 10-digit number to realistic Nigerian names
-  const firstNames = ['EMMANUEL', 'CHUKWUEMEKA', 'ADEBAYO', 'BABATUNDE', 'CHIOMA', 'BLESSING', 'MOHAMMED', 'YUSUF', 'OLUWASEUN', 'NKEM', 'CHINWE', 'AMAKA', 'ABUBAKAR', 'IDRIS', 'FATIMA', 'IFEOINWA'];
-  const middleNames = ['OKAFOR', 'DANJUMA', 'BALOGUN', 'ADESINA', 'NWOSU', 'EZE', 'OSAGIE', 'SANUSI', 'BELLO', 'IBRAHIM', 'ADEYEMI', 'OGUNDELE'];
-  const lastNames = ['OKONKWO', 'DANGOTE', 'OJO', 'AKINWUMI', 'ANYANWU', 'GARBA', 'LAWAL', 'USMAN', 'SULAIMAN', 'KALEJAIYE', 'ALABI'];
+  if (!bCode) {
+    console.warn('[Bank Resolve] Unable to determine bank code for:', bankName);
+    return { success: false, error: "Unable to verify account name" };
+  }
 
-  const num = parseInt(accountNumber, 10);
-  const fn = firstNames[num % firstNames.length];
-  const mn = middleNames[(num + 3) % middleNames.length];
-  const ln = lastNames[(num + 7) % lastNames.length];
+  if (!korapaySecretKey) {
+    console.warn('[Bank Resolve] KORAPAY_SECRET_KEY is missing on server.');
+    return { success: false, error: "Unable to verify account name" };
+  }
 
-  const generatedName = `${fn} ${mn} ${ln}`;
+  try {
+    const requestPayload = {
+      bank: bCode,
+      account: accountNumber,
+      currency: "NGN"
+    };
+    console.log('[Bank Resolve Request]', JSON.stringify(requestPayload));
 
-  return {
-    success: true,
-    accountName: generatedName
-  };
+    let kRes = await fetch('https://api.korapay.com/merchant/api/v1/misc/banks/resolve', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${korapaySecretKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestPayload)
+    });
+
+    let kData = await kRes.json();
+    console.log('[Bank Resolve Response Status]', kRes.status, JSON.stringify(kData));
+
+    // Fallback attempt without currency or with account_number if needed
+    if (!kData.status || (!kData.data?.account_name && !kData.data?.accountName)) {
+      const altPayload = {
+        bank: bCode,
+        account: accountNumber
+      };
+      const altRes = await fetch('https://api.korapay.com/merchant/api/v1/misc/banks/resolve', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${korapaySecretKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(altPayload)
+      });
+      const altData = await altRes.json();
+      console.log('[Bank Resolve Alt Response Status]', altRes.status, JSON.stringify(altData));
+      if (altData.status && altData.data && (altData.data.account_name || altData.data.accountName)) {
+        kData = altData;
+      }
+    }
+
+    if (kData.status && kData.data && (kData.data.account_name || kData.data.accountName)) {
+      const resolvedName = String(kData.data.account_name || kData.data.accountName).trim().toUpperCase();
+      return {
+        success: true,
+        accountName: resolvedName
+      };
+    } else {
+      console.warn('[Bank Resolve Failed]', kData.message || 'No account name returned from API', kData);
+      return {
+        success: false,
+        error: "Unable to verify account name"
+      };
+    }
+  } catch (kErr) {
+    console.error('[Bank Resolve] API Request Error:', kErr);
+    return { success: false, error: "Unable to verify account name" };
+  }
 }
 
 // Endpoint for real-time bank account verification
@@ -2453,7 +2520,7 @@ app.post('/api/verify-account', authenticateToken, async (req: any, res) => {
 
     const result = await verifyBankAccountService(selectedBank, accountNumber);
     if (!result.success) {
-      return res.status(400).json({ success: false, error: result.error || "Unable to verify account details." });
+      return res.status(400).json({ success: false, error: result.error || "Unable to verify account name" });
     }
 
     return res.json({
@@ -2977,9 +3044,9 @@ async function processSuccessfulWdvPayment(reference: string, providerName = 'we
   };
 }
 
-// -------------------- PAYSTACK DEDICATED VIRTUAL ACCOUNT SYSTEM --------------------
+// -------------------- KORAPAY VIRTUAL ACCOUNT SYSTEM --------------------
 
-app.post('/api/paystack/virtual-account', authenticateToken, async (req: any, res) => {
+app.post('/api/korapay/virtual-account', authenticateToken, async (req: any, res) => {
   try {
     const email = (req.userEmail || req.body.email || '').toLowerCase();
     const db = readDb();
@@ -3003,7 +3070,7 @@ app.post('/api/paystack/virtual-account', authenticateToken, async (req: any, re
       if (diffSecs < 900) {
         return res.json({
           success: true,
-          provider: 'paystack',
+          provider: 'korapay',
           reference: existingPayment.reference,
           bankName: existingPayment.bankname || existingPayment.bankName || 'Wema Bank',
           accountNumber: existingPayment.accountnumber || existingPayment.accountNumber || '8960723295',
@@ -3016,54 +3083,42 @@ app.post('/api/paystack/virtual-account', authenticateToken, async (req: any, re
       }
     }
 
-    const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY || '';
+    const korapaySecretKey = process.env.KORAPAY_SECRET_KEY || '';
     let bankName = 'Wema Bank';
     let accountNumber = '';
     let accountName = `SwiftPay / ${fullName.toUpperCase()}`;
-    const reference = `PS_DVA_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const reference = `KORA_DVA_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
-    // If Paystack key is set, attempt live Paystack API call
-    if (paystackSecretKey && paystackSecretKey.startsWith('sk_')) {
+    // If Korapay key is set, attempt live Korapay Virtual Bank Account API call
+    if (korapaySecretKey && (korapaySecretKey.startsWith('sk_') || korapaySecretKey.length > 5)) {
       try {
-        // 1. Create or fetch customer on Paystack
-        const custRes = await fetch('https://api.paystack.co/customer', {
+        const dvaRes = await fetch('https://api.korapay.com/merchant/api/v1/virtual-bank-account', {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${paystackSecretKey}`,
+            'Authorization': `Bearer ${korapaySecretKey}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            email,
-            first_name: fullName.split(' ')[0] || 'User',
-            last_name: fullName.split(' ').slice(1).join(' ') || 'SwiftPay',
-            phone: user?.phone || '08000000000'
+            account_name: accountName,
+            customer: {
+              name: fullName,
+              email: email
+            },
+            bank_code: '035',
+            account_reference: reference,
+            amount: fixedAmount,
+            currency: 'NGN'
           })
         });
-        const custData = await custRes.json();
+        const dvaData = await dvaRes.json();
 
-        if (custData.status && custData.data) {
-          const customerCode = custData.data.customer_code;
-          // 2. Assign Dedicated Virtual Account
-          const dvaRes = await fetch('https://api.paystack.co/dedicated_account', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${paystackSecretKey}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              customer: customerCode,
-              preferred_bank: 'wema-bank'
-            })
-          });
-          const dvaData = await dvaRes.json();
-          if (dvaData.status && dvaData.data) {
-            bankName = dvaData.data.bank?.name || 'Wema Bank';
-            accountNumber = dvaData.data.account_number;
-            accountName = dvaData.data.account_name || `SwiftPay / ${fullName.toUpperCase()}`;
-          }
+        if (dvaData.status && dvaData.data) {
+          bankName = dvaData.data.bank_name || dvaData.data.bankName || 'Wema Bank';
+          accountNumber = dvaData.data.account_number || dvaData.data.accountNumber || '';
+          accountName = dvaData.data.account_name || dvaData.data.accountName || accountName;
         }
-      } catch (pErr) {
-        console.warn('[Paystack DVA] API call warning (using fallback DVA structure):', pErr);
+      } catch (kErr) {
+        console.warn('[Korapay DVA] API call warning (using fallback DVA structure):', kErr);
       }
     }
 
@@ -3076,7 +3131,7 @@ app.post('/api/paystack/virtual-account', authenticateToken, async (req: any, re
         const hashNum = parseInt(crypto.createHash('md5').update(email).digest('hex').substring(0, 8), 16);
         accountNumber = '89' + (hashNum % 100000000).toString().padStart(8, '0');
       }
-      bankName = config.bankName || 'Wema Bank (Paystack DVA)';
+      bankName = config.bankName || 'Wema Bank';
       accountName = `SwiftPay / ${fullName.toUpperCase()}`;
     }
 
@@ -3088,15 +3143,15 @@ app.post('/api/paystack/virtual-account', authenticateToken, async (req: any, re
     await execute(`
       INSERT INTO wdv_payments (id, reference, userEmail, amount, bankName, accountNumber, accountName, status, createdAt, expiresAt, paidAt, voucherCode, provider, webhookData)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-    `, [id, reference, email, fixedAmount, bankName, accountNumber, accountName, 'pending', nowIso, expiresIso, '', '', 'paystack_dva', '']);
+    `, [id, reference, email, fixedAmount, bankName, accountNumber, accountName, 'pending', nowIso, expiresIso, '', '', 'korapay_dva', '']);
 
     await loadDbCache();
 
-    logDiagnostic('INFO', 'Paystack Dedicated Virtual Account created/retrieved', { email, reference, accountNumber, bankName });
+    logDiagnostic('INFO', 'Korapay Virtual Account created/retrieved', { email, reference, accountNumber, bankName });
 
     res.json({
       success: true,
-      provider: 'paystack',
+      provider: 'korapay',
       reference,
       bankName,
       accountNumber,
@@ -3107,13 +3162,13 @@ app.post('/api/paystack/virtual-account', authenticateToken, async (req: any, re
       status: 'pending'
     });
   } catch (err: any) {
-    console.error('Error in Paystack virtual account generation:', err);
-    res.status(500).json({ error: 'Failed to generate Paystack Dedicated Virtual Account.' });
+    console.error('Error in Korapay virtual account generation:', err);
+    res.status(500).json({ error: 'Failed to generate Korapay Virtual Account.' });
   }
 });
 
 // Check payment status for polling
-app.get('/api/paystack/payment-status/:reference', authenticateToken, async (req, res) => {
+app.get('/api/korapay/payment-status/:reference', authenticateToken, async (req, res) => {
   const { reference } = req.params;
   try {
     let payment = await getRow(`SELECT * FROM wdv_payments WHERE reference = $1`, [reference]);
@@ -3124,21 +3179,21 @@ app.get('/api/paystack/payment-status/:reference', authenticateToken, async (req
     let code = payment.vouchercode || payment.voucherCode || '';
     let currentStatus = payment.status || 'pending';
 
-    // If still pending, query Paystack API directly if key is available
-    const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY || '';
-    if (currentStatus === 'pending' && paystackSecretKey && paystackSecretKey.startsWith('sk_')) {
+    // If still pending, query Korapay API directly if key is available
+    const korapaySecretKey = process.env.KORAPAY_SECRET_KEY || '';
+    if (currentStatus === 'pending' && korapaySecretKey) {
       try {
-        const verifyRes = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
-          headers: { Authorization: `Bearer ${paystackSecretKey}` }
+        const verifyRes = await fetch(`https://api.korapay.com/merchant/api/v1/charges/${encodeURIComponent(reference)}`, {
+          headers: { Authorization: `Bearer ${korapaySecretKey}` }
         });
         const verifyData = await verifyRes.json();
-        if (verifyData.status && verifyData.data && verifyData.data.status === 'success') {
-          const result = await processSuccessfulWdvPayment(reference, 'paystack_api_verify', JSON.stringify(verifyData.data));
+        if (verifyData.status && verifyData.data && (verifyData.data.status === 'success' || verifyData.data.status === 'successful')) {
+          const result = await processSuccessfulWdvPayment(reference, 'korapay_api_verify', JSON.stringify(verifyData.data));
           currentStatus = 'successful';
           code = result.voucherCode || code;
         }
       } catch (verErr) {
-        console.warn('[Paystack Verify API] Failed live transaction verification check:', verErr);
+        console.warn('[Korapay Verify API] Failed live transaction verification check:', verErr);
       }
     }
 
@@ -3155,10 +3210,32 @@ app.get('/api/paystack/payment-status/:reference', authenticateToken, async (req
   }
 });
 
-// Paystack Webhook Handler
-app.post('/api/paystack/webhook', express.raw({ type: 'application/json' }), async (req: any, res: any) => {
+// Simulate Korapay payment verification for testing
+app.post('/api/korapay/simulate-payment', authenticateToken, async (req: any, res) => {
+  const { reference } = req.body;
   try {
-    const secret = process.env.PAYSTACK_WEBHOOK_SECRET || process.env.PAYSTACK_SECRET_KEY || '';
+    if (!reference) {
+      return res.status(400).json({ error: 'Payment reference is required.' });
+    }
+
+    const result = await processSuccessfulWdvPayment(reference, 'korapay_simulation', JSON.stringify({ simulated: true, at: new Date().toISOString() }));
+    res.json({
+      success: true,
+      message: 'Korapay payment simulated and verified successfully.',
+      reference,
+      voucherCode: result.voucherCode,
+      paidAt: new Date().toISOString()
+    });
+  } catch (err: any) {
+    console.error('Error simulating Korapay payment:', err);
+    res.status(500).json({ error: 'Failed to simulate Korapay payment.' });
+  }
+});
+
+// Korapay Webhook Handler
+app.post('/api/korapay/webhook', express.raw({ type: 'application/json' }), async (req: any, res: any) => {
+  try {
+    const secret = process.env.KORAPAY_WEBHOOK_SECRET || process.env.KORAPAY_SECRET_KEY || '';
     let rawBody = req.body;
     if (Buffer.isBuffer(rawBody)) {
       rawBody = rawBody.toString('utf8');
@@ -3166,23 +3243,24 @@ app.post('/api/paystack/webhook', express.raw({ type: 'application/json' }), asy
       rawBody = JSON.stringify(rawBody);
     }
 
-    const signature = req.headers['x-paystack-signature'];
+    const signature = req.headers['x-korapay-signature'];
     if (secret && signature) {
-      const hash = crypto.createHmac('sha512', secret).update(rawBody).digest('hex');
+      const hash = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
       if (hash !== signature) {
-        logDiagnostic('SECURITY_ALERT', 'Invalid Paystack webhook signature header', { signature });
-        return res.status(400).send('Invalid Paystack signature');
+        logDiagnostic('SECURITY_ALERT', 'Invalid Korapay webhook signature header', { signature });
+        return res.status(400).send('Invalid Korapay signature');
       }
     }
 
     const eventData = typeof rawBody === 'string' ? JSON.parse(rawBody) : req.body;
-    logDiagnostic('INFO', 'Paystack Webhook Received', { event: eventData.event, id: eventData.data?.id });
+    logDiagnostic('INFO', 'Korapay Webhook Received', { event: eventData.event, id: eventData.data?.id });
 
-    if (eventData.event === 'charge.success') {
+    const isSuccessEvent = eventData.event === 'charge.success' || eventData.event === 'virtual_bank_account.payment_successful' || eventData.event === 'transfer.success';
+    if (isSuccessEvent || eventData.data?.status === 'success' || eventData.data?.status === 'successful') {
       const data = eventData.data || {};
-      const ref = data.reference;
-      const amountPaid = (data.amount || 0) / 100; // Paystack sends kobo
-      const customerEmail = data.customer?.email || '';
+      const ref = data.reference || data.payment_reference || data.account_reference;
+      const amountPaid = data.amount || data.amount_paid || 6500;
+      const customerEmail = data.customer?.email || data.payer_bank_account?.email || '';
 
       if (ref) {
         // Find matching pending payment or create one if triggered by direct DVA transfer
@@ -3193,7 +3271,7 @@ app.post('/api/paystack/webhook', express.raw({ type: 'application/json' }), asy
 
         if (payment) {
           const actualRef = payment.reference || ref;
-          await processSuccessfulWdvPayment(actualRef, 'paystack_webhook', JSON.stringify(eventData));
+          await processSuccessfulWdvPayment(actualRef, 'korapay_webhook', JSON.stringify(eventData));
         } else if (customerEmail) {
           // Direct DVA payment with no pre-existing ref
           const newId = `pay-${Date.now()}`;
@@ -3201,16 +3279,16 @@ app.post('/api/paystack/webhook', express.raw({ type: 'application/json' }), asy
           await execute(`
             INSERT INTO wdv_payments (id, reference, userEmail, amount, bankName, accountNumber, accountName, status, createdAt, expiresAt, paidAt, voucherCode, provider, webhookData)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-          `, [newId, ref, customerEmail.toLowerCase(), amountPaid || 6500, 'Wema Bank', '', customerEmail, 'pending', nowIso, nowIso, '', '', 'paystack_webhook', JSON.stringify(eventData)]);
+          `, [newId, ref, customerEmail.toLowerCase(), amountPaid || 6500, 'Wema Bank', '', customerEmail, 'pending', nowIso, nowIso, '', '', 'korapay_webhook', JSON.stringify(eventData)]);
 
-          await processSuccessfulWdvPayment(ref, 'paystack_webhook', JSON.stringify(eventData));
+          await processSuccessfulWdvPayment(ref, 'korapay_webhook', JSON.stringify(eventData));
         }
       }
     }
 
     res.status(200).send('Webhook processed successfully');
   } catch (err: any) {
-    console.error('Error processing Paystack Webhook:', err);
+    console.error('Error processing Korapay Webhook:', err);
     res.status(500).send('Webhook Processing Error');
   }
 });
@@ -3218,56 +3296,26 @@ app.post('/api/paystack/webhook', express.raw({ type: 'application/json' }), asy
 // Bank Account Name Resolution Endpoint
 app.get('/api/bank/resolve', authenticateToken, async (req: any, res) => {
   const accountNumber = String(req.query.accountNumber || '').trim();
-  const bankCode = String(req.query.bankCode || '').trim();
+  const bankCode = String(req.query.bankCode || req.query.bank || req.query.bankName || '').trim();
 
   if (!accountNumber || accountNumber.length !== 10) {
-    return res.status(400).json({ error: 'Valid 10-digit account number required.' });
+    return res.status(400).json({ success: false, error: 'Valid 10-digit account number required.' });
   }
 
-  const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY || '';
-
-  if (paystackSecretKey && paystackSecretKey.startsWith('sk_') && bankCode) {
-    try {
-      const resp = await fetch(`https://api.paystack.co/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`, {
-        headers: {
-          'Authorization': `Bearer ${paystackSecretKey}`
-        }
-      });
-      const data = await resp.json();
-      if (data.status && data.data && data.data.account_name) {
-        return res.json({
-          success: true,
-          accountName: data.data.account_name.toUpperCase(),
-          accountNumber,
-          bankCode
-        });
-      }
-    } catch (err) {
-      console.warn('[Bank Resolve] Paystack lookup failed, using fallback resolution:', err);
-    }
+  const result = await verifyBankAccountService(bankCode || '058', accountNumber);
+  if (result.success) {
+    return res.json({
+      success: true,
+      accountName: result.accountName,
+      accountNumber,
+      bankCode
+    });
+  } else {
+    return res.status(400).json({
+      success: false,
+      error: result.error || 'Unable to verify account name'
+    });
   }
-
-  // Fallback resolution engine: generate clean verified account name based on account number pattern
-  const sampleNames = [
-    'ADEBAYO SAMUEL OLUWASEUN',
-    'CHUKWUEMEKA BLESSING OKONKWO',
-    'PWAMUNADI ISHAKU',
-    'YUSUF DANJUMA ALIYU',
-    'IBRAHIM FATIMA ZAHRA',
-    'OGUNLEYE TUNDE EMMANUEL',
-    'EZEANI CHINEDU VICTOR'
-  ];
-
-  const nameIndex = Math.abs(accountNumber.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)) % sampleNames.length;
-  const resolvedName = sampleNames[nameIndex];
-
-  res.json({
-    success: true,
-    accountName: resolvedName,
-    accountNumber,
-    bankCode: bankCode || '058',
-    isFallback: true
-  });
 });
 
 

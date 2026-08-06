@@ -2168,7 +2168,13 @@ app.post('/api/transactions/airtime', authenticateToken, async (req: any, res) =
     title: 'Airtime Purchase Successful',
     body: `Successfully purchased ₦${price.toLocaleString()} airtime for ${phoneNumber}. WDV Verified.`,
     date: new Date().toISOString(),
-    unread: true
+    unread: true,
+    type: 'airtime',
+    category: 'Airtime Topup',
+    status: 'Completed',
+    amount: price,
+    phoneNumber: phoneNumber,
+    reference: refNum
   });
 
   await writeDb(refreshedDb);
@@ -2319,7 +2325,13 @@ app.post('/api/transactions/data', authenticateToken, async (req: any, res) => {
     title: 'Data Purchase Successful',
     body: `Successfully purchased ${plan.size} data bundle for ${phoneNumber}. WDV Verified.`,
     date: new Date().toISOString(),
-    unread: true
+    unread: true,
+    type: 'data',
+    category: 'Data Bundle',
+    status: 'Completed',
+    amount: plan.price,
+    phoneNumber: phoneNumber,
+    reference: refNum
   });
 
   await writeDb(refreshedDb);
@@ -2631,7 +2643,14 @@ app.post('/api/transactions/transfer', authenticateToken, async (req: any, res) 
     title: 'Bank Cashout Success',
     body: `Successfully cashed out ₦${price.toLocaleString()} to ${resolvedName}. WDV voucher used.`,
     date: new Date().toISOString(),
-    unread: true
+    unread: true,
+    type: 'transfer',
+    category: 'Bank Transfer',
+    status: 'Completed',
+    amount: price,
+    recipientName: resolvedName,
+    accountNumber: accountNumber,
+    reference: refNum
   });
 
   await writeDb(refreshedDb);
@@ -2762,9 +2781,17 @@ app.post('/api/transactions/withdraw', authenticateToken, async (req: any, res) 
   refreshedUser.notifications.unshift({
     id: `notif-${Date.now()}`,
     title: 'Withdrawal Pending Approval',
-    body: `₦${price.toLocaleString()} withdrawal request to ${resolvedName} (${bank}) is pending review.`,
+    body: `Your withdrawal request of ₦${price.toLocaleString()} to ${resolvedName} (${bank}) has been received successfully and is currently under manual review by our compliance team. You will receive another notification once it has been approved or rejected.`,
     date: new Date().toISOString(),
-    unread: true
+    unread: true,
+    type: 'withdraw',
+    category: 'Withdrawal',
+    status: 'Pending Review',
+    amount: price,
+    recipientName: resolvedName,
+    bankName: bank,
+    accountNumber: accountNumber,
+    reference: refNum
   });
 
   // Save the withdrawal request permanently in the SQL database withdraw_requests table
@@ -3023,10 +3050,16 @@ async function processSuccessfulWdvPayment(reference: string, providerName = 'we
       db.users[userIndex].notifications = db.users[userIndex].notifications || [];
       db.users[userIndex].notifications.unshift({
         id: `notif-${Date.now()}`,
-        title: 'WDV Voucher Generated (Payment Verified)',
-        body: `Your payment of ₦${price.toLocaleString()} (Ref: ${reference}) was confirmed! Your new WDV Voucher code is: ${voucherCode}.`,
+        title: 'WDV Voucher Generated',
+        body: 'Your payment has been confirmed successfully. Your voucher has been generated and is ready for use.',
         date: nowIso,
-        unread: true
+        unread: true,
+        type: 'voucher',
+        category: 'WDV Voucher',
+        status: 'Payment Verified',
+        amount: price || 6500,
+        voucherCode: voucherCode,
+        reference: reference
       });
       writeDb(db);
     }

@@ -1918,7 +1918,13 @@ export default function App() {
         title: 'Airtime Purchase Successful!',
         body: `₦${price.toLocaleString()} Airtime has been credited to ${airtimePhone}. Balance updated.`,
         date: new Date().toISOString(),
-        unread: true
+        unread: true,
+        type: 'airtime',
+        category: 'Airtime Topup',
+        status: 'Completed',
+        amount: price,
+        phoneNumber: airtimePhone,
+        reference: data.transaction?.id || `AIR-${Date.now()}`
       };
       setNotifications([newNotif, ...notifications]);
 
@@ -2014,7 +2020,13 @@ export default function App() {
         title: 'Data Purchase Successful!',
         body: `${selectedDataPlan.size} bundle active on ${dataPhone}. Balance updated.`,
         date: new Date().toISOString(),
-        unread: true
+        unread: true,
+        type: 'data',
+        category: 'Data Bundle',
+        status: 'Completed',
+        amount: selectedDataPlan.price,
+        phoneNumber: dataPhone,
+        reference: data.transaction?.id || `DAT-${Date.now()}`
       };
       setNotifications([newNotif, ...notifications]);
 
@@ -2110,7 +2122,15 @@ export default function App() {
         title: 'Transfer Completed!',
         body: `₦${price.toLocaleString()} has been sent to ${transferAccName} (${transferBank}).`,
         date: new Date().toISOString(),
-        unread: true
+        unread: true,
+        type: 'transfer',
+        category: 'Bank Transfer',
+        status: 'Completed',
+        amount: price,
+        recipientName: transferAccName,
+        bankName: transferBank,
+        accountNumber: transferAccNum,
+        reference: data.transaction?.id || `TRF-${Date.now()}`
       };
       setNotifications([newNotif, ...notifications]);
 
@@ -2204,10 +2224,18 @@ export default function App() {
       // Trigger notification update
       const newNotif: NotificationItem = {
         id: `notif-${Date.now()}`,
-        title: 'Withdrawal Successful!',
-        body: `₦${price.toLocaleString()} withdrawn to ${withdrawAccName} (${withdrawBank}).`,
+        title: 'Withdrawal Pending Approval',
+        body: `Your withdrawal request of ₦${price.toLocaleString()} to ${withdrawAccName} (${withdrawBank}) has been received successfully and is currently under manual review by our compliance team. You will receive another notification once it has been approved or rejected.`,
         date: new Date().toISOString(),
-        unread: true
+        unread: true,
+        type: 'withdraw',
+        category: 'Withdrawal',
+        status: 'Pending Review',
+        amount: price,
+        recipientName: withdrawAccName,
+        bankName: withdrawBank,
+        accountNumber: withdrawAccount,
+        reference: data.transaction?.id || `WDR-${Date.now()}`
       };
       setNotifications([newNotif, ...notifications]);
 
@@ -2308,7 +2336,13 @@ export default function App() {
         title: 'Bill Payment Successful!',
         body: `Successfully paid ₦${Number(billsAmount).toLocaleString()} for ${billsProvider} (${billsAccountNumber}).`,
         date: new Date().toISOString(),
-        unread: true
+        unread: true,
+        type: 'system',
+        category: 'Bill Payment',
+        status: 'Completed',
+        amount: Number(billsAmount),
+        accountNumber: billsAccountNumber,
+        reference: data.transaction?.id || `BILL-${Date.now()}`
       };
       setNotifications([newNotif, ...notifications]);
 
@@ -2566,7 +2600,10 @@ export default function App() {
                     title,
                     body,
                     date: new Date().toISOString(),
-                    unread: true
+                    unread: true,
+                    type: type || 'system',
+                    category: type ? (type.charAt(0).toUpperCase() + type.slice(1)) : 'System Broadcast',
+                    status: 'Notice'
                   };
                   const updated = [newNotif, ...notifications];
                   setNotifications(updated);

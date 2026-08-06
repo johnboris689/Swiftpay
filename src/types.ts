@@ -88,7 +88,18 @@ export interface NotificationItem {
   body: string;
   date: string;
   unread: boolean;
-  type?: 'login' | 'airtime' | 'data' | 'transfer' | 'withdraw' | 'security' | 'system';
+  type?: 'login' | 'airtime' | 'data' | 'transfer' | 'withdraw' | 'security' | 'system' | 'voucher' | 'balance' | string;
+  category?: string;
+  status?: string;
+  amount?: number | string;
+  reference?: string;
+  bankName?: string;
+  recipientName?: string;
+  senderName?: string;
+  voucherCode?: string;
+  accountNumber?: string;
+  phoneNumber?: string;
+  details?: Record<string, any>;
 }
 
 export interface DeviceSession {

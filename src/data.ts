@@ -163,18 +163,55 @@ export const INITIAL_TRANSACTIONS: Transaction[] = [
 
 export const INITIAL_NOTIFICATIONS: NotificationItem[] = [
   {
-    id: 'notif-1',
-    title: 'Welcome to SwiftPay!',
-    body: 'Welcome to SwiftPay. Enjoy a faster, more secure, violet-to-teal digital experience!',
-    date: '2026-07-09T00:00:00Z',
-    unread: true
+    id: 'notif-wdr-101',
+    title: 'Withdrawal Pending Approval',
+    body: 'Your withdrawal request has been received successfully and is currently under manual review by our compliance team. You will receive another notification once it has been approved or rejected.',
+    date: '2026-08-05T15:29:00Z',
+    unread: true,
+    type: 'withdraw',
+    category: 'Withdrawal',
+    status: 'Pending Review',
+    amount: 195000,
+    recipientName: 'IDRIS BELLO ANYANWU',
+    bankName: 'First Bank of Nigeria Limited',
+    accountNumber: '3091823712',
+    reference: 'WDR-202608051950'
   },
   {
-    id: 'notif-2',
-    title: 'Wema Bank Maintenance Notice',
-    body: 'Please use other supported banks for funding or manual transfers, as Wema Bank is currently undergoing scheduled system updates.',
-    date: '2026-07-09T01:30:00Z',
-    unread: true
+    id: 'notif-wdv-102',
+    title: 'WDV Voucher Generated',
+    body: 'Your payment has been confirmed successfully. Your voucher has been generated and is ready for use.',
+    date: '2026-08-05T12:15:00Z',
+    unread: true,
+    type: 'voucher',
+    category: 'WDV Voucher',
+    status: 'Payment Verified',
+    amount: 6500,
+    voucherCode: 'WDV-F3A8-AAF2-1D79',
+    reference: 'DVA_928174012'
+  },
+  {
+    id: 'notif-bal-103',
+    title: 'Daily Wallet Allocation',
+    body: 'Your daily wallet allocation has been refreshed successfully. Any unused balance from the previous cycle has expired according to platform policy.',
+    date: '2026-08-04T08:00:00Z',
+    unread: false,
+    type: 'balance',
+    category: 'Daily Refreshed Balance',
+    status: 'Completed',
+    amount: 200000,
+    reference: 'REF-DAILY-20260804'
+  },
+  {
+    id: 'notif-welcome-104',
+    title: 'Welcome to SwiftPay!',
+    body: 'Welcome to SwiftPay. Enjoy a faster, more secure, violet-to-teal digital banking experience!',
+    date: '2026-07-09T00:00:00Z',
+    unread: false,
+    type: 'login',
+    category: 'Account Security',
+    status: 'Completed',
+    reference: 'SYS-WELCOME-001'
   }
 ];
 

@@ -2344,6 +2344,34 @@ app.post('/api/transactions/data', authenticateToken, async (req: any, res) => {
   });
 });
 
+// Dynamic Korapay Banks Cache
+let korapayBanksCache: Array<{ name: string; code: string; nip_code?: string; slug?: string }> | null = null;
+let lastKorapayBanksFetch = 0;
+
+async function getKorapayBanks(): Promise<Array<{ name: string; code: string; nip_code?: string; slug?: string }>> {
+  const now = Date.now();
+  if (korapayBanksCache && (now - lastKorapayBanksFetch < 3600000)) {
+    return korapayBanksCache;
+  }
+  const korapaySecretKey = process.env.KORAPAY_SECRET_KEY || process.env.KORAPAY_PUBLIC_KEY || '';
+  if (!korapaySecretKey) return [];
+  try {
+    const res = await fetch('https://api.korapay.com/merchant/api/v1/misc/banks?currency=NGN', {
+      headers: { 'Authorization': `Bearer ${korapaySecretKey}` }
+    });
+    const data = await res.json();
+    if (data.status && Array.isArray(data.data)) {
+      korapayBanksCache = data.data;
+      lastKorapayBanksFetch = now;
+      console.log(`[Korapay Banks] Cached ${korapayBanksCache.length} banks from Korapay API.`);
+      return korapayBanksCache;
+    }
+  } catch (e) {
+    console.error('[Korapay Banks Fetch Error]', e);
+  }
+  return korapayBanksCache || [];
+}
+
 // Bank Account Name Verification Service Layer
 async function verifyBankAccountService(bankName: string, accountNumber: string): Promise<{ success: boolean; accountName?: string; error?: string }> {
   if (!accountNumber || accountNumber.length !== 10 || !/^\d{10}$/.test(accountNumber)) {
@@ -2364,157 +2392,185 @@ async function verifyBankAccountService(bankName: string, accountNumber: string)
 
   const korapaySecretKey = process.env.KORAPAY_SECRET_KEY || process.env.KORAPAY_PUBLIC_KEY || '';
 
-  const bankCodeMap: Record<string, string> = {
-    'access bank': '044',
-    'access bank limited': '044',
-    'access holdings plc': '044',
-    'citibank nigeria limited': '023',
-    'citibank': '023',
-    'ecobank nigeria limited': '050',
-    'ecobank': '050',
-    'fbn holdings plc': '011',
-    'first bank of nigeria limited': '011',
-    'first bank': '011',
-    'fcmb group plc': '214',
-    'first city monument bank limited (fcmb)': '214',
-    'first city monument bank': '214',
-    'fcmb': '214',
-    'fidelity bank plc': '070',
-    'fidelity bank': '070',
-    'globus bank limited': '000027',
-    'globus bank': '000027',
-    'guaranty trust bank limited (gtbank)': '058',
-    'guaranty trust holding company plc': '058',
-    'guaranty trust bank': '058',
-    'gtbank': '058',
-    'gtb': '058',
-    'heritage bank plc': '030',
-    'heritage bank': '030',
-    'jaiz bank plc': '035',
-    'jaiz bank': '035',
-    'keystone bank limited': '082',
-    'keystone bank': '082',
-    'kuda bank': '50211',
-    'kuda': '50211',
-    'moniepoint': '50515',
-    'moniepoint microfinance bank': '50515',
-    'opay': '999992',
-    'opay digital services': '999992',
-    'palmpay': '999991',
-    'polaris bank limited': '076',
-    'polaris bank': '076',
-    'providus bank limited': '101',
-    'providus bank': '101',
-    'stanbic ibtc bank limited': '221',
-    'stanbic ibtc': '221',
-    'standard chartered bank limited': '068',
-    'standard chartered': '068',
-    'sterling bank limited': '232',
-    'sterling bank': '232',
-    'suntrust bank nigeria limited': '100',
-    'suntrust bank': '100',
-    'taj bank limited': '000026',
-    'taj bank': '000026',
-    'union bank of nigeria plc': '032',
-    'union bank': '032',
-    'united bank for africa plc': '033',
-    'united bank for africa': '033',
-    'uba': '033',
-    'unity bank plc': '215',
-    'unity bank': '215',
-    'wema bank plc': '035',
-    'wema bank': '035',
-    'zenith bank plc': '057',
-    'zenith bank': '057',
-    '9psb': '120001',
-    'rubies': '125',
-    'carbon': '565',
-    'fairmoney': '51318',
-    'chipper cash': '50315',
-    'piggyvest': '51229'
+  const bankCodeMap: Record<string, string[]> = {
+    'access bank': ['044'],
+    'access bank limited': ['044'],
+    'access holdings plc': ['044'],
+    'citibank nigeria limited': ['023'],
+    'citibank': ['023'],
+    'ecobank nigeria limited': ['050'],
+    'ecobank': ['050'],
+    'fbn holdings plc': ['011'],
+    'first bank of nigeria limited': ['011'],
+    'first bank': ['011'],
+    'fcmb group plc': ['214'],
+    'first city monument bank limited (fcmb)': ['214'],
+    'first city monument bank': ['214'],
+    'fcmb': ['214'],
+    'fidelity bank plc': ['070'],
+    'fidelity bank': ['070'],
+    'globus bank limited': ['000027'],
+    'globus bank': ['000027'],
+    'guaranty trust bank limited (gtbank)': ['058'],
+    'guaranty trust holding company plc': ['058'],
+    'guaranty trust bank': ['058'],
+    'gtbank': ['058'],
+    'gtb': ['058'],
+    'heritage bank plc': ['030'],
+    'heritage bank': ['030'],
+    'jaiz bank plc': ['035'],
+    'jaiz bank': ['035'],
+    'keystone bank limited': ['082'],
+    'keystone bank': ['082'],
+    'kuda bank': ['50211', '090267'],
+    'kuda': ['50211', '090267'],
+    'moniepoint': ['50515', '090129', '000028'],
+    'moniepoint microfinance bank': ['50515', '090129', '000028'],
+    'opay': ['100004', '090110', '304', '000010'],
+    'opay digital services': ['100004', '090110', '304', '000010'],
+    'paycom': ['100004', '090110', '304', '000010'],
+    'palmpay': ['100033', '090405'],
+    'polaris bank limited': ['076'],
+    'polaris bank': ['076'],
+    'providus bank limited': ['101'],
+    'providus bank': ['101'],
+    'stanbic ibtc bank limited': ['221'],
+    'stanbic ibtc': ['221'],
+    'standard chartered bank limited': ['068'],
+    'standard chartered': ['068'],
+    'sterling bank limited': ['232'],
+    'sterling bank': ['232'],
+    'suntrust bank nigeria limited': ['100'],
+    'suntrust bank': ['100'],
+    'taj bank limited': ['000026'],
+    'taj bank': ['000026'],
+    'union bank of nigeria plc': ['032'],
+    'union bank': ['032'],
+    'united bank for africa plc': ['033'],
+    'united bank for africa': ['033'],
+    'uba': ['033'],
+    'unity bank plc': ['215'],
+    'unity bank': ['215'],
+    'wema bank plc': ['035'],
+    'wema bank': ['035'],
+    'zenith bank plc': ['057'],
+    'zenith bank': ['057'],
+    '9psb': ['120001'],
+    'rubies': ['125'],
+    'carbon': ['565', '090130'],
+    'fairmoney': ['51318', '090551'],
+    'chipper cash': ['50315'],
+    'piggyvest': ['51229']
   };
 
   const normalizedBank = bankName.toLowerCase().trim();
-  let bCode = '';
+  const candidateCodes: string[] = [];
 
+  // 1. First, check live Korapay bank list for accurate bank code & NIP code
+  try {
+    const liveBanks = await getKorapayBanks();
+    if (liveBanks && liveBanks.length > 0) {
+      const liveMatches = liveBanks.filter(b => {
+        const bName = b.name.toLowerCase();
+        const bSlug = (b.slug || '').toLowerCase();
+        return (
+          bName === normalizedBank ||
+          bName.includes(normalizedBank) ||
+          normalizedBank.includes(bName) ||
+          (normalizedBank.includes('opay') && (bName.includes('paycom') || bName.includes('opay') || bSlug.includes('paycom') || bSlug.includes('opay'))) ||
+          (normalizedBank.includes('palmpay') && (bName.includes('palmpay') || bSlug.includes('palmpay'))) ||
+          (normalizedBank.includes('moniepoint') && (bName.includes('moniepoint') || bSlug.includes('moniepoint'))) ||
+          (normalizedBank.includes('kuda') && (bName.includes('kuda') || bSlug.includes('kuda')))
+        );
+      });
+
+      for (const liveMatch of liveMatches) {
+        if (liveMatch.code && !candidateCodes.includes(liveMatch.code)) {
+          candidateCodes.push(liveMatch.code);
+        }
+        if (liveMatch.nip_code && !candidateCodes.includes(liveMatch.nip_code)) {
+          candidateCodes.push(liveMatch.nip_code);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Bank Resolve] Live Korapay bank lookup error:', e);
+  }
+
+  // 2. Add codes from static bankCodeMap as fallback
   if (/^\d+$/.test(normalizedBank)) {
-    bCode = normalizedBank;
+    if (!candidateCodes.includes(normalizedBank)) {
+      candidateCodes.push(normalizedBank);
+    }
   } else {
-    bCode = bankCodeMap[normalizedBank] || '';
-    if (!bCode) {
-      const matchedKey = Object.keys(bankCodeMap).find(k => normalizedBank.includes(k) || k.includes(normalizedBank));
-      bCode = matchedKey ? bankCodeMap[matchedKey] : '';
+    if (bankCodeMap[normalizedBank]) {
+      for (const code of bankCodeMap[normalizedBank]) {
+        if (!candidateCodes.includes(code)) candidateCodes.push(code);
+      }
+    }
+    const matchedKey = Object.keys(bankCodeMap).find(k => normalizedBank.includes(k) || k.includes(normalizedBank));
+    if (matchedKey) {
+      for (const code of bankCodeMap[matchedKey]) {
+        if (!candidateCodes.includes(code)) candidateCodes.push(code);
+      }
     }
   }
 
-  if (!bCode) {
-    console.warn('[Bank Resolve] Unable to determine bank code for:', bankName);
-    return { success: false, error: "Unable to verify account name" };
+  // Filter out codes that are known non-Korapay codes (e.g. Paystack NIP codes like 999992, 999991)
+  const validKorapayCandidateCodes = candidateCodes.filter(code => !code.startsWith('9999'));
+
+  if (validKorapayCandidateCodes.length === 0) {
+    console.warn('[Bank Resolve] Unable to determine valid Korapay bank code for:', bankName);
+    return { success: false, error: "Invalid or unsupported bank selected." };
   }
 
   if (!korapaySecretKey) {
     console.warn('[Bank Resolve] KORAPAY_SECRET_KEY is missing on server.');
-    return { success: false, error: "Unable to verify account name" };
+    return { success: false, error: "Account verification service is missing configuration." };
   }
 
   try {
-    const requestPayload = {
-      bank: bCode,
-      account: accountNumber
-    };
-    console.log('[Bank Resolve Request]', JSON.stringify(requestPayload));
+    let lastErrorMsg = "Unable to verify account name. Please check account number and bank name.";
+    for (const bCode of validKorapayCandidateCodes) {
+      const requestPayload = {
+        bank: bCode,
+        account: accountNumber,
+        currency: 'NGN'
+      };
+      console.log('[Bank Resolve Request]', JSON.stringify(requestPayload));
 
-    let kRes = await fetch('https://api.korapay.com/merchant/api/v1/misc/banks/resolve', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${korapaySecretKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestPayload)
-    });
+      const kRes = await fetch('https://api.korapay.com/merchant/api/v1/misc/banks/resolve', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${korapaySecretKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestPayload)
+      });
 
-    let kData = await kRes.json();
-    console.log('[Bank Resolve Response Status]', kRes.status, JSON.stringify(kData));
+      const kData = await kRes.json();
+      console.log('[Bank Resolve Response Status]', kRes.status, JSON.stringify(kData));
 
-    // Fallback attempt with account_number if account didn't return data
-    if (!kData.status || (!kData.data?.account_name && !kData.data?.accountName)) {
-      if (kRes.status !== 400) {
-        const altPayload = {
-          bank: bCode,
-          account_number: accountNumber
+      if (kData.status && kData.data && (kData.data.account_name || kData.data.accountName)) {
+        const resolvedName = String(kData.data.account_name || kData.data.accountName).trim().toUpperCase();
+        return {
+          success: true,
+          accountName: resolvedName
         };
-        const altRes = await fetch('https://api.korapay.com/merchant/api/v1/misc/banks/resolve', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${korapaySecretKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(altPayload)
-        });
-        const altData = await altRes.json();
-        console.log('[Bank Resolve Alt Response Status]', altRes.status, JSON.stringify(altData));
-        if (altData.status && altData.data && (altData.data.account_name || altData.data.accountName)) {
-          kData = altData;
-        }
+      } else {
+        lastErrorMsg = kData.message || 'We couldn\'t find this bank account. Please check the details and try again.';
+        console.log(`[Bank Resolve Candidate Code ${bCode} Not Matched]`, lastErrorMsg);
       }
     }
 
-    if (kData.status && kData.data && (kData.data.account_name || kData.data.accountName)) {
-      const resolvedName = String(kData.data.account_name || kData.data.accountName).trim().toUpperCase();
-      return {
-        success: true,
-        accountName: resolvedName
-      };
-    } else {
-      console.warn('[Bank Resolve Failed]', kData.message || 'No account name returned from API', kData);
-      return {
-        success: false,
-        error: "Unable to verify account name"
-      };
-    }
+    console.log(`[Bank Resolve Result] Failed to resolve account for ${bankName} (${accountNumber}): ${lastErrorMsg}`);
+    return {
+      success: false,
+      error: lastErrorMsg
+    };
   } catch (kErr) {
     console.error('[Bank Resolve] API Request Error:', kErr);
-    return { success: false, error: "Unable to verify account name" };
+    return { success: false, error: "Unable to verify account name at this time." };
   }
 }
 

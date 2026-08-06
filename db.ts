@@ -334,11 +334,17 @@ export async function initDb() {
         database: process.env.SQL_DB_NAME,
         connectionTimeoutMillis: 15000,
       });
+      pgPool.on('error', (err) => {
+        console.error('[SwiftPay DB Admin Pool Error]', err.message);
+      });
     } else {
       console.log('[SwiftPay DB] Using DATABASE_URL connection string...');
       pgPool = new Pool({
         connectionString: process.env.DATABASE_URL,
         ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
+      });
+      pgPool.on('error', (err) => {
+        console.error('[SwiftPay DB Admin Pool Error]', err.message);
       });
     }
   } else {
@@ -750,10 +756,16 @@ export async function initDb() {
         database: process.env.SQL_DB_NAME,
         connectionTimeoutMillis: 15000,
       });
+      pgPool.on('error', (err) => {
+        console.error('[SwiftPay DB Pool Error]', err.message);
+      });
     } else {
       pgPool = new Pool({
         connectionString: process.env.DATABASE_URL,
         ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
+      });
+      pgPool.on('error', (err) => {
+        console.error('[SwiftPay DB Pool Error]', err.message);
       });
     }
   }

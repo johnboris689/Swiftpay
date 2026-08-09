@@ -63,6 +63,7 @@ import CongratulationsScreen from './components/CongratulationsScreen';
 import NumericPad from './components/NumericPad';
 import BottomNav from './components/BottomNav';
 import WdvVoucher from './components/WdvVoucher';
+import { BankSelector } from './components/BankSelector';
 import QuickFabMenu from './components/QuickFabMenu';
 import NotificationsModal from './components/NotificationsModal';
 import TransactionList from './components/TransactionList';
@@ -5048,18 +5049,16 @@ export default function App() {
                         {/* 1. Select Bank */}
                         <div>
                           <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold">1. Select Destination Bank</label>
-                          <select
+                          <BankSelector
                             id="withdraw-select-bank"
                             value={withdrawBank}
-                            onChange={(e) => setWithdrawBank(e.target.value)}
-                            className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-1 focus:ring-teal-400 font-sans"
-                          >
-                            {SUPPORTED_BANKS.map((b) => (
-                              <option key={b} value={b}>
-                                {b}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(bankName) => {
+                              setWithdrawBank(bankName);
+                              setWithdrawVerified(false);
+                              setWithdrawAccName('');
+                              setWithdrawError('');
+                            }}
+                          />
                         </div>
 
                         {/* 2. Account Number */}
@@ -5303,18 +5302,16 @@ export default function App() {
                         {/* 1. Select Bank */}
                         <div>
                           <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold">1. Select Destination Bank</label>
-                          <select
+                          <BankSelector
                             id="transfer-select-bank"
                             value={transferBank}
-                            onChange={(e) => setTransferBank(e.target.value)}
-                            className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-1 focus:ring-indigo-400 font-sans"
-                          >
-                            {SUPPORTED_BANKS.map((b) => (
-                              <option key={b} value={b}>
-                                {b}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(bankName) => {
+                              setTransferBank(bankName);
+                              setTransferVerified(false);
+                              setTransferAccName('');
+                              setTransferError('');
+                            }}
+                          />
                         </div>
 
                         {/* 2. Account Number */}

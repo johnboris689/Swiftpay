@@ -1,40 +1,29 @@
-# Korapay Virtual Account & Webhook Integration Setup
+# SwiftPay WDV Voucher — Korapay Setup
 
-This document provides the complete instructions for configuring Korapay Virtual Accounts (DVAs), Bank Verification, and Automatic Webhook Settlement for SwiftPay.
+SwiftPay supports Korapay as an online gateway for the **Buy WDV Voucher** flow. The fixed purchase price is **₦6,500**.
 
----
+## Configure Korapay
 
-## Step 1: Korapay Account Setup
-
-1. Log in to your [Korapay Dashboard](https://dashboard.korapay.com/).
-2. Navigate to **Settings -> API Keys & Webhooks**.
-3. Retrieve your **Secret Key**, **Public Key**, and **Encryption / Webhook Secret Key**.
-
----
-
-## Step 2: Set Webhook Endpoint in Korapay
-
-1. Navigate to **Korapay Dashboard -> Settings -> API Keys & Webhooks**.
-2. Set your **Webhook URL** to your backend server endpoint:
-   `https://your-app-name.onrender.com/api/korapay/webhook`
-3. Save changes.
-
----
-
-## Step 3: Configure Environment Variables
-
-Add the following environment variables to your deployment environment (or `.env` file):
+Add these server-side environment variables:
 
 ```env
-KORAPAY_SECRET_KEY=sk_live_xxxx...
-KORAPAY_PUBLIC_KEY=pk_live_xxxx...
-KORAPAY_WEBHOOK_SECRET=xxxx...
+PAYMENT_PROVIDER=korapay
+KORAPAY_SECRET_KEY=sk_live_...
+KORAPAY_PUBLIC_KEY=pk_live_...
+KORAPAY_WEBHOOK_SECRET=...
+KORAPAY_SECRET_HASH=...
 ```
 
----
+Keep all secret values server-side.
 
-## Step 4: How It Works
+## Payment flow
 
-1. **Live Korapay Flow**: When a user clicks **Buy WDV Voucher**, the system generates a Korapay Virtual Account with a 15-minute countdown timer.
-2. **Webhook Verification**: When funds are transferred to the virtual account, Korapay posts a webhook payload to `/api/korapay/webhook`. The system verifies the HMAC SHA256 signature (`x-korapay-signature`), updates payment status to `successful`, and issues the WDV Voucher code instantly.
-3. **Automatic Bank Resolution**: Transfer account numbers entered in SwiftPay are verified against Korapay's bank resolution API endpoint (`/api/bank/resolve`).
+1. User selects **Buy WDV Voucher**.
+2. SwiftPay starts a ₦6,500 Korapay checkout.
+3. Korapay processes the payment.
+4. SwiftPay verifies the transaction server-side.
+5. A WDV voucher is generated only after a successful ₦6,500 NGN verification.
+6. The existing WDV voucher ledger stores the generated voucher.
+
+Webhook endpoints:
+`/api/payment/webhook/korapay` and the legacy `/api/korapay/webhook` endpoint.

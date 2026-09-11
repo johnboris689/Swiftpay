@@ -53,6 +53,38 @@ export type TransactionType =
   | 'bank_transfer_direct'
   | 'promotional_bonus';
 
+export interface WithdrawalApprovalRecord {
+  id: string;
+  amount: number;
+  approvedAt: string;
+  approvedBy: string;
+  remainingAfter: number;
+  note?: string;
+}
+
+export interface WithdrawalRequest {
+  id: string;
+  userId: string;
+  email: string;
+  amount: number;
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  status: 'pending' | 'partially_approved' | 'processing' | 'completed' | 'rejected' | 'cancelled' | string;
+  timestamp: string;
+  reference: string;
+  voucherCode?: string;
+  notes?: string;
+  posSlipPath?: string;
+  posSlipUploadedAt?: string;
+  posSlipUploadedBy?: string;
+  approvedAmount?: number;
+  approvalHistory?: WithdrawalApprovalRecord[];
+  fullName?: string;
+  phone?: string;
+  userBalance?: number;
+}
+
 export interface Transaction {
   id: string;
   type: TransactionType;
@@ -74,6 +106,8 @@ export interface Transaction {
   network?: string;
   phoneNumber?: string;
   dataPlan?: string;
+  approvedAmount?: number;
+  approvalHistory?: WithdrawalApprovalRecord[];
 }
 
 export interface BankAccount {

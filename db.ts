@@ -30,11 +30,22 @@ interface JsonData {
   admins: any[];
   withdraw_requests: any[];
   wdv_payments: any[];
+  payment_transactions: any[];
   ai_chat_logs: any[];
   ai_custom_faqs: any[];
 }
 
 // -------------------- JSON DATABASE ENGINE FALLBACK --------------------
+function safeParseJsonField(val: any): any {
+  if (!val) return [];
+  if (typeof val !== 'string') return val;
+  try {
+    return JSON.parse(val);
+  } catch (e) {
+    return [];
+  }
+}
+
 function safeStringifyJsonField(val: any): string {
   if (val === undefined || val === null) return '[]';
   if (typeof val === 'string') {
@@ -113,6 +124,7 @@ function getJsonDb(): JsonData {
       ],
       withdraw_requests: [],
       wdv_payments: [],
+      payment_transactions: [],
       ai_chat_logs: [],
       ai_custom_faqs: []
     };
@@ -225,7 +237,12 @@ function getJsonDb(): JsonData {
         posSlipUploadedAt: w.posSlipUploadedAt || w.posslipuploadedat || '',
         posSlipuploadedAt: w.posSlipUploadedAt || w.posslipuploadedat || '',
         posSlipUploadedBy: w.posSlipUploadedBy || w.posslipuploadedby || '',
-        posSlipuploadedBy: w.posSlipUploadedBy || w.posslipuploadedby || ''
+        posSlipuploadedBy: w.posSlipUploadedBy || w.posslipuploadedby || '',
+        approvedAmount: Number(w.approvedAmount || w.approvedamount || 0),
+        approvedamount: Number(w.approvedAmount || w.approvedamount || 0),
+        approvalHistory: typeof w.approvalHistory === 'string'
+          ? (safeParseJsonField(w.approvalHistory) || [])
+          : (Array.isArray(w.approvalHistory) ? w.approvalHistory : (Array.isArray(w.approval_history) ? w.approval_history : []))
       })),
       wdv_payments: (parsed.wdv_payments || parsed.wdvPayments || []).map((p: any) => ({
         id: p.id || '',
@@ -251,6 +268,31 @@ function getJsonDb(): JsonData {
         provider: p.provider || 'manual_transfer',
         webhookData: p.webhookData || p.webhookdata || '',
         webhookdata: p.webhookData || p.webhookdata || ''
+      })),
+      payment_transactions: (parsed.payment_transactions || parsed.paymentTransactions || []).map((pt: any) => ({
+        id: pt.id || '',
+        reference: pt.reference || '',
+        userEmail: (pt.userEmail || pt.useremail || '').toLowerCase(),
+        useremail: (pt.userEmail || pt.useremail || '').toLowerCase(),
+        userName: pt.userName || pt.username || '',
+        username: pt.userName || pt.username || '',
+        amount: Number(pt.amount || 0),
+        currency: pt.currency || 'NGN',
+        provider: pt.provider || 'paystack',
+        providerReference: pt.providerReference || pt.providerreference || '',
+        providerreference: pt.providerReference || pt.providerreference || '',
+        purpose: pt.purpose || 'wallet_funding',
+        status: pt.status || 'pending',
+        channel: pt.channel || '',
+        authorizationUrl: pt.authorizationUrl || pt.authorizationurl || '',
+        authorizationurl: pt.authorizationUrl || pt.authorizationurl || '',
+        metadata: pt.metadata || '{}',
+        createdAt: pt.createdAt || pt.createdat || new Date().toISOString(),
+        createdat: pt.createdAt || pt.createdat || new Date().toISOString(),
+        verifiedAt: pt.verifiedAt || pt.verifiedat || '',
+        verifiedat: pt.verifiedAt || pt.verifiedat || '',
+        webhookData: pt.webhookData || pt.webhookdata || '',
+        webhookdata: pt.webhookData || pt.webhookdata || ''
       })),
       ai_chat_logs: parsed.ai_chat_logs || [],
       ai_custom_faqs: parsed.ai_custom_faqs || []
@@ -301,6 +343,7 @@ function getJsonDb(): JsonData {
       admins: [],
       withdraw_requests: [],
       wdv_payments: [],
+      payment_transactions: [],
       ai_chat_logs: [],
       ai_custom_faqs: []
     };
@@ -514,7 +557,9 @@ export async function initDb() {
       notes TEXT,
       posSlipPath TEXT,
       posSlipUploadedAt TEXT,
-      posSlipUploadedBy TEXT
+      posSlipUploadedBy TEXT,
+      approvedAmount REAL DEFAULT 0,
+      approvalHistory TEXT DEFAULT '[]'
     )
   `);
 
@@ -552,6 +597,27 @@ export async function initDb() {
       paidAt TEXT,
       voucherCode TEXT,
       provider TEXT,
+      webhookData TEXT
+    )
+  `);
+
+  await execute(`
+    CREATE TABLE IF NOT EXISTS payment_transactions (
+      id TEXT PRIMARY KEY,
+      reference TEXT UNIQUE,
+      userEmail TEXT,
+      userName TEXT,
+      amount REAL,
+      currency TEXT DEFAULT 'NGN',
+      provider TEXT,
+      providerReference TEXT,
+      purpose TEXT DEFAULT 'wallet_funding',
+      status TEXT DEFAULT 'pending',
+      channel TEXT,
+      authorizationUrl TEXT,
+      metadata TEXT,
+      createdAt TEXT,
+      verifiedAt TEXT,
       webhookData TEXT
     )
   `);
@@ -619,6 +685,12 @@ export async function initDb() {
   try {
     await execute(`ALTER TABLE withdraw_requests ADD COLUMN IF NOT EXISTS posSlipUploadedBy TEXT`);
   } catch (e) {}
+  try {
+    await execute(`ALTER TABLE withdraw_requests ADD COLUMN IF NOT EXISTS approvedAmount REAL DEFAULT 0`);
+  } catch (e) {}
+  try {
+    await execute(`ALTER TABLE withdraw_requests ADD COLUMN IF NOT EXISTS approvalHistory TEXT DEFAULT '[]'`);
+  } catch (e) {}
 
   try {
     await execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS wdvVerified INTEGER DEFAULT 0`);
@@ -673,6 +745,7 @@ export async function initDb() {
   try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_uniq ON users(email)`); } catch (e) {}
   try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vouchers_id_uniq ON vouchers(id)`); } catch (e) {}
   try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vouchers_code_uniq ON vouchers(voucherCode)`); } catch (e) {}
+  try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vouchers_withdrawal_id_uniq ON vouchers(withdrawalId) WHERE withdrawalId <> ''`); } catch (e) {}
   try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_settings_key_uniq ON admin_settings(key)`); } catch (e) {}
   try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_password_resets_id_uniq ON password_resets(id)`); } catch (e) {}
   try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_wdv_payments_ref_uniq ON wdv_payments(reference)`); } catch (e) {}
@@ -959,6 +1032,52 @@ export function execute(sql: string, params: any[] = []): Promise<any> {
           db.wdv_payments = db.wdv_payments || [];
           db.wdv_payments = db.wdv_payments.filter((x: any) => x.reference !== p.reference && x.id !== p.id);
           db.wdv_payments.push(p);
+        } else if (sqlUpper.includes('INSERT INTO PAYMENT_TRANSACTIONS')) {
+          const pt = {
+            id: params[0],
+            reference: params[1],
+            useremail: (params[2] || '').toLowerCase(),
+            userEmail: (params[2] || '').toLowerCase(),
+            username: params[3] || '',
+            userName: params[3] || '',
+            amount: Number(params[4] || 0),
+            currency: params[5] || 'NGN',
+            provider: params[6] || 'paystack',
+            providerreference: params[7] || '',
+            providerReference: params[7] || '',
+            purpose: params[8] || 'wallet_funding',
+            status: params[9] || 'pending',
+            channel: params[10] || '',
+            authorizationurl: params[11] || '',
+            authorizationUrl: params[11] || '',
+            metadata: params[12] || '{}',
+            createdat: params[13] || new Date().toISOString(),
+            createdAt: params[13] || new Date().toISOString(),
+            verifiedat: params[14] || '',
+            verifiedAt: params[14] || '',
+            webhookdata: params[15] || '',
+            webhookData: params[15] || ''
+          };
+          db.payment_transactions = db.payment_transactions || [];
+          db.payment_transactions = db.payment_transactions.filter((x: any) => x.reference !== pt.reference && x.id !== pt.id);
+          db.payment_transactions.push(pt);
+        } else if (sqlUpper.includes('UPDATE PAYMENT_TRANSACTIONS')) {
+          db.payment_transactions = db.payment_transactions || [];
+          const refParam = params[params.length - 1];
+          const pt = db.payment_transactions.find((x: any) => x.reference === refParam || x.id === refParam);
+          if (pt) {
+            if (sqlUpper.includes('STATUS =') || sqlUpper.includes('STATUS=')) {
+              pt.status = params[0];
+            }
+            if (sqlUpper.includes('VERIFIEDAT =') || sqlUpper.includes('VERIFIEDAT=')) {
+              pt.verifiedat = params[1] || new Date().toISOString();
+              pt.verifiedAt = pt.verifiedat;
+            }
+            if (sqlUpper.includes('PROVIDERREFERENCE =') || sqlUpper.includes('PROVIDERREFERENCE=')) {
+              pt.providerreference = params[2] || '';
+              pt.providerReference = pt.providerreference;
+            }
+          }
         } else if (sqlUpper.includes('UPDATE WDV_PAYMENTS')) {
           db.wdv_payments = db.wdv_payments || [];
           const refParam = params[params.length - 1];
@@ -1012,11 +1131,28 @@ export function execute(sql: string, params: any[] = []): Promise<any> {
           if (targetId) {
             const req = db.withdraw_requests.find((x: any) => x.id === targetId);
             if (req) {
+              if (sqlUpper.includes('APPROVEDAMOUNT =') || sqlUpper.includes('APPROVEDAMOUNT=')) {
+                // If updating status, approvedAmount, approvalHistory
+                if (sqlUpper.includes('STATUS =') && sqlUpper.includes('APPROVALHISTORY =')) {
+                  req.status = params[0];
+                  req.approvedAmount = Number(params[1] || 0);
+                  req.approvedamount = Number(params[1] || 0);
+                  req.approvalHistory = typeof params[2] === 'string' ? (safeParseJsonField(params[2]) || []) : (params[2] || []);
+                } else if (sqlUpper.includes('APPROVEDAMOUNT =')) {
+                  req.approvedAmount = Number(params[0] || 0);
+                  req.approvedamount = Number(params[0] || 0);
+                }
+              }
+              if (sqlUpper.includes('APPROVALHISTORY =') || sqlUpper.includes('APPROVALHISTORY=')) {
+                if (!sqlUpper.includes('STATUS =')) {
+                  req.approvalHistory = typeof params[0] === 'string' ? (safeParseJsonField(params[0]) || []) : (params[0] || []);
+                }
+              }
               if (sqlUpper.includes('STATUS =') || sqlUpper.includes('STATUS=')) {
                 if (sqlUpper.includes('STATUS =') && sqlUpper.includes('NOTES =')) {
                   req.status = params[0];
                   req.notes = params[1];
-                } else {
+                } else if (!sqlUpper.includes('APPROVEDAMOUNT =')) {
                   req.status = params[0];
                 }
               }
@@ -1150,6 +1286,12 @@ export function getRow(sql: string, params: any[] = []): Promise<any> {
           const row = db.wdv_payments.find((p: any) => p.reference === refVal || p.id === refVal);
           return resolve(row || null);
         }
+        if (sqlUpper.includes('FROM PAYMENT_TRANSACTIONS')) {
+          db.payment_transactions = db.payment_transactions || [];
+          const refVal = params[0];
+          const row = db.payment_transactions.find((p: any) => p.reference === refVal || p.id === refVal);
+          return resolve(row || null);
+        }
         if (sqlUpper.includes('FROM ADMIN_SETTINGS')) {
           const keyVal = params[0];
           if (keyVal && db.admin_settings[keyVal] !== undefined) {
@@ -1204,6 +1346,10 @@ export function getAllRows(sql: string, params: any[] = []): Promise<any[]> {
         if (sqlUpper.includes('FROM WDV_PAYMENTS')) {
           db.wdv_payments = db.wdv_payments || [];
           return resolve(db.wdv_payments);
+        }
+        if (sqlUpper.includes('FROM PAYMENT_TRANSACTIONS')) {
+          db.payment_transactions = db.payment_transactions || [];
+          return resolve(db.payment_transactions);
         }
         if (sqlUpper.includes('FROM AI_CHAT_LOGS')) {
           db.ai_chat_logs = db.ai_chat_logs || [];

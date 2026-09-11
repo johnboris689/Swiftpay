@@ -9,6 +9,7 @@ import bcrypt from 'bcryptjs';
 import { GoogleGenAI } from '@google/genai';
 import { initDb, getRow, getAllRows, execute } from './db';
 import { sendEmail, sendSms } from './email_sms_service';
+import { paymentManager, PaymentProviderName } from './payments/index';
 
 dotenv.config();
 
@@ -25,7 +26,11 @@ const app = express();
 const PORT = 3000;
 const DB_FILE = path.join(process.cwd(), 'swiftpay_db.json');
 
-app.use(express.json());
+app.use(express.json({
+  verify: (req: any, _res, buf) => {
+    req.rawBody = buf ? buf.toString('utf8') : '';
+  }
+}));
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 app.use('/public', express.static(path.join(process.cwd(), 'public')));
 
@@ -3007,58 +3012,6 @@ function generateVoucherCode(): string {
   return `WDV-${parts.join('-')}`;
 }
 
-// Purchase WDV Voucher Price Lock API
-app.post('/api/vouchers/purchase', async (req, res) => {
-  const { email, amount } = req.body;
-  if (!email || amount === undefined) {
-    return res.status(400).json({ error: 'Email and amount are required.' });
-  }
-
-  const db = readDb();
-  const config = db.wdvConfig || DEFAULT_WDV_CONFIG;
-
-  if (Number(amount) !== config.voucherPrice) {
-    logDiagnostic('API_ERROR', 'Purchase voucher failed: Invalid amount lock bypass attempted', { email, amount });
-    return res.status(400).json({ error: `WDV Voucher price is strictly fixed at ₦${config.voucherPrice.toLocaleString()}` });
-  }
-
-  const code = generateVoucherCode();
-  const id = `v-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-
-  try {
-    await execute(`
-      INSERT INTO vouchers (id, voucherCode, code, amount, status, usedBy, usedAt, generatedAt, withdrawalId, purchasedBy, redeemedBy)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-    `, [id, code, code, config.voucherPrice, 'unused', '', '', new Date().toISOString(), '', email.toLowerCase(), '[]']);
-
-    await loadDbCache();
-
-    // Add notification to user
-    const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
-    if (userIndex !== -1) {
-      db.users[userIndex].notifications = db.users[userIndex].notifications || [];
-      db.users[userIndex].notifications.unshift({
-        id: `notif-${Date.now()}`,
-        title: 'WDV Voucher Purchased',
-        body: `You successfully purchased a WDV Voucher. Code: ${code}. Copy and use it to complete transactions!`,
-        date: new Date().toISOString(),
-        unread: true
-      });
-      writeDb(db);
-    }
-
-    logDiagnostic('INFO', 'WDV Voucher purchased successfully', { email, code });
-
-    res.json({
-      success: true,
-      code,
-      message: 'WDV Purchase completed successfully! Voucher generated.'
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message || 'Failed to complete purchase' });
-  }
-});
-
 // -------------------- VIRTUAL ACCOUNT WDV PAYMENT SYSTEM --------------------
 
 // Core Payment Verification & Voucher Generation Logic
@@ -3084,14 +3037,39 @@ async function processSuccessfulWdvPayment(reference: string, providerName = 'we
   const nowIso = new Date().toISOString();
   const db = readDb();
   const config = db.wdvConfig || DEFAULT_WDV_CONFIG;
-  const price = payment.amount || config.voucherPrice || 6500;
+  const price = Number(payment.amount || config.voucherPrice || 6500);
   const email = (payment.useremail || payment.userEmail || '').toLowerCase();
 
-  // Save voucher in SQL database
-  await execute(`
-    INSERT INTO vouchers (id, voucherCode, code, amount, status, usedBy, usedAt, generatedAt, withdrawalId, purchasedBy, redeemedBy)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-  `, [voucherId, voucherCode, voucherCode, price, 'unused', '', '', nowIso, reference, email, '[]']);
+  if (Math.abs(price - 6500) > 0.009) {
+    throw new Error('WDV voucher payment amount must be exactly ₦6,500.');
+  }
+
+  // Save voucher in SQL database. withdrawalId is the payment reference, and a
+  // unique index prevents two concurrent webhook/verify calls from issuing two vouchers.
+  try {
+    await execute(`
+      INSERT INTO vouchers (id, voucherCode, code, amount, status, usedBy, usedAt, generatedAt, withdrawalId, purchasedBy, redeemedBy)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    `, [voucherId, voucherCode, voucherCode, price, 'unused', '', '', nowIso, reference, email, '[]']);
+  } catch (insertErr: any) {
+    // If another request already issued the voucher for this payment, return that
+    // voucher instead of generating another one.
+    const existingVoucher = await getRow(`SELECT * FROM vouchers WHERE withdrawalId = $1`, [reference]);
+    if (existingVoucher) {
+      const existing = existingVoucher.voucherCode || existingVoucher.vouchercode || existingVoucher.code;
+      if (existing) {
+        return {
+          success: true,
+          alreadyProcessed: true,
+          voucherCode: existing,
+          reference,
+          paidAt: existingVoucher.generatedAt || nowIso,
+          amount: Number(existingVoucher.amount || price)
+        };
+      }
+    }
+    throw insertErr;
+  }
 
   // Update payment status to successful
   await execute(`
@@ -3131,6 +3109,156 @@ async function processSuccessfulWdvPayment(reference: string, providerName = 'we
     reference,
     paidAt: nowIso,
     amount: price
+  };
+}
+
+// Unified Core Payment Verification, User Wallet Crediting & Voucher Handling Logic
+async function processSuccessfulPayment(params: {
+  reference: string;
+  providerName: PaymentProviderName;
+  verifiedAmount?: number;
+  channel?: string;
+  providerReference?: string;
+  rawData?: any;
+}) {
+  const reference = params.reference;
+  const nowIso = new Date().toISOString();
+
+  // 1. Check existing payment in payment_transactions & wdv_payments
+  let tx = await getRow(`SELECT * FROM payment_transactions WHERE reference = $1`, [reference]);
+  let wdvPayment = await getRow(`SELECT * FROM wdv_payments WHERE reference = $1`, [reference]);
+
+  if (tx && (tx.status === 'successful' || tx.status === 'settled')) {
+    const existingWdv = await getRow(`SELECT * FROM wdv_payments WHERE reference = $1`, [reference]);
+    return {
+      success: true,
+      alreadyProcessed: true,
+      reference,
+      amount: Number(tx.amount || existingWdv?.amount || 0),
+      purpose: tx.purpose || 'wallet_funding',
+      status: 'successful',
+      voucherCode: existingWdv?.voucherCode || existingWdv?.vouchercode || '',
+      message: 'Transaction already verified and processed.'
+    };
+  }
+
+  const userEmail = ((tx?.useremail || tx?.userEmail || wdvPayment?.useremail || wdvPayment?.userEmail || '') as string).toLowerCase();
+  const rawAmount = params.verifiedAmount !== undefined ? params.verifiedAmount : Number(tx?.amount || wdvPayment?.amount || 0);
+  const amount = Number(rawAmount || 0);
+  const purpose = tx?.purpose || (wdvPayment ? 'wdv_voucher' : 'wallet_funding');
+  const provider = params.providerName || (tx?.provider as PaymentProviderName) || 'paystack';
+  const providerRef = params.providerReference || tx?.providerReference || '';
+  const rawDataStr = typeof params.rawData === 'string' ? params.rawData : JSON.stringify(params.rawData || {});
+
+  // WDV purchases are always exactly ₦6,500. Reject mismatched amounts before
+  // marking the transaction successful or creating a voucher.
+  if (purpose === 'wdv_voucher' && Math.abs(amount - 6500) > 0.009) {
+    throw new Error('WDV voucher payment amount must be exactly ₦6,500.');
+  }
+
+  // 2. Mark or create in payment_transactions
+  if (tx) {
+    await execute(`
+      UPDATE payment_transactions
+      SET status = 'successful', verifiedAt = $1, providerReference = $2, webhookData = $3, channel = $4
+      WHERE reference = $5
+    `, [nowIso, providerRef, rawDataStr, params.channel || tx.channel || 'card', reference]);
+  } else {
+    const id = `ptx-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+    await execute(`
+      INSERT INTO payment_transactions (id, reference, userEmail, userName, amount, currency, provider, providerReference, purpose, status, channel, authorizationUrl, metadata, createdAt, verifiedAt, webhookData)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+    `, [id, reference, userEmail, '', amount, 'NGN', provider, providerRef, purpose, 'successful', params.channel || 'card', '', '{}', nowIso, nowIso, rawDataStr]);
+  }
+
+  let voucherCode = '';
+
+  // 3. Handle Wallet Funding vs Voucher
+  if (purpose === 'wallet_funding') {
+    const db = readDb();
+    const userIndex = db.users.findIndex((u: any) => u.email.toLowerCase() === userEmail);
+    if (userIndex !== -1) {
+      const user = db.users[userIndex];
+      const currentBal = Number(user.balance || 0);
+      const newBal = currentBal + amount;
+      user.balance = newBal;
+
+      const txRecord = {
+        id: `tx-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
+        userId: userEmail,
+        type: 'deposit',
+        amount: amount,
+        date: nowIso,
+        status: 'success',
+        description: `Deposit via ${provider.toUpperCase()} (Ref: ${reference})`,
+        reference: reference,
+        provider: provider,
+        balanceBefore: currentBal,
+        balanceAfter: newBal
+      };
+      user.transactions = user.transactions || [];
+      user.transactions.unshift(txRecord);
+
+      user.notifications = user.notifications || [];
+      user.notifications.unshift({
+        id: `notif-${Date.now()}-${crypto.randomBytes(2).toString('hex')}`,
+        title: 'Wallet Funded Successfully',
+        body: `Your wallet has been credited with ₦${amount.toLocaleString()} via ${provider.toUpperCase()}. New balance: ₦${newBal.toLocaleString()}.`,
+        date: nowIso,
+        unread: true,
+        type: 'deposit',
+        category: 'Wallet Deposit',
+        status: 'Success',
+        amount: amount,
+        reference: reference
+      });
+
+      await writeDb(db);
+
+      try {
+        await execute(`UPDATE users SET balance = $1, notifications = $2, transactions = $3 WHERE LOWER(email) = $4`, [
+          newBal,
+          JSON.stringify(user.notifications),
+          JSON.stringify(user.transactions),
+          userEmail
+        ]);
+        await execute(`UPDATE wallets SET balance = $1 WHERE LOWER(userId) = $2`, [newBal, userEmail]);
+      } catch (sqlErr) {
+        console.warn('[Payment Credit] SQL update error:', sqlErr);
+      }
+    }
+  } else if (purpose === 'wdv_voucher') {
+    if (Math.abs(amount - 6500) > 0.009) {
+      throw new Error('WDV voucher payment amount must be exactly ₦6,500.');
+    }
+    try {
+      if (!wdvPayment) {
+        const id = `dva-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+        await execute(`
+          INSERT INTO wdv_payments (id, reference, userEmail, amount, bankName, accountNumber, accountName, status, createdAt, expiresAt, paidAt, voucherCode, provider, webhookData)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        `, [id, reference, userEmail, amount, `${provider.toUpperCase()} Checkout`, 'Online Gateway', `SwiftPay / Customer`, 'pending', nowIso, nowIso, '', '', provider, '']);
+      }
+      const vResult = await processSuccessfulWdvPayment(reference, provider, rawDataStr);
+      voucherCode = vResult.voucherCode || '';
+    } catch (vErr) {
+      console.error('[Payment Process] WDV voucher error:', vErr);
+      throw vErr;
+    }
+  }
+
+  logDiagnostic('INFO', 'Payment processed and confirmed', { reference, userEmail, amount, purpose, provider });
+  await loadDbCache();
+
+  return {
+    success: true,
+    alreadyProcessed: false,
+    reference,
+    amount,
+    purpose,
+    status: 'successful',
+    voucherCode,
+    paidAt: nowIso
   };
 }
 
@@ -3300,28 +3428,6 @@ app.get('/api/korapay/payment-status/:reference', authenticateToken, async (req,
   }
 });
 
-// Simulate Korapay payment verification for testing
-app.post('/api/korapay/simulate-payment', authenticateToken, async (req: any, res) => {
-  const { reference } = req.body;
-  try {
-    if (!reference) {
-      return res.status(400).json({ error: 'Payment reference is required.' });
-    }
-
-    const result = await processSuccessfulWdvPayment(reference, 'korapay_simulation', JSON.stringify({ simulated: true, at: new Date().toISOString() }));
-    res.json({
-      success: true,
-      message: 'Korapay payment simulated and verified successfully.',
-      reference,
-      voucherCode: result.voucherCode,
-      paidAt: new Date().toISOString()
-    });
-  } catch (err: any) {
-    console.error('Error simulating Korapay payment:', err);
-    res.status(500).json({ error: 'Failed to simulate Korapay payment.' });
-  }
-});
-
 // Korapay Webhook Handler
 app.post('/api/korapay/webhook', express.raw({ type: 'application/json' }), async (req: any, res: any) => {
   try {
@@ -3380,6 +3486,456 @@ app.post('/api/korapay/webhook', express.raw({ type: 'application/json' }), asyn
   } catch (err: any) {
     console.error('Error processing Korapay Webhook:', err);
     res.status(500).send('Webhook Processing Error');
+  }
+});
+
+// -------------------- UNIFIED NIGERIAN PAYMENT GATEWAY (PAYSTACK, FLUTTERWAVE, KORAPAY) --------------------
+
+// 1. Get Payment Configuration & Available Providers
+app.get('/api/payment/config', (req, res) => {
+  try {
+    const providers = paymentManager.getAllProvidersStatus();
+    const activeProvider = paymentManager.getConfiguredActiveProviderName();
+    const isAvailable = providers.some(p => p.isConfigured);
+
+    res.json({
+      success: true,
+      activeProvider,
+      providers,
+      isAvailable
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to fetch payment configuration.' });
+  }
+});
+
+// Flexible authentication middleware for payment endpoints (accepts Bearer header, body token, or verified user email)
+async function authenticatePaymentUser(req: any, res: any, next: any) {
+  const authHeader = req.headers['authorization'];
+  let rawToken = (authHeader && authHeader.split(' ')[1]) || req.body?.token || req.query?.token;
+  if (typeof rawToken === 'string') {
+    rawToken = rawToken.trim().replace(/^Bearer\s+/i, '');
+  }
+
+  if (rawToken) {
+    const email = verifyToken(rawToken);
+    if (email) {
+      req.userEmail = email.toLowerCase();
+      // Ensure user exists in db
+      const db = readDb();
+      let userIndex = db.users.findIndex((u: any) => u.email.toLowerCase() === email.toLowerCase());
+      if (userIndex === -1) {
+        const defaultName = email.split('@')[0].split(/[._-]/).map((p: string) => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+        const dummyUser = {
+          fullName: defaultName || 'SwiftPay User',
+          email: email.toLowerCase(),
+          passwordHash: bcrypt.hashSync('SwiftPayTempPass99!', 10),
+          balance: 200000,
+          dailyTarget: 50000,
+          dailySpent: 0,
+          pinCreated: false,
+          biometricEnabled: false,
+          twoFactorEnabled: false,
+          accountNumber: Math.floor(1000000000 + Math.random() * 9000000000).toString(),
+          bankName: 'SwiftPay Microfinance Bank',
+          createdAt: new Date().toISOString(),
+          transactions: [],
+          notifications: []
+        };
+        db.users.push(dummyUser);
+        writeDb(db);
+      }
+      return next();
+    }
+  }
+
+  // Fallback: If user provided their email in body or query
+  const bodyEmail = (req.body?.email || req.body?.userEmail || req.query?.email || '').trim().toLowerCase();
+  if (bodyEmail && bodyEmail.includes('@')) {
+    const db = readDb();
+    let userIndex = db.users.findIndex((u: any) => u.email.toLowerCase() === bodyEmail);
+    if (userIndex === -1) {
+      const defaultName = (req.body?.name || bodyEmail.split('@')[0]).split(/[._-]/).map((p: string) => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+      const dummyUser = {
+        fullName: defaultName || 'SwiftPay User',
+        email: bodyEmail,
+        passwordHash: bcrypt.hashSync('SwiftPayTempPass99!', 10),
+        balance: 200000,
+        dailyTarget: 50000,
+        dailySpent: 0,
+        pinCreated: false,
+        biometricEnabled: false,
+        twoFactorEnabled: false,
+        accountNumber: Math.floor(1000000000 + Math.random() * 9000000000).toString(),
+        bankName: 'SwiftPay Microfinance Bank',
+        createdAt: new Date().toISOString(),
+        transactions: [],
+        notifications: []
+      };
+      db.users.push(dummyUser);
+      writeDb(db);
+    }
+    req.userEmail = bodyEmail;
+    return next();
+  }
+
+  return res.status(401).json({ error: 'Access Denied: Secure session token missing. Please sign in.' });
+}
+
+// 2. Initialize Payment (Server-side Initialization)
+app.post('/api/payment/initialize', authenticatePaymentUser, async (req: any, res) => {
+  try {
+    const email = (req.userEmail || '').toLowerCase();
+    const db = readDb();
+    const user = db.users.find((u: any) => u.email.toLowerCase() === email);
+    const purpose = req.body.purpose || 'wdv_voucher';
+    const requestedProvider = req.body.provider;
+    const configuredWdvPrice = 6500;
+    const amount = configuredWdvPrice;
+
+    // This payment endpoint is intentionally WDV-only. Wallet funding/deposit
+    // is not part of the WDV purchase flow. Never trust a client-supplied amount.
+    if (purpose !== 'wdv_voucher') {
+      return res.status(400).json({ error: 'Wallet funding is not available through the WDV purchase flow.' });
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(500).json({ error: 'WDV voucher price is not configured correctly.' });
+    }
+
+    const provider = paymentManager.getActiveProvider(requestedProvider);
+    if (!provider || !provider.isConfigured()) {
+      const missing = provider ? provider.getMissingEnvVars().join(', ') : 'API Secret Keys';
+      return res.status(400).json({
+        error: `The selected payment gateway (${provider?.displayName || 'Active Gateway'}) is not currently configured. Missing: ${missing}. Please contact system support or configure credentials in Admin Settings.`
+      });
+    }
+
+    const reference = `SPAY_${Date.now()}_${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    const defaultCallbackUrl = `${protocol}://${host}/payment/callback?reference=${reference}&provider=${provider.name}`;
+    const callbackUrl = req.body.callbackUrl || defaultCallbackUrl;
+
+    const initResult = await provider.initializePayment({
+      amount,
+      email,
+      name: user?.fullName || req.body.name || 'SwiftPay Customer',
+      phone: user?.phone || req.body.phone || '',
+      reference,
+      callbackUrl,
+      purpose,
+      metadata: {
+        userId: email,
+        purpose,
+        userFullName: user?.fullName,
+        ...(req.body.metadata || {})
+      }
+    });
+
+    const nowIso = new Date().toISOString();
+    const id = `ptx-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+
+    await execute(`
+      INSERT INTO payment_transactions (id, reference, userEmail, userName, amount, currency, provider, providerReference, purpose, status, channel, authorizationUrl, metadata, createdAt, verifiedAt, webhookData)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+    `, [id, reference, email, user?.fullName || '', amount, 'NGN', provider.name, '', purpose, 'pending', 'card', initResult.authorizationUrl || '', JSON.stringify({ callbackUrl }), nowIso, '', '']);
+
+    // If purpose is WDV voucher, create synchronized record in wdv_payments
+    if (purpose === 'wdv_voucher') {
+      const dvaId = `dva-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+      const expiresIso = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      await execute(`
+        INSERT INTO wdv_payments (id, reference, userEmail, amount, bankName, accountNumber, accountName, status, createdAt, expiresAt, paidAt, voucherCode, provider, webhookData)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      `, [dvaId, reference, email, amount, `${provider.displayName} Checkout`, 'Online Gateway', `SwiftPay / ${user?.fullName || 'User'}`, 'pending', nowIso, expiresIso, '', '', provider.name, '']);
+    }
+
+    await loadDbCache();
+
+    logDiagnostic('INFO', 'Payment initialized successfully', { reference, email, amount, provider: provider.name });
+
+    res.json({
+      success: true,
+      reference,
+      authorizationUrl: initResult.authorizationUrl,
+      accessCode: initResult.accessCode,
+      provider: provider.name,
+      providerDisplayName: provider.displayName,
+      amount,
+      purpose
+    });
+  } catch (err: any) {
+    console.error('Error during payment initialization:', err);
+    res.status(500).json({ error: err.message || 'Payment initialization failed.' });
+  }
+});
+
+// 3. Verify Payment (Server-side Authoritative Verification)
+const verifyPaymentUnifiedHandler = async (req: any, res: any) => {
+  try {
+    const reference = req.body.reference || req.params.reference || req.query.reference;
+    if (!reference) {
+      return res.status(400).json({ error: 'Payment reference is required.' });
+    }
+
+    // 1. Check existing payment status
+    let tx = await getRow(`SELECT * FROM payment_transactions WHERE reference = $1`, [reference]);
+    let wdvPayment = await getRow(`SELECT * FROM wdv_payments WHERE reference = $1`, [reference]);
+
+    if (!tx && !wdvPayment) {
+      return res.status(404).json({ error: 'Payment transaction reference not found.' });
+    }
+
+    // Security: a signed-in user may only verify their own payment reference.
+    const requesterEmail = String(req.userEmail || '').toLowerCase();
+    const paymentOwner = String(tx?.useremail || tx?.userEmail || wdvPayment?.useremail || wdvPayment?.userEmail || '').toLowerCase();
+    if (!requesterEmail || !paymentOwner || requesterEmail !== paymentOwner) {
+      return res.status(403).json({ error: 'This payment reference does not belong to your account.' });
+    }
+
+    // WDV purchases are fixed-price NGN transactions. Never issue a voucher for a
+    // successful payment with the wrong amount or currency.
+    const requestedPurpose = tx?.purpose || (wdvPayment ? 'wdv_voucher' : '');
+    if (requestedPurpose !== 'wdv_voucher') {
+      return res.status(400).json({ error: 'Only WDV voucher payments are supported by this checkout.' });
+    }
+
+    // Idempotency: if a webhook already completed the payment, return the exact
+    // existing voucher instead of asking the provider to create anything again.
+    if (tx && (tx.status === 'successful' || tx.status === 'settled')) {
+      const db = readDb();
+      const user = db.users.find((u: any) => u.email.toLowerCase() === paymentOwner);
+      const existingCode = wdvPayment?.voucherCode || wdvPayment?.vouchercode || '';
+      return res.json({
+        success: true,
+        alreadyProcessed: true,
+        status: 'successful',
+        amount: Number(tx.amount || wdvPayment?.amount || 6500),
+        reference,
+        purpose: 'wdv_voucher',
+        balance: user?.balance,
+        voucherCode: existingCode,
+        message: 'Payment has already been verified and your WDV voucher is ready.'
+      });
+    }
+
+    // 2. Identify provider used for this payment
+    const rawProvider = (tx?.provider || wdvPayment?.provider || 'paystack').toLowerCase();
+    const providerName: PaymentProviderName =
+      rawProvider.includes('flutterwave') ? 'flutterwave' :
+      rawProvider.includes('korapay') ? 'korapay' : 'paystack';
+
+    const provider = paymentManager.getProvider(providerName);
+    if (!provider.isConfigured()) {
+      return res.status(400).json({
+        error: `Provider "${provider.displayName}" credentials are not configured to perform live verification.`
+      });
+    }
+
+    // 3. Query the provider's verification API with secret key
+    const verifyRes = await provider.verifyPayment(reference);
+
+    if (verifyRes.success && verifyRes.status === 'successful') {
+      const expectedAmount = 6500;
+      const verifiedAmount = Number(verifyRes.amount || 0);
+      const verifiedCurrency = String(verifyRes.currency || '').toUpperCase();
+      const storedAmount = Number(tx?.amount || wdvPayment?.amount || expectedAmount);
+
+      if (verifiedCurrency !== 'NGN' || Math.abs(verifiedAmount - expectedAmount) > 0.009 || Math.abs(storedAmount - expectedAmount) > 0.009) {
+        await execute(`UPDATE payment_transactions SET status = $1 WHERE reference = $2`, ['failed', reference]);
+        return res.status(400).json({
+          success: false,
+          status: 'failed',
+          reference,
+          message: 'Payment amount could not be verified as the required ₦6,500 WDV purchase. No voucher was generated.'
+        });
+      }
+
+      const processRes = await processSuccessfulPayment({
+        reference,
+        providerName: provider.name,
+        verifiedAmount: verifyRes.amount,
+        channel: verifyRes.channel,
+        providerReference: verifyRes.providerReference,
+        rawData: verifyRes.rawResponse
+      });
+
+      const db = readDb();
+      const email = (tx?.useremail || tx?.userEmail || wdvPayment?.useremail || wdvPayment?.userEmail || '').toLowerCase();
+      const user = db.users.find((u: any) => u.email.toLowerCase() === email);
+
+      return res.json({
+        success: true,
+        status: 'successful',
+        amount: verifyRes.amount,
+        reference,
+        purpose: tx?.purpose || 'wallet_funding',
+        balance: user?.balance,
+        voucherCode: processRes.voucherCode,
+        message: 'Payment verified successfully and funds credited!'
+      });
+    }
+
+    if (verifyRes.status === 'failed' || verifyRes.status === 'abandoned') {
+      await execute(`UPDATE payment_transactions SET status = $1 WHERE reference = $2`, [verifyRes.status, reference]);
+      return res.json({
+        success: false,
+        status: verifyRes.status,
+        reference,
+        message: verifyRes.message || 'Payment was unsuccessful or cancelled.'
+      });
+    }
+
+    res.json({
+      success: false,
+      status: 'pending',
+      reference,
+      message: 'Payment is pending. Please complete authorization.'
+    });
+  } catch (err: any) {
+    console.error('Error during payment verification:', err);
+    res.status(500).json({ error: err.message || 'Payment verification failed.' });
+  }
+};
+
+app.post('/api/payment/verify', authenticatePaymentUser, verifyPaymentUnifiedHandler);
+app.get('/api/payment/verify/:reference', authenticatePaymentUser, verifyPaymentUnifiedHandler);
+
+// 4. Unified Webhook Receiver
+const handleWebhookUnified = async (providerName: PaymentProviderName, req: any, res: any) => {
+  try {
+    const provider = paymentManager.getProvider(providerName);
+    const rawBody = req.rawBody || (typeof req.body === 'string' ? req.body : JSON.stringify(req.body || {}));
+    const jsonBody = typeof req.body === 'object' && !Buffer.isBuffer(req.body) ? req.body : (rawBody ? JSON.parse(rawBody) : {});
+
+    const parsed = await provider.parseWebhook(req.headers, rawBody, jsonBody);
+    if (!parsed.isValid) {
+      logDiagnostic('SECURITY_ALERT', `Invalid ${provider.displayName} webhook signature`, { headers: req.headers });
+      return res.status(400).send(`Invalid ${provider.displayName} webhook signature`);
+    }
+
+    logDiagnostic('INFO', `${provider.displayName} Webhook Received`, { event: parsed.event, reference: parsed.reference });
+
+    if (parsed.status === 'successful' && parsed.reference) {
+      await processSuccessfulPayment({
+        reference: parsed.reference,
+        providerName,
+        verifiedAmount: parsed.amount,
+        providerReference: parsed.providerReference,
+        rawData: parsed.rawData
+      });
+    }
+
+    res.status(200).json({ status: 'success', message: `${provider.displayName} webhook processed.` });
+  } catch (err: any) {
+    console.error(`Error in ${providerName} webhook handler:`, err);
+    res.status(500).json({ error: 'Webhook processing failure.' });
+  }
+};
+
+app.post('/api/payment/webhook/paystack', (req, res) => handleWebhookUnified('paystack', req, res));
+app.post('/api/payment/webhook/flutterwave', (req, res) => handleWebhookUnified('flutterwave', req, res));
+app.post('/api/payment/webhook/korapay', (req, res) => handleWebhookUnified('korapay', req, res));
+app.post('/api/paystack/webhook', (req, res) => handleWebhookUnified('paystack', req, res));
+app.post('/api/flutterwave/webhook', (req, res) => handleWebhookUnified('flutterwave', req, res));
+
+// 5. Admin Payment Gateway Configuration & Transaction Oversight
+app.get('/api/admin/payment-config', authenticateAdminToken, (req, res) => {
+  try {
+    const providers = paymentManager.getAllProvidersStatus();
+    const activeProvider = paymentManager.getConfiguredActiveProviderName();
+    res.json({
+      success: true,
+      activeProvider,
+      providers
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to fetch admin payment configuration.' });
+  }
+});
+
+app.post('/api/admin/payment-config/active-provider', authenticateAdminToken, async (req, res) => {
+  try {
+    const { provider } = req.body;
+    if (!provider || !['paystack', 'flutterwave', 'korapay'].includes(provider)) {
+      return res.status(400).json({ error: 'Valid provider required (paystack, flutterwave, or korapay).' });
+    }
+
+    paymentManager.setActiveProviderName(provider as PaymentProviderName);
+
+    // Persist in admin_settings
+    await execute(`INSERT INTO admin_settings (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = $2`, [
+      'payment_provider',
+      provider
+    ]);
+
+    res.json({
+      success: true,
+      activeProvider: provider,
+      message: `Active payment provider set to ${provider.toUpperCase()}`
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to update active payment provider.' });
+  }
+});
+
+app.get('/api/admin/payment-transactions', authenticateAdminToken, async (req, res) => {
+  try {
+    const transactions = await getAllRows(`SELECT * FROM payment_transactions ORDER BY createdAt DESC`);
+    res.json({
+      success: true,
+      transactions
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to fetch payment transactions.' });
+  }
+});
+
+app.post('/api/admin/payment-transactions/manual-verify', authenticateAdminToken, async (req, res) => {
+  try {
+    const { reference } = req.body;
+    if (!reference) {
+      return res.status(400).json({ error: 'Payment reference is required.' });
+    }
+
+    const tx = await getRow(`SELECT * FROM payment_transactions WHERE reference = $1`, [reference]);
+    const rawProvider = (tx?.provider || 'paystack').toLowerCase();
+    const providerName: PaymentProviderName =
+      rawProvider.includes('flutterwave') ? 'flutterwave' :
+      rawProvider.includes('korapay') ? 'korapay' : 'paystack';
+
+    const provider = paymentManager.getProvider(providerName);
+    if (!provider.isConfigured()) {
+      return res.status(400).json({
+        error: `Provider ${provider.displayName} is missing API credentials for verification.`
+      });
+    }
+
+    const verifyRes = await provider.verifyPayment(reference);
+    if (verifyRes.success && verifyRes.status === 'successful') {
+      const processRes = await processSuccessfulPayment({
+        reference,
+        providerName: provider.name,
+        verifiedAmount: verifyRes.amount,
+        channel: verifyRes.channel,
+        providerReference: verifyRes.providerReference,
+        rawData: verifyRes.rawResponse
+      });
+
+      return res.json({
+        success: true,
+        message: 'Transaction successfully verified with provider and account credited.',
+        data: processRes
+      });
+    }
+
+    res.json({
+      success: false,
+      status: verifyRes.status,
+      message: verifyRes.message || 'Provider verification was not successful.'
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Manual verification failed.' });
   }
 });
 
@@ -4258,11 +4814,41 @@ const uploadPosSlip = multer({
   }
 });
 
+// Helper to parse and structure withdrawal rows with partial approval history
+const formatWithdrawalData = (row: any) => {
+  if (!row) return null;
+  const requestedAmount = Number(row.amount || 0);
+  const approvedAmount = Number(row.approvedAmount || row.approvedamount || 0);
+  let approvalHistory: any[] = [];
+  try {
+    if (typeof row.approvalHistory === 'string') {
+      approvalHistory = JSON.parse(row.approvalHistory || '[]');
+    } else if (typeof row.approvalhistory === 'string') {
+      approvalHistory = JSON.parse(row.approvalhistory || '[]');
+    } else if (Array.isArray(row.approvalHistory)) {
+      approvalHistory = row.approvalHistory;
+    } else if (Array.isArray(row.approvalhistory)) {
+      approvalHistory = row.approvalhistory;
+    }
+  } catch (e) {
+    approvalHistory = [];
+  }
+  const remainingAmount = Math.max(0, requestedAmount - approvedAmount);
+  return {
+    ...row,
+    amount: requestedAmount,
+    approvedAmount,
+    remainingAmount,
+    approvalHistory: Array.isArray(approvalHistory) ? approvalHistory : []
+  };
+};
+
 // Admin Withdrawal Management API Endpoints
 // 1. Fetch all withdrawal requests
 app.get('/api/admin/withdrawals', authenticateAdminToken, async (req, res) => {
   try {
-    const withdrawals = await getAllRows(`SELECT * FROM withdraw_requests ORDER BY timestamp DESC`);
+    const rawWithdrawals = await getAllRows(`SELECT * FROM withdraw_requests ORDER BY timestamp DESC`);
+    const withdrawals = (rawWithdrawals || []).map(formatWithdrawalData);
     res.json({ success: true, withdrawals });
   } catch (err) {
     console.error('Error fetching withdrawals:', err);
@@ -4274,10 +4860,11 @@ app.get('/api/admin/withdrawals', authenticateAdminToken, async (req, res) => {
 app.get('/api/admin/withdrawals/:transactionId', authenticateAdminToken, async (req, res) => {
   const { transactionId } = req.params;
   try {
-    const withdrawal = await getRow(`SELECT * FROM withdraw_requests WHERE id = $1`, [transactionId]);
-    if (!withdrawal) {
+    const rawWithdrawal = await getRow(`SELECT * FROM withdraw_requests WHERE id = $1`, [transactionId]);
+    if (!rawWithdrawal) {
       return res.status(404).json({ error: 'Withdrawal request not found' });
     }
+    const withdrawal = formatWithdrawalData(rawWithdrawal);
     const user = await getRow(`SELECT fullName, phone, balance FROM users WHERE email = $1`, [withdrawal.email || withdrawal.userid || withdrawal.userId]);
     res.json({
       success: true,
@@ -4294,7 +4881,145 @@ app.get('/api/admin/withdrawals/:transactionId', authenticateAdminToken, async (
   }
 });
 
-// 3. Update withdrawal status and internal notes
+// 3. Partial approval endpoint (Approve part by part)
+app.post('/api/admin/withdrawals/:transactionId/approve-partial', authenticateAdminToken, async (req, res) => {
+  const { transactionId } = req.params;
+  const { amount, note } = req.body;
+
+  const approveAmt = Number(amount);
+  if (isNaN(approveAmt) || approveAmt <= 0) {
+    return res.status(400).json({ error: 'Please enter a valid approval amount greater than ₦0.' });
+  }
+
+  try {
+    const rawWithdrawal = await getRow(`SELECT * FROM withdraw_requests WHERE id = $1`, [transactionId]);
+    if (!rawWithdrawal) {
+      return res.status(404).json({ error: 'Withdrawal request not found' });
+    }
+
+    const currentWithdrawal = formatWithdrawalData(rawWithdrawal);
+    const requestedAmount = Number(currentWithdrawal.amount || 0);
+    const currentApproved = Number(currentWithdrawal.approvedAmount || 0);
+    const currentRemaining = Math.max(0, requestedAmount - currentApproved);
+
+    if (currentApproved >= requestedAmount || currentRemaining <= 0) {
+      return res.status(400).json({ error: 'This withdrawal request has already been fully approved.' });
+    }
+
+    if (approveAmt > currentRemaining) {
+      return res.status(400).json({
+        error: `Approval amount (₦${approveAmt.toLocaleString('en-NG', { minimumFractionDigits: 2 })}) exceeds the remaining pending amount of ₦${currentRemaining.toLocaleString('en-NG', { minimumFractionDigits: 2 })}.`
+      });
+    }
+
+    const newApprovedAmount = currentApproved + approveAmt;
+    const newRemainingAmount = Math.max(0, requestedAmount - newApprovedAmount);
+    const isFullyApproved = newRemainingAmount <= 0 || newApprovedAmount >= requestedAmount;
+    const newStatus = isFullyApproved ? 'completed' : 'partially_approved';
+
+    const approvalRecord = {
+      id: `appr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      amount: approveAmt,
+      approvedAt: new Date().toISOString(),
+      approvedBy: (req as any).adminEmail || 'admin@swiftpay.ng',
+      remainingAfter: newRemainingAmount,
+      note: note ? String(note).trim() : ''
+    };
+
+    const updatedHistory = [...(currentWithdrawal.approvalHistory || []), approvalRecord];
+    const historyJson = JSON.stringify(updatedHistory);
+
+    // Update SQL database
+    await execute(
+      `UPDATE withdraw_requests SET status = $1, approvedAmount = $2, approvalHistory = $3 WHERE id = $4`,
+      [newStatus, newApprovedAmount, historyJson, transactionId]
+    );
+
+    // Sync to user database, transactions, and notifications
+    const db = readDb();
+    const userEmail = (currentWithdrawal.email || currentWithdrawal.userid || currentWithdrawal.userId || '').toLowerCase();
+    const userIndex = db.users.findIndex(u => u.email.toLowerCase() === userEmail);
+
+    if (userIndex !== -1) {
+      const user = db.users[userIndex];
+      user.transactions = user.transactions || [];
+      const tx = user.transactions.find((t: any) => t.id === transactionId);
+      if (tx) {
+        tx.status = isFullyApproved ? 'success' : 'processing';
+        tx.approvedAmount = newApprovedAmount;
+        tx.approvalHistory = updatedHistory;
+      }
+
+      // Generate user notification per exact specification
+      user.notifications = user.notifications || [];
+
+      if (isFullyApproved) {
+        user.notifications.unshift({
+          id: `notif-${Date.now()}`,
+          title: 'Withdrawal Approved',
+          body: `Your full withdrawal of ₦${requestedAmount.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} has been approved.`,
+          date: new Date().toISOString(),
+          unread: true,
+          type: 'withdraw',
+          category: 'Withdrawal',
+          status: 'Completed',
+          amount: requestedAmount,
+          recipientName: currentWithdrawal.accountName || currentWithdrawal.accountname,
+          bankName: currentWithdrawal.bankName || currentWithdrawal.bankname,
+          accountNumber: currentWithdrawal.accountNumber || currentWithdrawal.accountnumber,
+          reference: currentWithdrawal.reference
+        });
+      } else {
+        user.notifications.unshift({
+          id: `notif-${Date.now()}`,
+          title: 'Withdrawal Update',
+          body: `₦${approveAmt.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} of your ₦${requestedAmount.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} withdrawal has been approved.\n\n₦${newRemainingAmount.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} is still waiting for approval. Please complete any remaining requirements before the rest can be approved.`,
+          date: new Date().toISOString(),
+          unread: true,
+          type: 'withdraw',
+          category: 'Withdrawal',
+          status: 'Partially Approved',
+          amount: approveAmt,
+          recipientName: currentWithdrawal.accountName || currentWithdrawal.accountname,
+          bankName: currentWithdrawal.bankName || currentWithdrawal.bankname,
+          accountNumber: currentWithdrawal.accountNumber || currentWithdrawal.accountnumber,
+          reference: currentWithdrawal.reference
+        });
+      }
+
+      writeDb(db);
+    }
+
+    logDiagnostic('INFO', `Admin ${(req as any).adminEmail} partially approved ₦${approveAmt} for withdrawal ${transactionId}`, {
+      requestedAmount,
+      approvedAmount: newApprovedAmount,
+      remainingAmount: newRemainingAmount,
+      isFullyApproved
+    });
+
+    res.json({
+      success: true,
+      message: isFullyApproved
+        ? `Withdrawal fully approved (₦${requestedAmount.toLocaleString('en-NG', { minimumFractionDigits: 2 })})`
+        : `₦${approveAmt.toLocaleString('en-NG', { minimumFractionDigits: 2 })} approved successfully. Remaining: ₦${newRemainingAmount.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`,
+      isFullyApproved,
+      approvedAmount: newApprovedAmount,
+      remainingAmount: newRemainingAmount,
+      withdrawal: {
+        ...currentWithdrawal,
+        status: newStatus,
+        approvedAmount: newApprovedAmount,
+        remainingAmount: newRemainingAmount,
+        approvalHistory: updatedHistory
+      }
+    });
+  } catch (err) {
+    console.error('Error approving partial withdrawal:', err);
+    res.status(500).json({ error: 'Failed to process partial approval' });
+  }
+});
+
+// 4. Update withdrawal status and internal notes
 app.post('/api/admin/withdrawals/:transactionId/status', authenticateAdminToken, async (req, res) => {
   const { transactionId } = req.params;
   const { status, notes } = req.body;
@@ -4304,20 +5029,54 @@ app.post('/api/admin/withdrawals/:transactionId/status', authenticateAdminToken,
   }
 
   try {
-    const withdrawal = await getRow(`SELECT * FROM withdraw_requests WHERE id = $1`, [transactionId]);
-    if (!withdrawal) {
+    const rawWithdrawal = await getRow(`SELECT * FROM withdraw_requests WHERE id = $1`, [transactionId]);
+    if (!rawWithdrawal) {
       return res.status(404).json({ error: 'Withdrawal request not found' });
     }
 
+    const currentWithdrawal = formatWithdrawalData(rawWithdrawal);
+    const requestedAmount = Number(currentWithdrawal.amount || 0);
+    const currentApproved = Number(currentWithdrawal.approvedAmount || 0);
+    const currentRemaining = Math.max(0, requestedAmount - currentApproved);
+
+    let finalApprovedAmount = currentApproved;
+    let finalHistory = currentWithdrawal.approvalHistory || [];
+
+    // If admin is completing the entire withdrawal directly
+    if (status === 'completed' || status === 'Completed') {
+      if (currentRemaining > 0) {
+        finalApprovedAmount = requestedAmount;
+        finalHistory = [
+          ...finalHistory,
+          {
+            id: `appr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            amount: currentRemaining,
+            approvedAt: new Date().toISOString(),
+            approvedBy: (req as any).adminEmail || 'admin@swiftpay.ng',
+            remainingAfter: 0,
+            note: notes ? String(notes).trim() : 'Full disbursement authorized'
+          }
+        ];
+      }
+    }
+
+    const historyJson = JSON.stringify(finalHistory);
+
     if (notes !== undefined) {
-      await execute(`UPDATE withdraw_requests SET status = $1, notes = $2 WHERE id = $3`, [status, notes, transactionId]);
+      await execute(
+        `UPDATE withdraw_requests SET status = $1, notes = $2, approvedAmount = $3, approvalHistory = $4 WHERE id = $5`,
+        [status, notes, finalApprovedAmount, historyJson, transactionId]
+      );
     } else {
-      await execute(`UPDATE withdraw_requests SET status = $1 WHERE id = $2`, [status, transactionId]);
+      await execute(
+        `UPDATE withdraw_requests SET status = $1, approvedAmount = $2, approvalHistory = $3 WHERE id = $4`,
+        [status, finalApprovedAmount, historyJson, transactionId]
+      );
     }
 
     // Handle real-time notifications, transaction status updates and balance refunding
     const db = readDb();
-    const userEmail = (withdrawal.email || withdrawal.userid || withdrawal.userId || '').toLowerCase();
+    const userEmail = (currentWithdrawal.email || currentWithdrawal.userid || currentWithdrawal.userId || '').toLowerCase();
     const userIndex = db.users.findIndex(u => u.email.toLowerCase() === userEmail);
 
     if (userIndex !== -1) {
@@ -4326,37 +5085,68 @@ app.post('/api/admin/withdrawals/:transactionId/status', authenticateAdminToken,
       const tx = user.transactions.find((t: any) => t.id === transactionId);
       if (tx) {
         tx.status = status === 'completed' ? 'success' : (status === 'rejected' ? 'failed' : status);
+        tx.approvedAmount = finalApprovedAmount;
+        tx.approvalHistory = finalHistory;
       }
 
       // Automatically refund balance if transaction is cancelled or rejected and was previously pending/processing
       const isRefunding = (status === 'rejected' || status === 'cancelled' || status === 'Rejected' || status === 'Cancelled') && 
-                          (withdrawal.status !== 'rejected' && withdrawal.status !== 'cancelled' && withdrawal.status !== 'completed' && withdrawal.status !== 'Rejected' && withdrawal.status !== 'Cancelled' && withdrawal.status !== 'Completed');
+                          (currentWithdrawal.status !== 'rejected' && currentWithdrawal.status !== 'cancelled' && currentWithdrawal.status !== 'completed' && currentWithdrawal.status !== 'Rejected' && currentWithdrawal.status !== 'Cancelled' && currentWithdrawal.status !== 'Completed');
       if (isRefunding) {
-        user.balance += Number(withdrawal.amount);
-        if (tx) {
-          tx.balanceAfter = user.balance;
+        // Refund the unapproved remaining portion
+        const refundAmt = Math.max(0, requestedAmount - currentApproved);
+        if (refundAmt > 0) {
+          user.balance += refundAmt;
+          if (tx) {
+            tx.balanceAfter = user.balance;
+          }
         }
       }
 
       // Push real-time notification in user's SwiftPay account
-      const msgText = status === 'processing' || status === 'Processing'
-        ? "Your withdrawal is now being processed."
-        : (status === 'completed' || status === 'Completed'
-          ? "Your withdrawal has been completed."
+      user.notifications = user.notifications || [];
+
+      if (status === 'completed' || status === 'Completed') {
+        user.notifications.unshift({
+          id: `notif-${Date.now()}`,
+          title: 'Withdrawal Approved',
+          body: `Your full withdrawal of ₦${requestedAmount.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} has been approved.`,
+          date: new Date().toISOString(),
+          unread: true,
+          type: 'withdraw',
+          category: 'Withdrawal',
+          status: 'Completed',
+          amount: requestedAmount,
+          recipientName: currentWithdrawal.accountName || currentWithdrawal.accountname,
+          bankName: currentWithdrawal.bankName || currentWithdrawal.bankname,
+          accountNumber: currentWithdrawal.accountNumber || currentWithdrawal.accountnumber,
+          reference: currentWithdrawal.reference
+        });
+      } else {
+        const msgText = status === 'processing' || status === 'Processing'
+          ? "Your withdrawal is now being processed."
           : (status === 'rejected' || status === 'Rejected'
             ? "Your withdrawal has been rejected."
             : (status === 'cancelled' || status === 'Cancelled'
               ? "Your withdrawal has been cancelled."
-              : `Your withdrawal status has been updated to ${status}.`)));
+              : `Your withdrawal status has been updated to ${status}.`));
 
-      user.notifications = user.notifications || [];
-      user.notifications.unshift({
-        id: `notif-${Date.now()}`,
-        title: `Withdrawal ${status.charAt(0).toUpperCase() + status.slice(1)}`,
-        body: msgText,
-        date: new Date().toISOString(),
-        unread: true
-      });
+        user.notifications.unshift({
+          id: `notif-${Date.now()}`,
+          title: `Withdrawal ${status.charAt(0).toUpperCase() + status.slice(1)}`,
+          body: msgText,
+          date: new Date().toISOString(),
+          unread: true,
+          type: 'withdraw',
+          category: 'Withdrawal',
+          status: status.charAt(0).toUpperCase() + status.slice(1),
+          amount: requestedAmount,
+          recipientName: currentWithdrawal.accountName || currentWithdrawal.accountname,
+          bankName: currentWithdrawal.bankName || currentWithdrawal.bankname,
+          accountNumber: currentWithdrawal.accountNumber || currentWithdrawal.accountnumber,
+          reference: currentWithdrawal.reference
+        });
+      }
 
       writeDb(db);
     }
@@ -4859,12 +5649,31 @@ app.post('/api/admin/logs/clear', authenticateAdminToken, (req, res) => {
   res.json({ success: true });
 });
 
+// Payment provider return page. It does not mark a payment successful; the
+// authenticated SwiftPay tab continues server-side verification and issues the
+// voucher only after the provider confirms the transaction.
+app.get('/payment/callback', (req, res) => {
+  const reference = String(req.query.reference || '');
+  res.type('html').send(`<!doctype html>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>SwiftPay Payment</title>
+<style>body{margin:0;background:#0c0c14;color:#fff;font-family:Arial,sans-serif;display:grid;place-items:center;min-height:100vh}.card{max-width:420px;margin:20px;padding:28px;border:1px solid #243044;border-radius:24px;background:#111827;text-align:center}.ok{color:#2dd4bf;font-size:42px}.muted{color:#94a3b8;line-height:1.6;font-size:14px}button{margin-top:18px;padding:12px 18px;border:0;border-radius:12px;background:#2dd4bf;color:#0c0c14;font-weight:800}</style></head>
+<body><main class="card"><div class="ok">✓</div><h2>Payment window completed</h2><p class="muted">Return to your SwiftPay tab. SwiftPay will verify the payment with the gateway before generating your WDV voucher.</p><button onclick="window.close()">Close Window</button></main>
+<script>try{if(window.opener){window.opener.postMessage({type:'SWIFTPAY_PAYMENT_RETURN',reference:${JSON.stringify(reference)}},window.location.origin);}}catch(e){}</script></body></html>`);
+});
+
 // -------------------- VITE STATIC SERVER HANDLER --------------------
 async function startServer() {
   // Initialize and preload SQL database cache on startup
   try {
     await initDb();
     await loadDbCache();
+
+    // Restore configured payment provider if saved in admin settings
+    const savedProvider = await getRow(`SELECT value FROM admin_settings WHERE key = $1`, ['payment_provider']);
+    if (savedProvider && savedProvider.value) {
+      paymentManager.setActiveProviderName(savedProvider.value as PaymentProviderName);
+      console.log(`[SwiftPay Payment] Restored active payment provider from database: ${savedProvider.value}`);
+    }
   } catch (err) {
     console.error('[SwiftPay DB] Critical failure during database initialization:', err);
   }

@@ -1,35 +1,29 @@
-# Paystack Dedicated Virtual Account & Webhook Integration Setup
+# SwiftPay WDV Voucher — Paystack Setup
 
-## Overview
-This update replaces manual bank transfer workflows with Paystack Dedicated Virtual Accounts (DVAs) for WDV Voucher purchases (fixed price: ₦6,500).
+SwiftPay now sells the WDV voucher directly from **Buy WDV Voucher**. The fixed purchase price is **₦6,500**. There is no wallet-deposit step in this flow.
 
----
+## Configure Paystack
 
-## Step 1: Paystack Account Setup
-1. Log in to your [Paystack Dashboard](https://dashboard.paystack.com/).
-2. Ensure your account is activated for **Dedicated Virtual Accounts (DVA)** under **Settings -> Customer Accounts / Virtual Accounts**.
+Add these server-side environment variables in Render (or your hosting provider):
 
----
-
-## Step 2: Set Webhook Endpoint in Paystack
-1. Navigate to **Paystack Dashboard -> Settings -> API Keys & Webhooks**.
-2. Under **Webhook URL**, enter your deployed server URL:
-   `https://your-app-name.onrender.com/api/paystack/webhook`
-3. Copy the **Secret Key** and **Webhook Secret**.
-
----
-
-## Step 3: Add Environment Variables in Hosting Dashboard (e.g., Render)
-Add the following key-value pairs in your deployment settings:
 ```env
-PAYSTACK_SECRET_KEY=sk_live_xxxx...
-PAYSTACK_PUBLIC_KEY=pk_live_xxxx...
-PAYSTACK_WEBHOOK_SECRET=xxxx...
+PAYMENT_PROVIDER=paystack
+PAYSTACK_SECRET_KEY=sk_live_...
+PAYSTACK_PUBLIC_KEY=pk_live_...
 ```
 
----
+The secret key must never be placed in frontend code.
 
-## Step 4: Testing & Verification
-1. **Live Paystack Flow**: When a user clicks **Buy WDV Voucher**, the system generates a Dedicated Virtual Account with a 15-minute countdown.
-2. **Webhook Verification**: When funds are transferred to the virtual account, Paystack posts a webhook payload to `/api/paystack/webhook`. The system verifies the HMAC signature, updates status to `successful`, and issues the WDV Voucher code automatically.
-3. **Test Simulation**: Use the **"Simulate / Check Payment Received"** button in the app to instantly test automated voucher generation without transferring real money.
+## Payment flow
+
+1. User opens **Buy WDV Voucher** and taps **BUY WDV VOUCHER — ₦6,500**.
+2. SwiftPay creates a unique payment reference on the server.
+3. Paystack opens its secure checkout.
+4. SwiftPay verifies the reference directly with Paystack's API.
+5. Only a verified successful **₦6,500 NGN** payment can create a WDV voucher.
+6. The voucher is stored in the existing WDV voucher database and shown with a **Copy Voucher** button.
+
+Paystack webhooks are also supported at:
+`/api/payment/webhook/paystack`
+
+The webhook does not trust the browser and cannot create a voucher for the wrong amount. Duplicate notifications are handled idempotently.

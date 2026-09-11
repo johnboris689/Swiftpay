@@ -3,6 +3,7 @@ import { Download, Share2, CheckCircle2, X, ShieldCheck } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { Transaction } from '../types';
 import GlassCard from './GlassCard';
+import { formatNaira } from '../utils/formatters';
 
 interface TransactionReceiptProps {
   transaction: Transaction | null;
@@ -43,10 +44,10 @@ export default function TransactionReceipt({
       { label: "Bank", value: transaction.recipientBank || 'PalmPay', bold: true },
       { label: "Account Name", value: transaction.recipientName || 'Pwamunadi Ishaku' },
       { label: "Account Number", value: transaction.recipientAccount || '8960723295' },
-      { label: "Amount", value: `₦${transaction.amount.toLocaleString()}`, bold: true },
+      { label: "Amount", value: formatNaira(transaction.amount), bold: true },
       { label: "Transaction Reference", value: refNum, selectAll: true },
       { label: "Date & Time", value: `${date} ${time}` },
-      { label: "Remaining Wallet Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
+      { label: "Remaining Wallet Balance", value: formatNaira(newBalanceVal), highlight: true }
     ];
   } else if (type === 'bank_transfer_direct') {
     title = "Transfer Successful";
@@ -54,20 +55,20 @@ export default function TransactionReceipt({
       { label: "Recipient Bank", value: transaction.recipientBank || 'N/A', bold: true },
       { label: "Recipient Account Number", value: transaction.recipientAccount || 'N/A' },
       { label: "Recipient Name", value: transaction.recipientName || 'N/A' },
-      { label: "Amount", value: `₦${transaction.amount.toLocaleString()}`, bold: true },
+      { label: "Amount", value: formatNaira(transaction.amount), bold: true },
       { label: "Transaction Reference", value: refNum, selectAll: true },
       { label: "Date & Time", value: `${date} ${time}` },
-      { label: "Remaining Wallet Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
+      { label: "Remaining Wallet Balance", value: formatNaira(newBalanceVal), highlight: true }
     ];
   } else if (type === 'redeem_airtime') {
     title = "Airtime Purchase Successful";
     contentRows = [
       { label: "Network", value: transaction.recipientBank || transaction.network || 'MTN', bold: true },
       { label: "Phone Number", value: transaction.recipientAccount || transaction.phoneNumber || 'N/A' },
-      { label: "Amount", value: `₦${transaction.amount.toLocaleString()}`, bold: true },
+      { label: "Amount", value: formatNaira(transaction.amount), bold: true },
       { label: "Transaction Reference", value: refNum, selectAll: true },
       { label: "Date & Time", value: `${date} ${time}` },
-      { label: "Remaining Wallet Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
+      { label: "Remaining Wallet Balance", value: formatNaira(newBalanceVal), highlight: true }
     ];
   } else if (type === 'redeem_data') {
     let planSize = transaction.dataPlan;
@@ -82,10 +83,10 @@ export default function TransactionReceipt({
       { label: "Network", value: transaction.recipientBank || transaction.network || 'MTN', bold: true },
       { label: "Phone Number", value: transaction.recipientAccount || transaction.phoneNumber || 'N/A' },
       { label: "Data Plan", value: planSize },
-      { label: "Amount", value: `₦${transaction.amount.toLocaleString()}`, bold: true },
+      { label: "Amount", value: formatNaira(transaction.amount), bold: true },
       { label: "Transaction Reference", value: refNum, selectAll: true },
       { label: "Date & Time", value: `${date} ${time}` },
-      { label: "Remaining Wallet Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
+      { label: "Remaining Wallet Balance", value: formatNaira(newBalanceVal), highlight: true }
     ];
   } else {
     title = "Operation Successful";
@@ -93,9 +94,9 @@ export default function TransactionReceipt({
       { label: "Transaction Reference", value: transaction.id, selectAll: true },
       { label: "Date & Time", value: `${date} ${time}` },
       { label: "Type", value: transaction.type.toUpperCase() },
-      { label: "Amount", value: `₦${transaction.amount.toLocaleString()}`, bold: true },
+      { label: "Amount", value: formatNaira(transaction.amount), bold: true },
       { label: "Description", value: transaction.description },
-      { label: "Remaining Wallet Balance", value: `₦${newBalanceVal.toLocaleString()}`, highlight: true }
+      { label: "Remaining Wallet Balance", value: formatNaira(newBalanceVal), highlight: true }
     ];
   }
 

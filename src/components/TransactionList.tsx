@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowDownLeft, ArrowUpRight, Search, Ticket, Smartphone, Landmark, SlidersHorizontal } from 'lucide-react';
 import { Transaction } from '../types';
+import { formatNaira } from '../utils/formatters';
 
 interface TransactionListProps {
   transactions: Transaction[];
@@ -77,11 +78,7 @@ export default function TransactionList({
   const displayedTransactions = limit ? filteredTransactions.slice(0, limit) : filteredTransactions;
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-NG', {
-      style: 'currency',
-      currency: 'NGN',
-      maximumFractionDigits: 0
-    }).format(amount);
+    return formatNaira(amount);
   };
 
   return (

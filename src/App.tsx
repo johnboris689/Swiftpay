@@ -43,11 +43,14 @@ import {
   Download,
   Fingerprint,
   Bot,
-  RefreshCw
+  RefreshCw,
+  PlusCircle
 } from 'lucide-react';
 
 import { registerDeviceBiometric, loginWithBiometric, isWebAuthnSupported } from './lib/webauthn';
 import { User, WdvCode, Transaction, NotificationItem } from './types';
+import { formatNaira } from './utils/formatters';
+import { PaymentModal } from './components/PaymentModal';
 import {
   SUPPORTED_BANKS,
   MOBILE_NETWORKS,
@@ -375,6 +378,7 @@ export default function App() {
     maintenanceNotice: "Wema Bank transfers are temporarily delayed. Please use other supported banks (like PalmPay or GTBank) for instant manual validation."
   });
   const [buyWdvAmount, setBuyWdvAmount] = useState<string>('6500');
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
 
   const [systemSettings, setSystemSettings] = useState<Record<string, string>>({
     websiteName: "SwiftPay",
@@ -2421,13 +2425,9 @@ export default function App() {
     }, 1500);
   };
 
-  // Helper formatting
+  // Helper formatting - standardizes monetary display with 2 decimal places (e.g. ₦0.00)
   const nairaFormat = (val: number) => {
-    return new Intl.NumberFormat('en-NG', {
-      style: 'currency',
-      currency: 'NGN',
-      maximumFractionDigits: 0
-    }).format(val);
+    return formatNaira(val);
   };
 
   // Mark single notification read
@@ -3303,8 +3303,8 @@ export default function App() {
                           </span>
                         </div>
 
-                        {/* Action Buttons: [ Withdraw ]  [ Transfer ] */}
-                        <div className="relative z-10 border-t border-white/10 pt-4 mt-4 grid grid-cols-2 gap-3 sm:gap-4">
+                        {/* Action Buttons: [ Withdraw ] [ Transfer ] */}
+                        <div className="relative z-10 border-t border-white/10 pt-4 mt-4 grid grid-cols-3 gap-2 sm:gap-3">
                           <button
                             id="btn-withdraw-trigger"
                             type="button"
@@ -3313,7 +3313,7 @@ export default function App() {
                               setCurrentScreen('withdraw');
                               navigateTo('/dashboard/withdraw');
                             }}
-                            className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-teal-400 to-emerald-400 hover:from-teal-300 hover:to-emerald-300 text-slate-950 text-xs font-black shadow-md shadow-teal-500/20 active:scale-95 hover:scale-[1.02] transition-all duration-200 flex items-center justify-center gap-1.5 cursor-pointer"
+                            className="w-full py-2.5 px-2.5 rounded-xl bg-gradient-to-r from-teal-400 to-cyan-400 hover:from-teal-300 hover:to-cyan-300 text-slate-950 text-xs font-black shadow-md shadow-teal-500/20 active:scale-95 hover:scale-[1.02] transition-all duration-200 flex items-center justify-center gap-1 cursor-pointer"
                           >
                             <ArrowRight className="h-4 w-4 stroke-[2.5]" />
                             <span>Withdraw</span>
@@ -3327,7 +3327,7 @@ export default function App() {
                               setCurrentScreen('transfer_bank');
                               navigateTo('/dashboard/transfer');
                             }}
-                            className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white text-xs font-black shadow-md shadow-indigo-500/25 active:scale-95 hover:scale-[1.02] transition-all duration-200 flex items-center justify-center gap-1.5 cursor-pointer border border-indigo-400/30"
+                            className="w-full py-2.5 px-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white text-xs font-black shadow-md shadow-indigo-500/25 active:scale-95 hover:scale-[1.02] transition-all duration-200 flex items-center justify-center gap-1 cursor-pointer border border-indigo-400/30"
                           >
                             <Send className="h-4 w-4 stroke-[2.5]" />
                             <span>Transfer</span>
@@ -3929,80 +3929,37 @@ export default function App() {
                   </div>
 
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    Generate an automatic WDV voucher code instantly by completing a bank transfer to your dedicated virtual account.
+                    Purchase a WDV voucher securely online. Your voucher is issued only after the payment gateway confirms the payment.
                   </p>
 
-                  <GlassCard className="p-5">
-                    <form onSubmit={handleInitiateWdv} className="space-y-4">
-                      <div>
-                        <label className="text-[10px] font-mono text-slate-400 block mb-1">Voucher Amount (Strictly Locked)</label>
-                        <div className="w-full text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-slate-800 dark:text-white font-mono font-bold flex justify-between items-center select-none">
-                          <span>₦{wdvConfig.voucherPrice.toLocaleString()}</span>
-                          <span className="text-[9px] font-mono tracking-wider uppercase text-teal-500 bg-teal-500/10 px-2 py-0.5 rounded-md border border-teal-500/10">FIXED PRICE</span>
+                  {/* Instant Online Payment Option (Paystack / Flutterwave / Korapay) */}
+                  <div className="p-4 rounded-2xl bg-gradient-to-r from-teal-500/15 via-emerald-500/10 to-indigo-500/15 border border-teal-500/30 space-y-3 shadow-lg shadow-teal-500/5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 rounded-xl bg-teal-500/20 text-teal-400 border border-teal-500/30">
+                          <Zap className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-bold text-white font-display block">Instant Automated Voucher Issuance</span>
+                          <span className="text-[10px] text-teal-300/80 font-mono">Pay with Card, Bank Transfer, or USSD</span>
                         </div>
                       </div>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[9px] font-mono font-bold border border-emerald-500/30">
+                        RECOMMENDED
+                      </span>
+                    </div>
 
-                      <div>
-                        <label className="text-[10px] font-mono text-slate-400 block mb-1">Full Name</label>
-                        <input
-                          id="wdv-fullname"
-                          type="text"
-                          required
-                          value={wdvFormName || user?.fullName || ''}
-                          onChange={(e) => setWdvFormName(e.target.value)}
-                          className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-[10px] font-mono text-slate-400 block mb-1">Email Address</label>
-                        <input
-                          id="wdv-email"
-                          type="email"
-                          required
-                          value={wdvFormEmail || user?.email || ''}
-                          onChange={(e) => setWdvFormEmail(e.target.value)}
-                          className="w-full text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-teal-400"
-                        />
-                      </div>
-
-                      <button
-                        id="btn-wdv-submit"
-                        type="submit"
-                        disabled={isInitiatingWdv}
-                        className="w-full text-xs font-bold uppercase tracking-widest py-3.5 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 disabled:opacity-50 text-white rounded-xl shadow-lg shadow-indigo-500/20 active:scale-95 transition-all mt-2 flex items-center justify-center gap-2"
-                      >
-                        {isInitiatingWdv ? (
-                          <>
-                            <div className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                            <span>Processing...</span>
-                          </>
-                        ) : (
-                          <span>Proceed to Payment</span>
-                        )}
-                      </button>
-                    </form>
-                  </GlassCard>
-
-                  <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono justify-center">
-                    <Clock className="h-3.5 w-3.5" /> Direct manual transfer confirmation via WhatsApp
-                  </div>
-                </div>
-              )}
-
-              {/* -------------------- FLOW 4.1: WDV PROCESSING LOADER -------------------- */}
-              {currentScreen === 'wdv_processing' && (
-                <div className="p-5 flex-1 flex flex-col items-center justify-center text-center space-y-6 h-full pt-20 animate-[fadeIn_0.2s_ease-out]">
-                  <div className="relative">
-                    <div className="h-16 w-16 rounded-full border-4 border-indigo-500/20 border-t-indigo-600 dark:border-t-teal-400 animate-spin" />
-                    <Ticket className="h-6 w-6 text-indigo-500 dark:text-teal-400 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
-                  </div>
-
-                  <div>
-                    <h4 className="text-base font-bold text-slate-800 dark:text-white">Loading Bank Details</h4>
-                    <p className="text-xs text-slate-400 mt-2 px-10 leading-relaxed">
-                      Fetching official payment account details...
-                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPaymentModalOpen(true);
+                      }}
+                      className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-teal-400 to-emerald-400 hover:from-teal-300 hover:to-emerald-300 text-slate-950 text-xs font-black uppercase tracking-wider shadow-lg shadow-teal-500/20 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <CreditCard className="h-4 w-4 stroke-[2.5]" />
+                      <span>BUY WDV VOUCHER — ₦6,500</span>
+                      <ArrowRight className="h-4 w-4" />
+                    </button>
                   </div>
                 </div>
               )}
@@ -6051,6 +6008,22 @@ export default function App() {
             }}
           />
         )}
+
+        {/* -------------------- NIGERIAN PAYMENT GATEWAYS MODAL -------------------- */}
+        <PaymentModal
+          isOpen={paymentModalOpen}
+          onClose={() => setPaymentModalOpen(false)}
+          userEmail={user?.email || ''}
+          userName={user?.fullName || ''}
+          token={localStorage.getItem('swiftpay_token') || ''}
+          onToast={showToast}
+          onSuccess={async (res) => {
+            await syncWithBackend(true);
+            if (res?.voucherCode) {
+              showToast(`WDV Voucher: ${res.voucherCode} generated successfully!`, 'success');
+            }
+          }}
+        />
 
         </div>
       </div>

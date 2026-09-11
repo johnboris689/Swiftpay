@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Users, User, Mail, Phone, Building, CreditCard, Hash, Calendar, Check, Image, Coins, ShoppingBag, ShieldAlert, ArrowLeft, Search, UserMinus, ToggleLeft, ToggleRight, Trash2, Edit2, Key, RefreshCw, Send, FileSpreadsheet, BarChart3, Database, MessageSquare, AlertCircle, Video, Settings, DollarSign, CheckCircle, UploadCloud, Clock, ArrowUpRight, FileText, XCircle, AlertTriangle, Inbox, Menu, X, Globe, Megaphone, Save, Eye, Bot, Sparkles, HelpCircle, Headphones, MessageCircle } from 'lucide-react';
+import { Users, User, Mail, Phone, Building, CreditCard, Hash, Calendar, Check, Image, Coins, ShoppingBag, ShieldAlert, ArrowLeft, Search, UserMinus, ToggleLeft, ToggleRight, Trash2, Edit2, Key, RefreshCw, Send, FileSpreadsheet, BarChart3, Database, MessageSquare, AlertCircle, Video, Settings, DollarSign, CheckCircle, UploadCloud, Clock, ArrowUpRight, FileText, XCircle, AlertTriangle, Inbox, Menu, X, Globe, Megaphone, Save, Eye, Bot, Sparkles, HelpCircle, Headphones, MessageCircle, Zap } from 'lucide-react';
 import GlassCard from './GlassCard';
 import AdminDashboard1To1 from './AdminDashboard1To1';
 import AdminSidebar from './AdminSidebar';
 import { CyberWithdrawalTerminal } from './CyberWithdrawalTerminal';
+import { PaymentAdminTab } from './PaymentAdminTab';
+import { formatNaira } from '../utils/formatters';
 
 interface AdminPanelProps {
   currentUserEmail: string;
@@ -91,6 +93,18 @@ export const normalizeUser = (u: any) => {
 
 export const normalizeWithdrawal = (w: any) => {
   if (!w || typeof w !== 'object') return null;
+  const requested = typeof w.amount === 'number' ? w.amount : Number(w.amount || 0);
+  const approved = typeof (w.approvedAmount ?? w.approvedamount) === 'number'
+    ? (w.approvedAmount ?? w.approvedamount)
+    : Number(w.approvedAmount || w.approvedamount || 0);
+  const remaining = typeof (w.remainingAmount ?? w.remainingamount) === 'number'
+    ? (w.remainingAmount ?? w.remainingamount)
+    : Math.max(0, requested - approved);
+  let hist = w.approvalHistory || w.approvalhistory || [];
+  if (typeof hist === 'string') {
+    try { hist = JSON.parse(hist); } catch (e) { hist = []; }
+  }
+
   return {
     ...w,
     id: toSafeStr(w.id || w.reference),
@@ -101,7 +115,10 @@ export const normalizeWithdrawal = (w: any) => {
     email: toSafeStr(w.email || w.userId),
     userId: toSafeStr(w.userId || w.email),
     status: toSafeStr(w.status || 'pending'),
-    amount: typeof w.amount === 'number' ? w.amount : Number(w.amount || 0)
+    amount: requested,
+    approvedAmount: approved,
+    remainingAmount: remaining,
+    approvalHistory: hist
   };
 };
 
@@ -137,6 +154,7 @@ export default function AdminPanel({
   const [payments, setPayments] = useState<any[]>([]);
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [paymentSearch, setPaymentSearch] = useState('');
+  const [paymentSubTab, setPaymentSubTab] = useState<'gateways' | 'manual_wdv'>('gateways');
   
   // Withdrawal Management System State
   const [withdrawals, setWithdrawals] = useState<any[]>([]);
@@ -151,6 +169,7 @@ export default function AdminPanel({
   const [uploadingSlip, setUploadingSlip] = useState(false);
   const [isDraggingSlip, setIsDraggingSlip] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState<string | null>(null);
+  const [approvingPartial, setApprovingPartial] = useState(false);
   const [removingSlip, setRemovingSlip] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -973,7 +992,33 @@ export default function AdminPanel({
     }
   };
 
-  // Remove uploaded POS decline slip
+  // Approve partial withdrawal amount
+  const approvePartialWithdrawal = async (amount: number, note?: string) => {
+    if (!selectedWithdrawal) return false;
+    setApprovingPartial(true);
+    try {
+      const res = await fetch(`/api/admin/withdrawals/${selectedWithdrawal.id}/approve-partial`, {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ amount, note: note || '' })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        onToast(data.message || `Successfully approved partial amount of ₦${amount.toLocaleString()}`, 'success');
+        await fetchSelectedWithdrawalDetails(selectedWithdrawal.id);
+        await fetchWithdrawals();
+        return true;
+      } else {
+        onToast(data.error || 'Failed to approve partial withdrawal', 'error');
+        return false;
+      }
+    } catch (err) {
+      onToast('Network error approving partial amount', 'error');
+      return false;
+    } finally {
+      setApprovingPartial(false);
+    }
+  };
   const handleRemoveSlip = async () => {
     if (!selectedWithdrawal) return;
     setRemovingSlip(true);
@@ -1712,6 +1757,8 @@ export default function AdminPanel({
         updateWithdrawalStatus={updateWithdrawalStatus}
         statusUpdating={statusUpdating}
         maskAccountNumber={maskAccountNumber}
+        approvePartialWithdrawal={approvePartialWithdrawal}
+        approvingPartial={approvingPartial}
       />
     );
   }
@@ -1973,7 +2020,7 @@ export default function AdminPanel({
                 </div>
                 
                 <div className="text-right font-mono text-xs font-bold text-teal-400">
-                  ₦{(u.balance || 0).toLocaleString()}
+                  {formatNaira(u.balance || 0)}
                 </div>
               </div>
             ))
@@ -2270,7 +2317,7 @@ export default function AdminPanel({
                     <Coins className="h-4 w-4 text-amber-400" />
                   </div>
                   <div className="text-xl font-black text-amber-400 font-mono mt-2">
-                    {currency}{(users.reduce((sum, u) => sum + (u.balance || 0), 0)).toLocaleString()}
+                    {formatNaira(users.reduce((sum, u) => sum + (u.balance || 0), 0))}
                   </div>
                   <div className="text-[9px] text-slate-500 mt-1">Combined Wallet Balances</div>
                 </GlassCard>
@@ -2370,9 +2417,9 @@ export default function AdminPanel({
                             </td>
 
                             <td className="p-3 font-mono">
-                              <div className="text-xs font-bold text-teal-400">{currency}{(u.balance || 0).toLocaleString()}</div>
+                              <div className="text-xs font-bold text-teal-400">{formatNaira(u.balance || 0)}</div>
                               {u.bonusBalance > 0 && (
-                                <div className="text-[9px] text-amber-400">Bonus: {currency}{(u.bonusBalance || 0).toLocaleString()}</div>
+                                <div className="text-[9px] text-amber-400">Bonus: {formatNaira(u.bonusBalance || 0)}</div>
                               )}
                             </td>
 
@@ -3242,32 +3289,67 @@ export default function AdminPanel({
 
           {activeTab === 'payment_settings' && (
             <div className="space-y-6 animate-[fadeIn_0.2s_ease-out]">
-              {/* Header Info Card */}
-              <GlassCard className="p-5 border-white/5 bg-gradient-to-br from-indigo-950/20 via-slate-900/30 to-teal-950/15">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <div className="p-2 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20">
-                        <Building className="h-5 w-5" />
+              {/* Sub-tab Navigation */}
+              <div className="flex items-center gap-2 border-b border-white/10 pb-2">
+                <button
+                  type="button"
+                  onClick={() => setPaymentSubTab('gateways')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold font-mono transition-all cursor-pointer flex items-center gap-2 ${
+                    paymentSubTab === 'gateways'
+                      ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40 shadow-sm'
+                      : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+                  }`}
+                >
+                  <Zap className="h-4 w-4 text-teal-400" />
+                  <span>Payment Gateways (Paystack, Flutterwave, Korapay)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentSubTab('manual_wdv')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold font-mono transition-all cursor-pointer flex items-center gap-2 ${
+                    paymentSubTab === 'manual_wdv'
+                      ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40 shadow-sm'
+                      : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+                  }`}
+                >
+                  <Building className="h-4 w-4 text-teal-400" />
+                  <span>Manual Bank Transfer &amp; WDV Account</span>
+                </button>
+              </div>
+
+              {paymentSubTab === 'gateways' ? (
+                <PaymentAdminTab
+                  onToast={onToast}
+                  getAdminHeaders={getAdminHeaders}
+                />
+              ) : (
+                <>
+                  {/* Header Info Card */}
+                  <GlassCard className="p-5 border-white/5 bg-gradient-to-br from-indigo-950/20 via-slate-900/30 to-teal-950/15">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <div className="p-2 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20">
+                            <Building className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <h4 className="text-base font-bold text-white tracking-wide">
+                              WDV Payment Account Management
+                            </h4>
+                            <p className="text-[11px] text-slate-400">
+                              Configure the live bank payment details, voucher pricing, WhatsApp support number, and instructions displayed to users purchasing WDV Vouchers.
+                            </p>
+                          </div>
+                        </div>
                       </div>
-                      <div>
-                        <h4 className="text-base font-bold text-white tracking-wide">
-                          WDV Payment Account Management
-                        </h4>
-                        <p className="text-[11px] text-slate-400">
-                          Configure the live bank payment details, voucher pricing, WhatsApp support number, and instructions displayed to users purchasing WDV Vouchers.
-                        </p>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-mono font-bold flex items-center gap-1.5 whitespace-nowrap">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
+                          Live Sync Active
+                        </span>
                       </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-mono font-bold flex items-center gap-1.5 whitespace-nowrap">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
-                      Live Sync Active
-                    </span>
-                  </div>
-                </div>
-              </GlassCard>
+                  </GlassCard>
 
               {/* Form & Live Preview Grid */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -3513,8 +3595,10 @@ export default function AdminPanel({
                   </GlassCard>
                 </div>
               </div>
-            </div>
+            </>
           )}
+        </div>
+      )}
 
           {(activeTab === 'settings' || (activeTab as string) === 'overview') && (
             <>
@@ -4625,19 +4709,19 @@ export default function AdminPanel({
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 font-mono text-xs">
                   <div className="p-3 rounded-xl bg-slate-950/60 border border-white/5">
                     <div className="text-[10px] text-slate-400 uppercase font-bold">Wallet Balance</div>
-                    <div className="text-base font-black text-teal-400 mt-1">{currency}{(selectedUserForView.balance || 0).toLocaleString()}</div>
+                    <div className="text-base font-black text-teal-400 mt-1">{formatNaira(selectedUserForView.balance || 0)}</div>
                   </div>
                   <div className="p-3 rounded-xl bg-slate-950/60 border border-white/5">
                     <div className="text-[10px] text-slate-400 uppercase font-bold">Bonus Balance</div>
-                    <div className="text-base font-black text-amber-400 mt-1">{currency}{(selectedUserForView.bonusBalance || 0).toLocaleString()}</div>
+                    <div className="text-base font-black text-amber-400 mt-1">{formatNaira(selectedUserForView.bonusBalance || 0)}</div>
                   </div>
                   <div className="p-3 rounded-xl bg-slate-950/60 border border-white/5">
                     <div className="text-[10px] text-slate-400 uppercase font-bold">Total Deposits</div>
-                    <div className="text-base font-black text-emerald-400 mt-1">{currency}{(selectedUserForView.totalDeposits || 0).toLocaleString()}</div>
+                    <div className="text-base font-black text-emerald-400 mt-1">{formatNaira(selectedUserForView.totalDeposits || 0)}</div>
                   </div>
                   <div className="p-3 rounded-xl bg-slate-950/60 border border-white/5">
                     <div className="text-[10px] text-slate-400 uppercase font-bold">Total Withdrawals</div>
-                    <div className="text-base font-black text-rose-400 mt-1">{currency}{(selectedUserForView.totalWithdrawals || 0).toLocaleString()}</div>
+                    <div className="text-base font-black text-rose-400 mt-1">{formatNaira(selectedUserForView.totalWithdrawals || 0)}</div>
                   </div>
                 </div>
 
@@ -4887,7 +4971,7 @@ export default function AdminPanel({
                 <div className="p-3 bg-slate-950/60 rounded-xl border border-white/5 space-y-1">
                   <div className="text-slate-400 text-[10px]">TARGET ACCOUNT</div>
                   <div className="font-bold text-white">{selectedUserForBalance.fullName} ({selectedUserForBalance.email})</div>
-                  <div className="text-teal-400 font-black">Current Balance: {currency}{(selectedUserForBalance.balance || 0).toLocaleString()}</div>
+                  <div className="text-teal-400 font-black">Current Balance: {formatNaira(selectedUserForBalance.balance || 0)}</div>
                 </div>
 
                 <form onSubmit={handleSaveBalanceAdjustment} className="space-y-4">

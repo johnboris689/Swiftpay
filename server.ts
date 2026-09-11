@@ -3431,24 +3431,25 @@ app.get('/api/korapay/payment-status/:reference', authenticateToken, async (req,
 // Korapay Webhook Handler
 app.post('/api/korapay/webhook', express.raw({ type: 'application/json' }), async (req: any, res: any) => {
   try {
-    const secret = process.env.KORAPAY_WEBHOOK_SECRET || process.env.KORAPAY_SECRET_KEY || '';
     let rawBody = req.body;
     if (Buffer.isBuffer(rawBody)) {
       rawBody = rawBody.toString('utf8');
-    } else if (typeof rawBody === 'object') {
-      rawBody = JSON.stringify(rawBody);
     }
 
-    const signature = req.headers['x-korapay-signature'];
+    const eventData = typeof rawBody === 'string' ? JSON.parse(rawBody) : (rawBody || {});
+    const secret = (process.env.KORAPAY_SECRET_KEY || '').trim();
+    const signature = String(req.headers['x-korapay-signature'] || '').trim();
     if (secret && signature) {
-      const hash = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-      if (hash !== signature) {
+      // Korapay signs ONLY the webhook `data` object, not the entire webhook body.
+      const signedPayload = JSON.stringify(eventData?.data ?? {});
+      const hash = crypto.createHmac('sha256', secret).update(signedPayload).digest('hex');
+      const expected = Buffer.from(hash, 'utf8');
+      const received = Buffer.from(signature, 'utf8');
+      if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) {
         logDiagnostic('SECURITY_ALERT', 'Invalid Korapay webhook signature header', { signature });
         return res.status(400).send('Invalid Korapay signature');
       }
     }
-
-    const eventData = typeof rawBody === 'string' ? JSON.parse(rawBody) : req.body;
     logDiagnostic('INFO', 'Korapay Webhook Received', { event: eventData.event, id: eventData.data?.id });
 
     const isSuccessEvent = eventData.event === 'charge.success' || eventData.event === 'virtual_bank_account.payment_successful' || eventData.event === 'transfer.success';
@@ -5676,6 +5677,12 @@ async function startServer() {
     }
   } catch (err) {
     console.error('[SwiftPay DB] Critical failure during database initialization:', err);
+    // Never continue with a configured PostgreSQL database that failed to initialize.
+    // Continuing leaves payment endpoints running against a broken pool and can cause
+    // provider payments to be created without a corresponding SwiftPay transaction.
+    if (process.env.DATABASE_URL || process.env.SQL_HOST) {
+      process.exit(1);
+    }
   }
 
   if (process.env.NODE_ENV !== 'production') {

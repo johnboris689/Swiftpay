@@ -5,7 +5,16 @@ import crypto from 'crypto';
 
 const { Pool } = pg;
 
-const isPostgres = !!process.env.DATABASE_URL || !!process.env.SQL_HOST;
+function getDatabaseUrl(): string {
+  const raw = (process.env.DATABASE_URL || '').trim();
+  // Render/environment UIs sometimes preserve surrounding quotes when values are pasted.
+  return raw.replace(/^['"]|['"]$/g, '').trim();
+}
+
+function hasPostgresConfig(): boolean {
+  return Boolean(getDatabaseUrl() || (process.env.SQL_HOST || '').trim());
+}
+
 let pgPool: pg.Pool | null = null;
 
 const JSON_FILE = path.join(process.cwd(), 'swiftpay_db.json');
@@ -366,7 +375,7 @@ function normVCode(codeStr: string | undefined): string {
 
 // -------------------- DATABASE INITIALIZATION --------------------
 export async function initDb() {
-  if (isPostgres) {
+  if (hasPostgresConfig()) {
     console.log('[SwiftPay DB] Connecting to PostgreSQL database (Admin privileges for Schema setup)...');
     if (process.env.SQL_HOST) {
       console.log('[SwiftPay DB] Using Cloud SQL socket/host connection params with ADMIN privileges...');
@@ -383,8 +392,9 @@ export async function initDb() {
     } else {
       console.log('[SwiftPay DB] Using DATABASE_URL connection string...');
       pgPool = new Pool({
-        connectionString: process.env.DATABASE_URL,
-        ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
+        connectionString: getDatabaseUrl(),
+        connectionTimeoutMillis: 15000,
+        ssl: getDatabaseUrl() && !getDatabaseUrl().includes('localhost') ? { rejectUnauthorized: false } : false
       });
       pgPool.on('error', (err) => {
         console.error('[SwiftPay DB Admin Pool Error]', err.message);
@@ -811,7 +821,7 @@ export async function initDb() {
   }
 
   // Reinitialize the pool with App user (least privilege) for runtime database access
-  if (isPostgres) {
+  if (hasPostgresConfig()) {
     console.log('[SwiftPay DB] Schema setup and seeding complete. Switching database connection pool to App user (least privilege)...');
     try {
       if (pgPool) {
@@ -834,8 +844,9 @@ export async function initDb() {
       });
     } else {
       pgPool = new Pool({
-        connectionString: process.env.DATABASE_URL,
-        ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
+        connectionString: getDatabaseUrl(),
+        connectionTimeoutMillis: 15000,
+        ssl: getDatabaseUrl() && !getDatabaseUrl().includes('localhost') ? { rejectUnauthorized: false } : false
       });
       pgPool.on('error', (err) => {
         console.error('[SwiftPay DB Pool Error]', err.message);
@@ -847,7 +858,7 @@ export async function initDb() {
 // -------------------- QUERY EXECUTION CONTROLLER --------------------
 export function execute(sql: string, params: any[] = []): Promise<any> {
   return new Promise((resolve, reject) => {
-    if (isPostgres) {
+    if (hasPostgresConfig()) {
       if (!pgPool) {
         return reject(new Error('PostgreSQL pool not initialized.'));
       }
@@ -1236,7 +1247,7 @@ export function execute(sql: string, params: any[] = []): Promise<any> {
 
 export function getRow(sql: string, params: any[] = []): Promise<any> {
   return new Promise((resolve, reject) => {
-    if (isPostgres) {
+    if (hasPostgresConfig()) {
       if (!pgPool) {
         return reject(new Error('PostgreSQL pool not initialized.'));
       }
@@ -1310,7 +1321,7 @@ export function getRow(sql: string, params: any[] = []): Promise<any> {
 
 export function getAllRows(sql: string, params: any[] = []): Promise<any[]> {
   return new Promise((resolve, reject) => {
-    if (isPostgres) {
+    if (hasPostgresConfig()) {
       if (!pgPool) {
         return reject(new Error('PostgreSQL pool not initialized.'));
       }

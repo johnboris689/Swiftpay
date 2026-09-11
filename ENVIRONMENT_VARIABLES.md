@@ -9,5 +9,4 @@ The following environment variables are required for full SwiftPay operations, i
 | `JWT_SECRET` | Required | `swiftpay_secure_jwt_secret_key_2026` | Secret key for signing user authentication JSON Web Tokens |
 | `KORAPAY_SECRET_KEY` | Recommended | `sk_test_1234567890abcdef...` or `sk_live_...` | Korapay API Secret Key for generating Virtual Accounts & bank verification |
 | `KORAPAY_PUBLIC_KEY` | Recommended | `pk_test_1234567890abcdef...` or `pk_live_...` | Korapay API Public Key |
-| `KORAPAY_WEBHOOK_SECRET` | Recommended | `whsec_1234567890...` | Secret key for verifying `x-korapay-signature` HMAC SHA256 header on webhooks |
 | `ADMIN_PASSWORD` | Optional | `admin123` | Default master administrator login password |

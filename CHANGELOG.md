@@ -30,4 +30,4 @@
   - Added **Download PDF Receipt** button utilizing `jsPDF` to generate official A4 PDF payment certificates.
 
 ### 4. Environment Configuration (`.env.example`)
-- Added `KORAPAY_SECRET_KEY`, `KORAPAY_PUBLIC_KEY`, and `KORAPAY_WEBHOOK_SECRET`.
+- Added `KORAPAY_SECRET_KEY` and `KORAPAY_PUBLIC_KEY`; Korapay webhook verification uses the Secret Key.

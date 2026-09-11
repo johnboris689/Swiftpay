@@ -25,7 +25,6 @@
    Set the following variables in your hosting environment (e.g., Render, Railway, Heroku, or `.env` file):
    - `KORAPAY_SECRET_KEY`: Your Korapay Secret Key (e.g. `sk_live_...` or `sk_test_...`)
    - `KORAPAY_PUBLIC_KEY`: Your Korapay Public Key (e.g. `pk_live_...` or `pk_test_...`)
-   - `KORAPAY_WEBHOOK_SECRET`: Your Korapay Webhook Secret Key
 
 4. **Git Commit & Push**
    ```bash

@@ -22,10 +22,6 @@ export class KorapayProvider implements PaymentProvider {
     return key || null;
   }
 
-  private getWebhookSecret(): string {
-    return (process.env.KORAPAY_SECRET_HASH || process.env.KORAPAY_WEBHOOK_SECRET || process.env.KORAPAY_SECRET_KEY || '').trim();
-  }
-
   isConfigured(): boolean {
     const key = this.getSecretKey();
     return Boolean(key && (key.startsWith('sk_') || key.length >= 10));
@@ -54,7 +50,7 @@ export class KorapayProvider implements PaymentProvider {
         name: params.name || 'SwiftPay Customer',
         email: params.email
       },
-      information: params.purpose === 'wdv_voucher' ? 'WDV Voucher Purchase' : 'SwiftPay Wallet Funding',
+      narration: params.purpose === 'wdv_voucher' ? 'WDV Voucher Purchase' : 'SwiftPay Wallet Funding',
       metadata: {
         purpose: params.purpose || 'wallet_funding',
         ...(params.metadata || {})
@@ -145,14 +141,21 @@ export class KorapayProvider implements PaymentProvider {
   }
 
   verifyWebhookSignature(headers: Record<string, any>, rawBody: string): boolean {
-    const secret = this.getWebhookSecret();
-    if (!secret) return false;
+    const secret = this.getSecretKey();
+    const signature = String(headers['x-korapay-signature'] || '').trim();
+    if (!secret || !signature || !rawBody) return false;
 
-    const signature = headers['x-korapay-signature'];
-    if (!signature) return false;
-
-    const hash = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-    return hash === signature;
+    try {
+      const body = JSON.parse(rawBody);
+      // Korapay signs only the webhook `data` object with the Secret Key.
+      const signedPayload = JSON.stringify(body?.data ?? {});
+      const expected = crypto.createHmac('sha256', secret).update(signedPayload).digest('hex');
+      const a = Buffer.from(expected, 'utf8');
+      const b = Buffer.from(signature, 'utf8');
+      return a.length === b.length && crypto.timingSafeEqual(a, b);
+    } catch {
+      return false;
+    }
   }
 
   async parseWebhook(headers: Record<string, any>, rawBody: string, jsonBody: any): Promise<WebhookEventResult> {

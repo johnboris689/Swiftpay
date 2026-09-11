@@ -5663,28 +5663,54 @@ app.get('/payment/callback', (req, res) => {
 });
 
 // -------------------- VITE STATIC SERVER HANDLER --------------------
-async function startServer() {
-  // Initialize and preload SQL database cache on startup
+let databaseReady = false;
+let databaseInitializing = false;
+let databaseRetryTimer: NodeJS.Timeout | null = null;
+
+app.get('/api/health', (_req, res) => {
+  res.status(200).json({
+    success: true,
+    service: 'SwiftPay',
+    status: databaseReady ? 'ready' : 'starting',
+    database: databaseReady ? 'ready' : 'initializing',
+    timestamp: new Date().toISOString()
+  });
+});
+
+async function initializeDatabaseWithRetry() {
+  if (databaseInitializing || databaseReady) return;
+  databaseInitializing = true;
+
   try {
+    console.log('[SwiftPay DB] Starting database initialization...');
     await initDb();
     await loadDbCache();
 
-    // Restore configured payment provider if saved in admin settings
+    // Restore configured payment provider if saved in admin settings.
     const savedProvider = await getRow(`SELECT value FROM admin_settings WHERE key = $1`, ['payment_provider']);
     if (savedProvider && savedProvider.value) {
       paymentManager.setActiveProviderName(savedProvider.value as PaymentProviderName);
       console.log(`[SwiftPay Payment] Restored active payment provider from database: ${savedProvider.value}`);
     }
-  } catch (err) {
-    console.error('[SwiftPay DB] Critical failure during database initialization:', err);
-    // Never continue with a configured PostgreSQL database that failed to initialize.
-    // Continuing leaves payment endpoints running against a broken pool and can cause
-    // provider payments to be created without a corresponding SwiftPay transaction.
-    if (process.env.DATABASE_URL || process.env.SQL_HOST) {
-      process.exit(1);
-    }
-  }
 
+    databaseReady = true;
+    databaseInitializing = false;
+    if (databaseRetryTimer) {
+      clearInterval(databaseRetryTimer);
+      databaseRetryTimer = null;
+    }
+    console.log('[SwiftPay DB] Database is ready. SwiftPay API is fully operational.');
+  } catch (err) {
+    databaseInitializing = false;
+    databaseReady = false;
+    console.error('[SwiftPay DB] Database initialization failed; server will remain online and retry automatically:', err);
+    console.error('[SwiftPay DB] Check Render DATABASE_URL and make sure it belongs to the currently running Render PostgreSQL database/service region.');
+  }
+}
+
+async function startServer() {
+  // IMPORTANT FOR RENDER: bind the HTTP port before external database initialization.
+  // A database DNS outage must not make the web service fail its port check.
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -5701,7 +5727,14 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[SwiftPay Server] Enhanced Full-Stack listening at http://0.0.0.0:${PORT}`);
+    void initializeDatabaseWithRetry();
+    databaseRetryTimer = setInterval(() => {
+      if (!databaseReady) void initializeDatabaseWithRetry();
+    }, 15000);
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error('[SwiftPay Server] Fatal startup error:', err);
+  process.exit(1);
+});

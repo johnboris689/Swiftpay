@@ -23,7 +23,7 @@ const ai = new GoogleGenAI({
 });
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 10000;
 const DB_FILE = path.join(process.cwd(), 'swiftpay_db.json');
 
 app.use(express.json({

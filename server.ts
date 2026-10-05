@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 import multer from 'multer';
 import bcrypt from 'bcryptjs';
 import { GoogleGenAI } from '@google/genai';
-import { initDb, getRow, getAllRows, execute, createVoucherAtomic, generateSecureVoucherCode, isPostgresActive } from './db';
+import { initDb, getRow, getAllRows, execute, createVoucherAtomic, generateSecureVoucherCode, isPostgresActive, runPostgresDiagnosticQuery } from './db';
 import { sendEmail, sendSms } from './email_sms_service';
 import { paymentManager, PaymentProviderName } from './payments/index';
 
@@ -5802,12 +5802,55 @@ app.post('/api/admin/logs/clear', authenticateAdminToken, (req, res) => {
   res.json({ success: true });
 });
 
+// Server-side PostgreSQL DATABASE_URL connectivity diagnostic endpoint
+const handleDatabaseDiagnostic = async (req: express.Request, res: express.Response) => {
+  try {
+    const diagnostic = await runPostgresDiagnosticQuery();
+    if (diagnostic.connected) {
+      logDiagnostic(
+        'INFO',
+        `PostgreSQL diagnostic check succeeded (db=${diagnostic.database}, host=${diagnostic.host}, latency=${diagnostic.latencyMs}ms)`
+      );
+      return res.status(200).json({
+        success: true,
+        status: 'connected',
+        message: 'Successfully connected and executed test query against PostgreSQL database.',
+        diagnostic
+      });
+    } else {
+      logDiagnostic(
+        'API_ERROR',
+        `PostgreSQL diagnostic check failed (host=${diagnostic.host}, code=${diagnostic.errorCode}): ${diagnostic.error}`
+      );
+      return res.status(diagnostic.databaseUrlConfigured ? 503 : 200).json({
+        success: false,
+        status: 'disconnected',
+        message: diagnostic.error || 'PostgreSQL connection check failed.',
+        diagnostic
+      });
+    }
+  } catch (err: any) {
+    console.error('[SwiftPay DB Diagnostic Endpoint Exception]:', err);
+    logDiagnostic('EXCEPTION', `PostgreSQL diagnostic endpoint error: ${err?.message || err}`);
+    return res.status(500).json({
+      success: false,
+      status: 'error',
+      message: err?.message || 'Unexpected error executing PostgreSQL diagnostic check.'
+    });
+  }
+};
+
+app.get('/api/diagnostics/db', handleDatabaseDiagnostic);
+app.get('/api/health/db', handleDatabaseDiagnostic);
+app.get('/api/admin/diagnostics/db', authenticateAdminToken, handleDatabaseDiagnostic);
+
 // -------------------- VITE STATIC SERVER HANDLER --------------------
 async function startServer() {
   // Initialize and preload SQL database cache on startup
   try {
     await initDb();
     await loadDbCache();
+    await runPostgresDiagnosticQuery();
 
     // Ensure Korapay is active payment provider
     paymentManager.setActiveProviderName('korapay');

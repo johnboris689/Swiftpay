@@ -6,7 +6,16 @@ import dns from 'dns';
 
 const { Pool } = pg;
 
+let configuredRawDatabaseUrl: string = (process.env.DATABASE_URL || '').trim();
+let configuredRawSqlHost: string = (process.env.SQL_HOST || '').trim();
+
 async function validateAndSanitizeDbEnv(): Promise<{ connectionString?: string; sqlHost?: string }> {
+  if (process.env.DATABASE_URL && process.env.DATABASE_URL.trim()) {
+    configuredRawDatabaseUrl = process.env.DATABASE_URL.trim();
+  }
+  if (process.env.SQL_HOST && process.env.SQL_HOST.trim()) {
+    configuredRawSqlHost = process.env.SQL_HOST.trim();
+  }
   // Check and clear any unresolvable PGHOST / PGHOSTNAME / DB_HOST / POSTGRES_HOST env vars
   // so node-postgres never implicitly attempts to connect to a stale host
   for (const envKey of ['PGHOST', 'PGHOSTNAME', 'DB_HOST', 'POSTGRES_HOST']) {
@@ -23,21 +32,23 @@ async function validateAndSanitizeDbEnv(): Promise<{ connectionString?: string; 
     }
   }
 
+  let validSqlHost: string | undefined;
   const rawSqlHost = (process.env.SQL_HOST || '').trim();
   if (rawSqlHost) {
     if (rawSqlHost !== 'localhost' && rawSqlHost !== '127.0.0.1' && !rawSqlHost.startsWith('/')) {
       try {
         await dns.promises.lookup(rawSqlHost);
-        return { sqlHost: rawSqlHost };
+        validSqlHost = rawSqlHost;
       } catch {
-        console.warn('[SwiftPay DB] Configured SQL_HOST is unreachable; falling back to JSON storage.');
+        console.warn('[SwiftPay DB] Configured SQL_HOST is unreachable; removing from environment.');
         delete process.env.SQL_HOST;
       }
     } else {
-      return { sqlHost: rawSqlHost };
+      validSqlHost = rawSqlHost;
     }
   }
 
+  let validConnectionString: string | undefined;
   const rawUrl = (process.env.DATABASE_URL || '').trim();
   if (rawUrl && rawUrl !== 'postgresql://user:password@localhost:5432/swiftpay') {
     try {
@@ -46,9 +57,9 @@ async function validateAndSanitizeDbEnv(): Promise<{ connectionString?: string; 
       if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
         await dns.promises.lookup(hostname);
       }
-      return { connectionString: rawUrl };
+      validConnectionString = rawUrl;
     } catch {
-      console.warn('[SwiftPay DB] Configured DATABASE_URL host is unreachable in DNS; falling back to persistent JSON storage.');
+      console.warn('[SwiftPay DB] Configured DATABASE_URL host is unreachable in DNS; falling back.');
       delete process.env.DATABASE_URL;
     }
   } else if (rawUrl) {
@@ -56,21 +67,23 @@ async function validateAndSanitizeDbEnv(): Promise<{ connectionString?: string; 
   }
 
   // Support standard PGHOST + PGDATABASE + PGUSER + PGPASSWORD environment variables if set and reachable
-  const pgHost = (process.env.PGHOST || process.env.DB_HOST || process.env.POSTGRES_HOST || '').trim();
-  const pgDb = (process.env.PGDATABASE || process.env.POSTGRES_DB || '').trim();
-  const pgUser = (process.env.PGUSER || process.env.POSTGRES_USER || '').trim();
-  const pgPass = (process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD || '').trim();
-  const pgPort = (process.env.PGPORT || '5432').trim();
-  if (pgHost && pgDb && pgUser) {
-    const encodedPass = encodeURIComponent(pgPass);
-    const constructedUrl = `postgresql://${encodeURIComponent(pgUser)}:${encodedPass}@${pgHost}:${pgPort}/${encodeURIComponent(pgDb)}`;
-    return { connectionString: constructedUrl };
+  if (!validConnectionString) {
+    const pgHost = (process.env.PGHOST || process.env.DB_HOST || process.env.POSTGRES_HOST || '').trim();
+    const pgDb = (process.env.PGDATABASE || process.env.POSTGRES_DB || '').trim();
+    const pgUser = (process.env.PGUSER || process.env.POSTGRES_USER || '').trim();
+    const pgPass = (process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD || '').trim();
+    const pgPort = (process.env.PGPORT || '5432').trim();
+    if (pgHost && pgDb && pgUser) {
+      const encodedPass = encodeURIComponent(pgPass);
+      validConnectionString = `postgresql://${encodeURIComponent(pgUser)}:${encodedPass}@${pgHost}:${pgPort}/${encodeURIComponent(pgDb)}`;
+    }
   }
 
-  return {};
+  return { connectionString: validConnectionString, sqlHost: validSqlHost };
 }
 
 let isPostgres = false;
+let usedSqlHost = false;
 let pgPool: pg.Pool | null = null;
 
 const JSON_FILE = path.join(process.cwd(), 'swiftpay_db.json');
@@ -435,19 +448,12 @@ function normVCode(codeStr: string | undefined): string {
 export async function initDb() {
   const dbCfg = await validateAndSanitizeDbEnv();
   let candidatePool: pg.Pool | null = null;
+  usedSqlHost = false;
 
-  if (dbCfg.sqlHost || dbCfg.connectionString) {
-    try {
-      if (dbCfg.sqlHost) {
-        console.log('[SwiftPay DB] Verifying Cloud SQL connection...');
-        candidatePool = new Pool({
-          host: dbCfg.sqlHost,
-          user: process.env.SQL_ADMIN_USER || process.env.SQL_USER,
-          password: process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD,
-          database: process.env.SQL_DB_NAME,
-          connectionTimeoutMillis: 5000,
-        });
-      } else if (dbCfg.connectionString) {
+  if (dbCfg.connectionString || dbCfg.sqlHost) {
+    // 1. Prioritize production DATABASE_URL first if configured
+    if (dbCfg.connectionString) {
+      try {
         console.log('[SwiftPay DB] Verifying PostgreSQL DATABASE_URL connection...');
         const isLocal = dbCfg.connectionString.includes('localhost') || dbCfg.connectionString.includes('127.0.0.1');
         const sslDisabled = process.env.PGSSLMODE === 'disable' || dbCfg.connectionString.includes('sslmode=disable');
@@ -475,14 +481,44 @@ export async function initDb() {
             connectionTimeoutMillis: 8000,
             ssl: fallbackSsl
           });
+          const retryClient = await candidatePool.connect();
+          try {
+            await retryClient.query('SELECT 1');
+          } finally {
+            retryClient.release();
+          }
         }
-      }
 
-      if (candidatePool) {
         candidatePool.on('error', (err) => {
           console.error('[SwiftPay DB Pool Error]', err.message);
         });
-        // Test live connectivity before enabling PostgreSQL mode
+        pgPool = candidatePool;
+        isPostgres = true;
+        usedSqlHost = false;
+        console.log('[SwiftPay DB] PostgreSQL DATABASE_URL connection verified and active.');
+      } catch (dbUrlErr: any) {
+        console.warn(`[SwiftPay DB] Configured DATABASE_URL failed connection test (${dbUrlErr.message}).`);
+        if (candidatePool) {
+          try { await candidatePool.end(); } catch (_) {}
+          candidatePool = null;
+        }
+      }
+    }
+
+    // 2. If DATABASE_URL was not set or failed to connect, try SQL_HOST if available
+    if (!isPostgres && dbCfg.sqlHost) {
+      try {
+        console.log('[SwiftPay DB] Verifying Cloud SQL connection...');
+        candidatePool = new Pool({
+          host: dbCfg.sqlHost,
+          user: process.env.SQL_ADMIN_USER || process.env.SQL_USER,
+          password: process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD,
+          database: process.env.SQL_DB_NAME,
+          connectionTimeoutMillis: 5000,
+        });
+        candidatePool.on('error', (err) => {
+          console.error('[SwiftPay DB Pool Error]', err.message);
+        });
         const client = await candidatePool.connect();
         try {
           await client.query('SELECT 1');
@@ -491,15 +527,20 @@ export async function initDb() {
         }
         pgPool = candidatePool;
         isPostgres = true;
-        console.log('[SwiftPay DB] PostgreSQL connection verified and active.');
+        usedSqlHost = true;
+        console.log('[SwiftPay DB] PostgreSQL SQL_HOST connection verified and active.');
+      } catch (sqlHostErr: any) {
+        console.warn(`[SwiftPay DB] PostgreSQL SQL_HOST unavailable (${sqlHostErr.message}).`);
+        if (candidatePool) {
+          try { await candidatePool.end(); } catch (_) {}
+          candidatePool = null;
+        }
       }
-    } catch (connErr: any) {
-      console.warn(`[SwiftPay DB] PostgreSQL unavailable (${connErr.message}). Automatically switching to persistent JSON database at ${JSON_FILE}.`);
-      if (candidatePool) {
-        try { await candidatePool.end(); } catch (_) {}
-      }
+    }
+
+    if (!isPostgres) {
+      console.warn(`[SwiftPay DB] No PostgreSQL connection available. Automatically switching to persistent JSON database at ${JSON_FILE}.`);
       pgPool = null;
-      isPostgres = false;
       getJsonDb();
     }
   } else {
@@ -945,8 +986,8 @@ export async function initDb() {
     console.log('[SwiftPay DB] Default admin settings seeded.');
   }
 
-  // Reinitialize the pool with App user (least privilege) if separate SQL_HOST credentials are used
-  if (isPostgres && process.env.SQL_HOST && process.env.SQL_USER) {
+  // Reinitialize the pool with App user (least privilege) only when SQL_HOST is the active connection
+  if (isPostgres && usedSqlHost && process.env.SQL_HOST && process.env.SQL_USER) {
     try {
       await execute(`GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "${process.env.SQL_USER}"`);
       await execute(`GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "${process.env.SQL_USER}"`);
@@ -1890,5 +1931,251 @@ export async function createVoucherAtomic(params: CreateVoucherParams = {}): Pro
 
 export function isPostgresActive(): boolean {
   return isPostgres;
+}
+
+function maskDatabaseUrl(rawUrl: string): { maskedUrl: string; host: string; database: string } {
+  if (!rawUrl) {
+    return { maskedUrl: 'not_set', host: 'not_set', database: 'not_set' };
+  }
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname || 'unknown';
+    const port = parsed.port ? `:${parsed.port}` : '';
+    const dbName = (parsed.pathname || '').replace(/^\//, '') || 'unknown';
+    const user = parsed.username ? `${parsed.username}:***@` : '';
+    return {
+      maskedUrl: `${parsed.protocol}//${user}${host}${port}/${dbName}`,
+      host,
+      database: dbName
+    };
+  } catch {
+    return { maskedUrl: 'invalid_url_format', host: 'invalid_url', database: 'unknown' };
+  }
+}
+
+export interface PostgresDiagnosticResult {
+  connected: boolean;
+  databaseUrlConnected: boolean;
+  activeDatastore: 'postgresql' | 'json_fallback';
+  databaseUrlConfigured: boolean;
+  maskedConnection: string;
+  host: string;
+  database: string;
+  databaseUser?: string;
+  serverTime?: string;
+  pgVersion?: string;
+  latencyMs: number;
+  vouchersCount?: number;
+  usersCount?: number;
+  databaseUrlError?: string;
+  error?: string;
+  errorCode?: string;
+  timestamp: string;
+}
+
+/**
+ * Executes a live diagnostic query directly against the configured DATABASE_URL (PostgreSQL)
+ * and logs the detailed result to the server logs.
+ */
+export async function runPostgresDiagnosticQuery(): Promise<PostgresDiagnosticResult> {
+  const startMs = Date.now();
+  const timestamp = new Date().toISOString();
+  const effectiveRawUrl = (process.env.DATABASE_URL || configuredRawDatabaseUrl || '').trim();
+  const effectiveSqlHost = (process.env.SQL_HOST || configuredRawSqlHost || '').trim();
+  const hasDbUrl = Boolean(effectiveRawUrl && effectiveRawUrl !== 'postgresql://user:password@localhost:5432/swiftpay');
+  const { maskedUrl, host, database } = hasDbUrl
+    ? maskDatabaseUrl(effectiveRawUrl)
+    : effectiveSqlHost
+      ? { maskedUrl: `postgresql://${effectiveSqlHost}/${process.env.SQL_DB_NAME || ''}`, host: effectiveSqlHost, database: process.env.SQL_DB_NAME || 'unknown' }
+      : { maskedUrl: 'not_configured', host: 'none', database: 'none' };
+
+  console.log(`[SwiftPay DB Diagnostic] Starting PostgreSQL connectivity check against DATABASE_URL (host=${host}, db=${database}, activeEngine=${isPostgres ? 'postgresql' : 'json_fallback'})...`);
+
+  // 1. Always probe configured DATABASE_URL directly when DATABASE_URL is set
+  let databaseUrlError: string | undefined;
+  let databaseUrlErrorCode: string | undefined;
+  if (hasDbUrl) {
+    // If pgPool is already connected to DATABASE_URL (not SQL_HOST), query pgPool directly
+    if (isPostgres && pgPool && !usedSqlHost) {
+      try {
+        const metaRes = await pgPool.query(`
+          SELECT
+            1 AS ok,
+            NOW() AS server_time,
+            current_database() AS database_name,
+            current_user AS database_user,
+            version() AS pg_version
+        `);
+        const countRes = await pgPool.query(`
+          SELECT
+            (SELECT COUNT(*)::int FROM vouchers) AS vouchers_count,
+            (SELECT COUNT(*)::int FROM users) AS users_count
+        `);
+        const latencyMs = Date.now() - startMs;
+        const metaRow = metaRes.rows[0] || {};
+        const countRow = countRes.rows[0] || {};
+
+        const result: PostgresDiagnosticResult = {
+          connected: true,
+          databaseUrlConnected: true,
+          activeDatastore: 'postgresql',
+          databaseUrlConfigured: true,
+          maskedConnection: maskedUrl,
+          host,
+          database: metaRow.database_name || database,
+          databaseUser: metaRow.database_user || 'unknown',
+          serverTime: metaRow.server_time ? new Date(metaRow.server_time).toISOString() : timestamp,
+          pgVersion: String(metaRow.pg_version || '').split(',')[0],
+          latencyMs,
+          vouchersCount: Number(countRow.vouchers_count ?? 0),
+          usersCount: Number(countRow.users_count ?? 0),
+          timestamp
+        };
+
+        console.log(
+          `[SwiftPay DB Diagnostic] DATABASE_URL SUCCESS: Connected to Render PostgreSQL database "${result.database}" on host "${result.host}" as "${result.databaseUser}" in ${latencyMs}ms | serverTime=${result.serverTime} | vouchers=${result.vouchersCount} | users=${result.usersCount}`
+        );
+        return result;
+      } catch (err: any) {
+        databaseUrlError = err?.message || String(err);
+        databaseUrlErrorCode = err?.code || 'QUERY_ERROR';
+        console.error(
+          `[SwiftPay DB Diagnostic] DATABASE_URL ERROR on active pool (host=${host}, db=${database}, code=${databaseUrlErrorCode}): ${databaseUrlError}`
+        );
+      }
+    } else {
+      // Probe DATABASE_URL directly with a dedicated diagnostic connection
+      let tempPool: pg.Pool | null = null;
+      try {
+        const isLocal = effectiveRawUrl.includes('localhost') || effectiveRawUrl.includes('127.0.0.1');
+        const sslDisabled = process.env.PGSSLMODE === 'disable' || effectiveRawUrl.includes('sslmode=disable');
+        tempPool = new Pool({
+          connectionString: effectiveRawUrl,
+          connectionTimeoutMillis: 6000,
+          ssl: (isLocal || sslDisabled) ? false : { rejectUnauthorized: false }
+        });
+
+        const metaRes = await tempPool.query(`
+          SELECT
+            1 AS ok,
+            NOW() AS server_time,
+            current_database() AS database_name,
+            current_user AS database_user,
+            version() AS pg_version
+        `);
+        let vouchersCount = 0;
+        let usersCount = 0;
+        try {
+          const countRes = await tempPool.query(`
+            SELECT
+              (SELECT COUNT(*)::int FROM vouchers) AS vouchers_count,
+              (SELECT COUNT(*)::int FROM users) AS users_count
+          `);
+          vouchersCount = Number(countRes.rows[0]?.vouchers_count ?? 0);
+          usersCount = Number(countRes.rows[0]?.users_count ?? 0);
+        } catch (_) {}
+
+        const latencyMs = Date.now() - startMs;
+        const metaRow = metaRes.rows[0] || {};
+
+        const result: PostgresDiagnosticResult = {
+          connected: true,
+          databaseUrlConnected: true,
+          activeDatastore: isPostgres ? 'postgresql' : 'json_fallback',
+          databaseUrlConfigured: true,
+          maskedConnection: maskedUrl,
+          host,
+          database: metaRow.database_name || database,
+          databaseUser: metaRow.database_user || 'unknown',
+          serverTime: metaRow.server_time ? new Date(metaRow.server_time).toISOString() : timestamp,
+          pgVersion: String(metaRow.pg_version || '').split(',')[0],
+          latencyMs,
+          vouchersCount,
+          usersCount,
+          timestamp
+        };
+
+        console.log(
+          `[SwiftPay DB Diagnostic] DATABASE_URL SUCCESS: Connected to Render PostgreSQL database "${result.database}" on host "${result.host}" as "${result.databaseUser}" in ${latencyMs}ms | vouchers=${vouchersCount} | users=${usersCount}`
+        );
+        return result;
+      } catch (directErr: any) {
+        databaseUrlError = directErr?.message || String(directErr);
+        databaseUrlErrorCode = directErr?.code || 'CONNECTION_FAILED';
+        console.error(
+          `[SwiftPay DB Diagnostic] DATABASE_URL FAILED (host=${host}, db=${database}, code=${databaseUrlErrorCode}): ${databaseUrlError}`
+        );
+      } finally {
+        if (tempPool) {
+          try { await tempPool.end(); } catch (_) {}
+        }
+      }
+    }
+  }
+
+  // 2. If DATABASE_URL failed or was not set, check if fallback PostgreSQL (SQL_HOST) is active
+  if (isPostgres && pgPool) {
+    try {
+      const metaRes = await pgPool.query(`
+        SELECT
+          NOW() AS server_time,
+          current_database() AS database_name,
+          current_user AS database_user,
+          version() AS pg_version
+      `);
+      const countRes = await pgPool.query(`
+        SELECT
+          (SELECT COUNT(*)::int FROM vouchers) AS vouchers_count,
+          (SELECT COUNT(*)::int FROM users) AS users_count
+      `);
+      const latencyMs = Date.now() - startMs;
+      const metaRow = metaRes.rows[0] || {};
+      const countRow = countRes.rows[0] || {};
+
+      const result: PostgresDiagnosticResult = {
+        connected: true,
+        databaseUrlConnected: false,
+        activeDatastore: 'postgresql',
+        databaseUrlConfigured: hasDbUrl,
+        maskedConnection: maskedUrl,
+        host,
+        database: metaRow.database_name || database,
+        databaseUser: metaRow.database_user || 'unknown',
+        serverTime: metaRow.server_time ? new Date(metaRow.server_time).toISOString() : timestamp,
+        pgVersion: String(metaRow.pg_version || '').split(',')[0],
+        latencyMs,
+        vouchersCount: Number(countRow.vouchers_count ?? 0),
+        usersCount: Number(countRow.users_count ?? 0),
+        databaseUrlError,
+        errorCode: databaseUrlErrorCode,
+        timestamp
+      };
+
+      console.log(
+        `[SwiftPay DB Diagnostic] Active Fallback PostgreSQL Connected: db="${result.database}" as "${result.databaseUser}" in ${latencyMs}ms (DATABASE_URL status: ${databaseUrlError || 'not_set'})`
+      );
+      return result;
+    } catch (poolErr: any) {
+      console.error(`[SwiftPay DB Diagnostic] Fallback PostgreSQL pool error: ${poolErr?.message || poolErr}`);
+    }
+  }
+
+  const latencyMs = Date.now() - startMs;
+  const finalError = databaseUrlError || 'No production PostgreSQL DATABASE_URL is configured or reachable; running on local JSON datastore.';
+  console.warn(`[SwiftPay DB Diagnostic] RESULT: connected=false | host=${host} | error=${finalError}`);
+  return {
+    connected: false,
+    databaseUrlConnected: false,
+    activeDatastore: 'json_fallback',
+    databaseUrlConfigured: hasDbUrl,
+    maskedConnection: maskedUrl,
+    host,
+    database,
+    latencyMs,
+    databaseUrlError,
+    error: finalError,
+    errorCode: databaseUrlErrorCode || 'DATABASE_URL_UNREACHABLE',
+    timestamp
+  };
 }
 

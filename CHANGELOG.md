@@ -8,7 +8,7 @@
   - Implemented `GET /api/korapay/payment-status/:reference` to poll payment verification status.
   - Implemented `POST /api/korapay/webhook` with HMAC SHA256 signature verification (`x-korapay-signature`) for instant automated payment processing upon Korapay webhook events.
   - Implemented `GET /api/bank/resolve` for account name lookup across Nigerian banks.
-  - Implemented `POST /api/korapay/simulate-payment` for instant test payment verification and automated voucher delivery.
+  - Implemented `POST /api/payment/initialize` and `POST /api/payment/verify` for server-side Korapay checkout initialization and authoritative transaction verification.
 - **Bank Account Resolution**:
   - Updated `verifyBankAccountService` in `server.ts` to automatically attempt Korapay resolution when `KORAPAY_SECRET_KEY` is present.
 - **ZIP Download Endpoints**:

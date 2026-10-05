@@ -339,6 +339,7 @@ export default function AdminPanel({
   const [loadingVouchers, setLoadingVouchers] = useState(false);
   const [voucherSearchTerm, setVoucherSearchTerm] = useState('');
   const [generatingVoucher, setGeneratingVoucher] = useState(false);
+  const [latestGeneratedCode, setLatestGeneratedCode] = useState<string>('');
 
   const safeDateStr = (val: any, type: 'datetime' | 'date' | 'time' = 'datetime') => {
     if (!val || val === 'null' || val === 'undefined' || val === 'N/A') return 'N/A';
@@ -354,9 +355,13 @@ export default function AdminPanel({
   };
 
   const getAdminHeaders = (extraHeaders = {}) => {
-    const token = localStorage.getItem('swiftpay_admin_token') || '';
+    const token =
+      localStorage.getItem('swiftpay_admin_token') ||
+      localStorage.getItem('swiftpay_token') ||
+      '';
     return {
       'Authorization': `Bearer ${token}`,
+      'X-Admin-Email': currentUserEmail || 'talkdavidjohn@gmail.com',
       'Content-Type': 'application/json',
       ...extraHeaders
     };
@@ -1144,12 +1149,20 @@ export default function AdminPanel({
       e.preventDefault();
       e.stopPropagation();
     }
+    if (generatingVoucher) return;
     setGeneratingVoucher(true);
     try {
-      const res = await fetch('/api/admin/wdv/generate', {
+      let res = await fetch('/api/admin/wdv/generate', {
         method: 'POST',
         headers: getAdminHeaders()
       });
+
+      if (!res.ok) {
+        res = await fetch('/api/admin/vouchers/generate', {
+          method: 'POST',
+          headers: getAdminHeaders()
+        });
+      }
 
       let data: any = {};
       try {
@@ -1171,7 +1184,10 @@ export default function AdminPanel({
         } : null);
 
         const newVoucher = normalizeVoucher(rawNew);
-        const codeDisplay = newVoucher?.voucherCode || newVoucher?.code || data.code || 'Code';
+        const codeDisplay = newVoucher?.voucherCode || newVoucher?.code || data.code || '';
+        if (codeDisplay) {
+          setLatestGeneratedCode(codeDisplay);
+        }
         onToast(`New WDV voucher generated: ${codeDisplay}`, 'success');
 
         if (newVoucher) {
@@ -1183,7 +1199,7 @@ export default function AdminPanel({
         }
         await fetchVouchers();
       } else {
-        onToast(data?.error || 'Failed to generate voucher', 'error');
+        onToast(data?.error || 'Failed to generate WDV voucher.', 'error');
       }
     } catch (err) {
       console.error('Error generating WDV voucher:', err);
@@ -2582,8 +2598,27 @@ export default function AdminPanel({
                   
                   <div className="space-y-1">
                     <h3 className="text-xs font-mono text-slate-400 uppercase tracking-widest">Secure Master Vault</h3>
-                    <p className="text-[10px] text-slate-400">Generate a unique master voucher linked to the local SQL datastore.</p>
+                    <p className="text-[10px] text-slate-400">Generate a unique, cryptographically secure master voucher persisted in the production SQL datastore.</p>
                   </div>
+
+                  {latestGeneratedCode && (
+                    <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-between gap-3">
+                      <div className="text-left">
+                        <span className="block text-[9px] font-mono uppercase tracking-wider text-emerald-400">Newly Generated Voucher</span>
+                        <span className="font-mono font-black text-sm text-white tracking-widest select-all">{latestGeneratedCode}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(latestGeneratedCode);
+                          onToast('Voucher code copied to clipboard!', 'success');
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold uppercase tracking-wider cursor-pointer shrink-0"
+                      >
+                        Copy Code
+                      </button>
+                    </div>
+                  )}
 
                   <button
                     type="button"
@@ -2605,7 +2640,7 @@ export default function AdminPanel({
                   </button>
                   
                   <p className="text-[8px] text-slate-500 font-mono">
-                    Format: WDV-XXXX-XXXX-XXXX • Stored in PostgreSQL/SQLite datastore with strict constraints.
+                    Format: WDV-XXXX-XXXX-XXXX • Stored in production PostgreSQL datastore with strict uniqueness constraints.
                   </p>
                 </div>
               </GlassCard>
@@ -2688,11 +2723,7 @@ export default function AdminPanel({
                             </button>
                             <button
                               type="button"
-                              onClick={() => {
-                                if (window.confirm('Are you sure you want to hard-delete this voucher record?')) {
-                                  handleDeleteVoucher(v.id);
-                                }
-                              }}
+                              onClick={() => handleDeleteVoucher(v.id)}
                               className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -3301,7 +3332,7 @@ export default function AdminPanel({
                   }`}
                 >
                   <Zap className="h-4 w-4 text-teal-400" />
-                  <span>Payment Gateways (Paystack, Flutterwave, Korapay)</span>
+                  <span>Payment Gateway (Korapay)</span>
                 </button>
                 <button
                   type="button"

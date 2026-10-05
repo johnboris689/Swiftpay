@@ -2,19 +2,75 @@ import pg from 'pg';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import dns from 'dns';
 
 const { Pool } = pg;
 
-function getDatabaseUrl(): string {
-  const raw = (process.env.DATABASE_URL || '').trim();
-  // Render/environment UIs sometimes preserve surrounding quotes when values are pasted.
-  return raw.replace(/^['"]|['"]$/g, '').trim();
+async function validateAndSanitizeDbEnv(): Promise<{ connectionString?: string; sqlHost?: string }> {
+  // Check and clear any unresolvable PGHOST / PGHOSTNAME / DB_HOST / POSTGRES_HOST env vars
+  // so node-postgres never implicitly attempts to connect to a stale host
+  for (const envKey of ['PGHOST', 'PGHOSTNAME', 'DB_HOST', 'POSTGRES_HOST']) {
+    const val = (process.env[envKey] || '').trim();
+    if (val) {
+      if (val !== 'localhost' && val !== '127.0.0.1' && !val.startsWith('/')) {
+        try {
+          await dns.promises.lookup(val);
+        } catch {
+          console.warn(`[SwiftPay DB] Removing unreachable ${envKey} from environment.`);
+          delete process.env[envKey];
+        }
+      }
+    }
+  }
+
+  const rawSqlHost = (process.env.SQL_HOST || '').trim();
+  if (rawSqlHost) {
+    if (rawSqlHost !== 'localhost' && rawSqlHost !== '127.0.0.1' && !rawSqlHost.startsWith('/')) {
+      try {
+        await dns.promises.lookup(rawSqlHost);
+        return { sqlHost: rawSqlHost };
+      } catch {
+        console.warn('[SwiftPay DB] Configured SQL_HOST is unreachable; falling back to JSON storage.');
+        delete process.env.SQL_HOST;
+      }
+    } else {
+      return { sqlHost: rawSqlHost };
+    }
+  }
+
+  const rawUrl = (process.env.DATABASE_URL || '').trim();
+  if (rawUrl && rawUrl !== 'postgresql://user:password@localhost:5432/swiftpay') {
+    try {
+      const parsed = new URL(rawUrl);
+      const hostname = parsed.hostname;
+      if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
+        await dns.promises.lookup(hostname);
+      }
+      return { connectionString: rawUrl };
+    } catch {
+      console.warn('[SwiftPay DB] Configured DATABASE_URL host is unreachable in DNS; falling back to persistent JSON storage.');
+      delete process.env.DATABASE_URL;
+    }
+  } else if (rawUrl) {
+    delete process.env.DATABASE_URL;
+  }
+
+  // Support standard PGHOST + PGDATABASE + PGUSER + PGPASSWORD environment variables if set and reachable
+  const pgHost = (process.env.PGHOST || process.env.DB_HOST || process.env.POSTGRES_HOST || '').trim();
+  const pgDb = (process.env.PGDATABASE || process.env.POSTGRES_DB || '').trim();
+  const pgUser = (process.env.PGUSER || process.env.POSTGRES_USER || '').trim();
+  const pgPass = (process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD || '').trim();
+  const pgPort = (process.env.PGPORT || '5432').trim();
+  if (pgHost && pgDb && pgUser) {
+    const encodedPass = encodeURIComponent(pgPass);
+    const constructedUrl = `postgresql://${encodeURIComponent(pgUser)}:${encodedPass}@${pgHost}:${pgPort}/${encodeURIComponent(pgDb)}`;
+    return { connectionString: constructedUrl };
+  }
+
+  return {};
 }
 
-function hasPostgresConfig(): boolean {
-  return Boolean(getDatabaseUrl() || (process.env.SQL_HOST || '').trim());
-}
-
+let isPostgres = false;
 let pgPool: pg.Pool | null = null;
 
 const JSON_FILE = path.join(process.cwd(), 'swiftpay_db.json');
@@ -192,8 +248,10 @@ function getJsonDb(): JsonData {
           usedBy: v.usedBy || v.usedby || '',
           usedat: v.usedAt || v.usedat || '',
           usedAt: v.usedAt || v.usedat || '',
-          generatedat: v.generatedAt || v.generatedat || new Date().toISOString(),
-          generatedAt: v.generatedAt || v.generatedat || new Date().toISOString(),
+          generatedat: v.generatedAt || v.generatedat || v.createdAt || v.createdat || new Date().toISOString(),
+          generatedAt: v.generatedAt || v.generatedat || v.createdAt || v.createdat || new Date().toISOString(),
+          createdat: v.createdAt || v.createdat || v.generatedAt || v.generatedat || new Date().toISOString(),
+          createdAt: v.createdAt || v.createdat || v.generatedAt || v.generatedat || new Date().toISOString(),
           withdrawalid: v.withdrawalId || v.withdrawalid || '',
           withdrawalId: v.withdrawalId || v.withdrawalid || '',
           purchasedby: v.purchasedBy || v.purchasedby || 'admin',
@@ -287,7 +345,7 @@ function getJsonDb(): JsonData {
         username: pt.userName || pt.username || '',
         amount: Number(pt.amount || 0),
         currency: pt.currency || 'NGN',
-        provider: pt.provider || 'paystack',
+        provider: pt.provider || 'korapay',
         providerReference: pt.providerReference || pt.providerreference || '',
         providerreference: pt.providerReference || pt.providerreference || '',
         purpose: pt.purpose || 'wallet_funding',
@@ -375,33 +433,78 @@ function normVCode(codeStr: string | undefined): string {
 
 // -------------------- DATABASE INITIALIZATION --------------------
 export async function initDb() {
-  if (hasPostgresConfig()) {
-    console.log('[SwiftPay DB] Connecting to PostgreSQL database (Admin privileges for Schema setup)...');
-    if (process.env.SQL_HOST) {
-      console.log('[SwiftPay DB] Using Cloud SQL socket/host connection params with ADMIN privileges...');
-      pgPool = new Pool({
-        host: process.env.SQL_HOST,
-        user: process.env.SQL_ADMIN_USER || process.env.SQL_USER,
-        password: process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD,
-        database: process.env.SQL_DB_NAME,
-        connectionTimeoutMillis: 15000,
-      });
-      pgPool.on('error', (err) => {
-        console.error('[SwiftPay DB Admin Pool Error]', err.message);
-      });
-    } else {
-      console.log('[SwiftPay DB] Using DATABASE_URL connection string...');
-      pgPool = new Pool({
-        connectionString: getDatabaseUrl(),
-        connectionTimeoutMillis: 15000,
-        ssl: getDatabaseUrl() && !getDatabaseUrl().includes('localhost') ? { rejectUnauthorized: false } : false
-      });
-      pgPool.on('error', (err) => {
-        console.error('[SwiftPay DB Admin Pool Error]', err.message);
-      });
+  const dbCfg = await validateAndSanitizeDbEnv();
+  let candidatePool: pg.Pool | null = null;
+
+  if (dbCfg.sqlHost || dbCfg.connectionString) {
+    try {
+      if (dbCfg.sqlHost) {
+        console.log('[SwiftPay DB] Verifying Cloud SQL connection...');
+        candidatePool = new Pool({
+          host: dbCfg.sqlHost,
+          user: process.env.SQL_ADMIN_USER || process.env.SQL_USER,
+          password: process.env.SQL_ADMIN_PASSWORD || process.env.SQL_PASSWORD,
+          database: process.env.SQL_DB_NAME,
+          connectionTimeoutMillis: 5000,
+        });
+      } else if (dbCfg.connectionString) {
+        console.log('[SwiftPay DB] Verifying PostgreSQL DATABASE_URL connection...');
+        const isLocal = dbCfg.connectionString.includes('localhost') || dbCfg.connectionString.includes('127.0.0.1');
+        const sslDisabled = process.env.PGSSLMODE === 'disable' || dbCfg.connectionString.includes('sslmode=disable');
+        const primarySsl: any = (isLocal || sslDisabled) ? false : { rejectUnauthorized: false };
+
+        candidatePool = new Pool({
+          connectionString: dbCfg.connectionString,
+          connectionTimeoutMillis: 8000,
+          ssl: primarySsl
+        });
+
+        try {
+          const testClient = await candidatePool.connect();
+          try {
+            await testClient.query('SELECT 1');
+          } finally {
+            testClient.release();
+          }
+        } catch (firstErr: any) {
+          // If Render internal PostgreSQL rejects SSL or requires SSL, automatically negotiate fallback SSL mode
+          try { await candidatePool.end(); } catch (_) {}
+          const fallbackSsl: any = primarySsl ? false : { rejectUnauthorized: false };
+          candidatePool = new Pool({
+            connectionString: dbCfg.connectionString,
+            connectionTimeoutMillis: 8000,
+            ssl: fallbackSsl
+          });
+        }
+      }
+
+      if (candidatePool) {
+        candidatePool.on('error', (err) => {
+          console.error('[SwiftPay DB Pool Error]', err.message);
+        });
+        // Test live connectivity before enabling PostgreSQL mode
+        const client = await candidatePool.connect();
+        try {
+          await client.query('SELECT 1');
+        } finally {
+          client.release();
+        }
+        pgPool = candidatePool;
+        isPostgres = true;
+        console.log('[SwiftPay DB] PostgreSQL connection verified and active.');
+      }
+    } catch (connErr: any) {
+      console.warn(`[SwiftPay DB] PostgreSQL unavailable (${connErr.message}). Automatically switching to persistent JSON database at ${JSON_FILE}.`);
+      if (candidatePool) {
+        try { await candidatePool.end(); } catch (_) {}
+      }
+      pgPool = null;
+      isPostgres = false;
+      getJsonDb();
     }
   } else {
-    console.log(`[SwiftPay DB] No DATABASE_URL or SQL_HOST found. Initializing pure JS JSON database fallback at ${JSON_FILE}...`);
+    console.log(`[SwiftPay DB] Using persistent JSON database engine at ${JSON_FILE}...`);
+    isPostgres = false;
     getJsonDb(); // ensure initialized
   }
 
@@ -637,14 +740,15 @@ export async function initDb() {
       id TEXT PRIMARY KEY,
       voucherCode TEXT UNIQUE,
       code TEXT,
-      amount REAL,
-      status TEXT,
-      usedBy TEXT,
-      usedAt TEXT,
+      amount REAL DEFAULT 6500,
+      status TEXT DEFAULT 'unused',
+      usedBy TEXT DEFAULT '',
+      usedAt TEXT DEFAULT '',
       redeemedBy TEXT DEFAULT '[]',
       generatedAt TEXT,
-      withdrawalId TEXT,
-      purchasedBy TEXT
+      createdAt TEXT,
+      withdrawalId TEXT DEFAULT '',
+      purchasedBy TEXT DEFAULT 'admin'
     )
   `);
 
@@ -715,7 +819,25 @@ export async function initDb() {
     await execute(`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS voucherCode TEXT`);
   } catch (e) {}
   try {
+    await execute(`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS code TEXT`);
+  } catch (e) {}
+  try {
+    await execute(`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS amount REAL DEFAULT 6500`);
+  } catch (e) {}
+  try {
+    await execute(`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'unused'`);
+  } catch (e) {}
+  try {
+    await execute(`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS usedBy TEXT DEFAULT ''`);
+  } catch (e) {}
+  try {
+    await execute(`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS usedAt TEXT DEFAULT ''`);
+  } catch (e) {}
+  try {
     await execute(`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS generatedAt TEXT`);
+  } catch (e) {}
+  try {
+    await execute(`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS createdAt TEXT`);
   } catch (e) {}
   try {
     await execute(`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS withdrawalId TEXT`);
@@ -723,6 +845,9 @@ export async function initDb() {
   try {
     await execute(`ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS purchasedBy TEXT`);
   } catch (e) {}
+
+  // Ensure vouchers table schema is complete and compatible in PostgreSQL without losing existing rows
+  await ensureVouchersSchemaPostgres();
 
   await execute(`
     CREATE TABLE IF NOT EXISTS password_resets (
@@ -755,7 +880,7 @@ export async function initDb() {
   try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_uniq ON users(email)`); } catch (e) {}
   try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vouchers_id_uniq ON vouchers(id)`); } catch (e) {}
   try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vouchers_code_uniq ON vouchers(voucherCode)`); } catch (e) {}
-  try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vouchers_withdrawal_id_uniq ON vouchers(withdrawalId) WHERE withdrawalId <> ''`); } catch (e) {}
+  try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_vouchers_rawcode_uniq ON vouchers(code)`); } catch (e) {}
   try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_settings_key_uniq ON admin_settings(key)`); } catch (e) {}
   try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_password_resets_id_uniq ON password_resets(id)`); } catch (e) {}
   try { await execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_wdv_payments_ref_uniq ON wdv_payments(reference)`); } catch (e) {}
@@ -820,8 +945,12 @@ export async function initDb() {
     console.log('[SwiftPay DB] Default admin settings seeded.');
   }
 
-  // Reinitialize the pool with App user (least privilege) for runtime database access
-  if (hasPostgresConfig()) {
+  // Reinitialize the pool with App user (least privilege) if separate SQL_HOST credentials are used
+  if (isPostgres && process.env.SQL_HOST && process.env.SQL_USER) {
+    try {
+      await execute(`GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "${process.env.SQL_USER}"`);
+      await execute(`GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "${process.env.SQL_USER}"`);
+    } catch (_) {}
     console.log('[SwiftPay DB] Schema setup and seeding complete. Switching database connection pool to App user (least privilege)...');
     try {
       if (pgPool) {
@@ -830,47 +959,162 @@ export async function initDb() {
     } catch (err) {
       console.error('[SwiftPay DB] Error closing Admin pool:', err);
     }
-    
-    if (process.env.SQL_HOST) {
-      pgPool = new Pool({
-        host: process.env.SQL_HOST,
-        user: process.env.SQL_USER,
-        password: process.env.SQL_PASSWORD,
-        database: process.env.SQL_DB_NAME,
-        connectionTimeoutMillis: 15000,
-      });
-      pgPool.on('error', (err) => {
-        console.error('[SwiftPay DB Pool Error]', err.message);
-      });
-    } else {
-      pgPool = new Pool({
-        connectionString: getDatabaseUrl(),
-        connectionTimeoutMillis: 15000,
-        ssl: getDatabaseUrl() && !getDatabaseUrl().includes('localhost') ? { rejectUnauthorized: false } : false
-      });
-      pgPool.on('error', (err) => {
-        console.error('[SwiftPay DB Pool Error]', err.message);
-      });
-    }
+
+    pgPool = new Pool({
+      host: process.env.SQL_HOST,
+      user: process.env.SQL_USER,
+      password: process.env.SQL_PASSWORD,
+      database: process.env.SQL_DB_NAME,
+      connectionTimeoutMillis: 10000,
+    });
+    pgPool.on('error', (err) => {
+      console.error('[SwiftPay DB Pool Error]', err.message);
+    });
   }
 }
 
 // -------------------- QUERY EXECUTION CONTROLLER --------------------
-export function execute(sql: string, params: any[] = []): Promise<any> {
-  return new Promise((resolve, reject) => {
-    if (hasPostgresConfig()) {
-      if (!pgPool) {
-        return reject(new Error('PostgreSQL pool not initialized.'));
+function isConnectionFailure(err: any): boolean {
+  if (!err) return false;
+  const msg = String(err.message || '').toLowerCase();
+  const code = String(err.code || '').toUpperCase();
+  return (
+    code === 'ENOTFOUND' ||
+    code === 'EAI_AGAIN' ||
+    code === 'ECONNREFUSED' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNRESET' ||
+    code === 'EHOSTUNREACH' ||
+    code === 'ENETUNREACH' ||
+    code === 'EPIPE' ||
+    code === '57P01' ||
+    code === '57P02' ||
+    code === '57P03' ||
+    code === '08000' ||
+    code === '08003' ||
+    code === '08006' ||
+    code === '08001' ||
+    code === '08004' ||
+    code === '28P01' ||
+    code === '28000' ||
+    code === '3D000' ||
+    msg.includes('getaddrinfo') ||
+    msg.includes('enotfound') ||
+    msg.includes('econnrefused') ||
+    msg.includes('connection terminated') ||
+    msg.includes('connection timeout') ||
+    msg.includes('pool not initialized') ||
+    msg.includes('no pg_hba.conf entry')
+  );
+}
+
+export async function ensureVouchersSchemaPostgres(): Promise<void> {
+  if (!isPostgres || !pgPool) return;
+  try {
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS vouchers (
+        id TEXT PRIMARY KEY,
+        voucherCode TEXT UNIQUE,
+        code TEXT,
+        amount REAL DEFAULT 6500,
+        status TEXT DEFAULT 'unused',
+        usedBy TEXT DEFAULT '',
+        usedAt TEXT DEFAULT '',
+        redeemedBy TEXT DEFAULT '[]',
+        generatedAt TEXT,
+        createdAt TEXT,
+        withdrawalId TEXT DEFAULT '',
+        purchasedBy TEXT DEFAULT 'admin'
+      )
+    `);
+
+    const alterCols = [
+      `ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS id TEXT`,
+      `ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS voucherCode TEXT`,
+      `ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS code TEXT`,
+      `ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS amount REAL DEFAULT 6500`,
+      `ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'unused'`,
+      `ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS usedBy TEXT DEFAULT ''`,
+      `ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS usedAt TEXT DEFAULT ''`,
+      `ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS redeemedBy TEXT DEFAULT '[]'`,
+      `ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS generatedAt TEXT`,
+      `ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS createdAt TEXT`,
+      `ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS withdrawalId TEXT DEFAULT ''`,
+      `ALTER TABLE vouchers ADD COLUMN IF NOT EXISTS purchasedBy TEXT DEFAULT 'admin'`
+    ];
+    for (const stmt of alterCols) {
+      try { await pgPool.query(stmt); } catch (_) {}
+    }
+
+    // Inspect existing columns in vouchers table to handle legacy types or NOT NULL constraints
+    const colRes = await pgPool.query(`
+      SELECT column_name, data_type, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'vouchers'
+    `);
+    const existingColNames = new Set(colRes.rows.map((r: any) => String(r.column_name)));
+    const textCols = new Set([
+      'id', 'vouchercode', 'code', 'status', 'usedby', 'usedat',
+      'generatedat', 'createdat', 'withdrawalid', 'purchasedby', 'redeemedby'
+    ]);
+
+    for (const row of colRes.rows) {
+      const colName = String(row.column_name);
+      const lowerName = colName.toLowerCase();
+      const dataType = String(row.data_type || '').toLowerCase();
+      const isNullable = String(row.is_nullable || '').toUpperCase();
+
+      // If a mixed-case quoted column exists alongside or instead of lowercase
+      if (colName !== lowerName) {
+        if (!existingColNames.has(lowerName)) {
+          try {
+            await pgPool.query(`ALTER TABLE vouchers RENAME COLUMN "${colName}" TO ${lowerName}`);
+            existingColNames.add(lowerName);
+          } catch (_) {}
+        } else {
+          try {
+            await pgPool.query(`UPDATE vouchers SET ${lowerName} = COALESCE(${lowerName}, "${colName}"::text) WHERE ${lowerName} IS NULL OR ${lowerName} = ''`);
+            await pgPool.query(`ALTER TABLE vouchers ALTER COLUMN "${colName}" DROP NOT NULL`);
+          } catch (_) {}
+        }
       }
-      pgPool.query(sql, params, (err, res) => {
-        if (err) return reject(err);
-        resolve(res);
-      });
-    } else {
-      // In-memory pure JS simulator for JSON mode
-      try {
-        const db = getJsonDb();
-        const sqlUpper = sql.toUpperCase();
+
+      // Convert any non-text target columns (e.g. integer id or timestamp usedAt) to TEXT
+      if (textCols.has(lowerName) && dataType !== 'text' && dataType !== 'character varying') {
+        try {
+          await pgPool.query(`ALTER TABLE vouchers ALTER COLUMN "${colName}" DROP DEFAULT`);
+        } catch (_) {}
+        try {
+          await pgPool.query(`ALTER TABLE vouchers ALTER COLUMN "${colName}" TYPE TEXT USING "${colName}"::text`);
+        } catch (_) {}
+      }
+
+      // Drop unexpected NOT NULL constraints on non-PK columns so inserts never fail
+      if (isNullable === 'NO' && lowerName !== 'id' && lowerName !== 'code' && lowerName !== 'vouchercode') {
+        try {
+          await pgPool.query(`ALTER TABLE vouchers ALTER COLUMN "${colName}" DROP NOT NULL`);
+        } catch (_) {}
+      }
+    }
+
+    // Backfill legacy rows safely without deleting any existing records
+    try {
+      await pgPool.query(`UPDATE vouchers SET code = voucherCode WHERE (code IS NULL OR code = '') AND voucherCode IS NOT NULL AND voucherCode <> ''`);
+      await pgPool.query(`UPDATE vouchers SET voucherCode = code WHERE (voucherCode IS NULL OR voucherCode = '') AND code IS NOT NULL AND code <> ''`);
+      await pgPool.query(`UPDATE vouchers SET id = 'v-' || COALESCE(voucherCode, code) WHERE (id IS NULL OR id = '') AND COALESCE(voucherCode, code) IS NOT NULL`);
+      await pgPool.query(`UPDATE vouchers SET status = 'unused' WHERE status IS NULL OR status = ''`);
+      await pgPool.query(`UPDATE vouchers SET amount = 6500 WHERE amount IS NULL`);
+      await pgPool.query(`UPDATE vouchers SET generatedAt = COALESCE(generatedAt, createdAt, $1) WHERE generatedAt IS NULL OR generatedAt = ''`, [new Date().toISOString()]);
+      await pgPool.query(`UPDATE vouchers SET createdAt = COALESCE(createdAt, generatedAt) WHERE createdAt IS NULL OR createdAt = ''`);
+    } catch (_) {}
+  } catch (err: any) {
+    console.warn('[SwiftPay DB] Warning during ensureVouchersSchemaPostgres:', err.message);
+  }
+}
+
+function executeJson(sql: string, params: any[] = []): any {
+  const db = getJsonDb();
+  const sqlUpper = sql.toUpperCase();
 
         if (sqlUpper.includes('INSERT INTO ADMINS')) {
           const email = (params[0] || '').toLowerCase();
@@ -938,7 +1182,18 @@ export function execute(sql: string, params: any[] = []): Promise<any> {
           let pBy = 'admin';
           let rBy = '[]';
 
-          if (params.length >= 11) {
+          if (params.length >= 12) {
+            vId = params[0];
+            vCode = params[1] || params[2];
+            amt = Number(params[3] ?? 6500);
+            st = params[4] || 'unused';
+            uBy = params[5] || '';
+            uAt = params[6] || '';
+            genAt = params[7] || params[8] || new Date().toISOString();
+            wId = params[9] || '';
+            pBy = params[10] || 'admin';
+            rBy = safeStringifyJsonField(params[11]);
+          } else if (params.length >= 11) {
             vId = params[0];
             vCode = params[1] || params[2];
             amt = Number(params[3] ?? 6500);
@@ -972,6 +1227,8 @@ export function execute(sql: string, params: any[] = []): Promise<any> {
             usedAt: uAt,
             generatedat: genAt,
             generatedAt: genAt,
+            createdat: genAt,
+            createdAt: genAt,
             withdrawalid: wId,
             withdrawalId: wId,
             purchasedby: pBy,
@@ -1053,7 +1310,7 @@ export function execute(sql: string, params: any[] = []): Promise<any> {
             userName: params[3] || '',
             amount: Number(params[4] || 0),
             currency: params[5] || 'NGN',
-            provider: params[6] || 'paystack',
+            provider: params[6] || 'korapay',
             providerreference: params[7] || '',
             providerReference: params[7] || '',
             purpose: params[8] || 'wallet_funding',
@@ -1077,16 +1334,33 @@ export function execute(sql: string, params: any[] = []): Promise<any> {
           const refParam = params[params.length - 1];
           const pt = db.payment_transactions.find((x: any) => x.reference === refParam || x.id === refParam);
           if (pt) {
-            if (sqlUpper.includes('STATUS =') || sqlUpper.includes('STATUS=')) {
-              pt.status = params[0];
-            }
-            if (sqlUpper.includes('VERIFIEDAT =') || sqlUpper.includes('VERIFIEDAT=')) {
-              pt.verifiedat = params[1] || new Date().toISOString();
+            if (sqlUpper.includes("STATUS = 'SUCCESSFUL'") || sqlUpper.includes("STATUS='SUCCESSFUL'")) {
+              pt.status = 'successful';
+              pt.verifiedat = params[0] || new Date().toISOString();
               pt.verifiedAt = pt.verifiedat;
-            }
-            if (sqlUpper.includes('PROVIDERREFERENCE =') || sqlUpper.includes('PROVIDERREFERENCE=')) {
-              pt.providerreference = params[2] || '';
-              pt.providerReference = pt.providerreference;
+              if (params[1] !== undefined) {
+                pt.providerreference = params[1] || '';
+                pt.providerReference = pt.providerreference;
+              }
+              if (params[2] !== undefined) {
+                pt.webhookdata = params[2] || '';
+                pt.webhookData = pt.webhookdata;
+              }
+              if (params[3] !== undefined) {
+                pt.channel = params[3] || pt.channel || 'card';
+              }
+            } else {
+              if (sqlUpper.includes('STATUS =') || sqlUpper.includes('STATUS=')) {
+                pt.status = params[0];
+              }
+              if (sqlUpper.includes('VERIFIEDAT =') || sqlUpper.includes('VERIFIEDAT=')) {
+                pt.verifiedat = params[1] || new Date().toISOString();
+                pt.verifiedAt = pt.verifiedat;
+              }
+              if (sqlUpper.includes('PROVIDERREFERENCE =') || sqlUpper.includes('PROVIDERREFERENCE=')) {
+                pt.providerreference = params[2] || '';
+                pt.providerReference = pt.providerreference;
+              }
             }
           }
         } else if (sqlUpper.includes('UPDATE WDV_PAYMENTS')) {
@@ -1104,6 +1378,10 @@ export function execute(sql: string, params: any[] = []): Promise<any> {
             if (sqlUpper.includes('VOUCHERCODE =') || sqlUpper.includes('VOUCHERCODE=')) {
               p.vouchercode = params[2] || params[1] || '';
               p.voucherCode = p.vouchercode;
+            }
+            if (sqlUpper.includes('WEBHOOKDATA =') || sqlUpper.includes('WEBHOOKDATA=')) {
+              p.webhookdata = params[3] || '';
+              p.webhookData = p.webhookdata;
             }
           }
         } else if (sqlUpper.includes('INSERT INTO WITHDRAW_REQUESTS')) {
@@ -1237,81 +1515,125 @@ export function execute(sql: string, params: any[] = []): Promise<any> {
         }
         
         saveJsonDb(db);
-        resolve({ rows: [], lastID: Date.now(), changes: 1 });
+        return { rows: [], lastID: Date.now(), changes: 1 };
+}
+
+export function execute(sql: string, params: any[] = []): Promise<any> {
+  return new Promise((resolve, reject) => {
+    if (isPostgres && pgPool) {
+      pgPool.query(sql, params, (err, res) => {
+        if (err) {
+          if (isConnectionFailure(err)) {
+            console.warn(`[SwiftPay DB] PostgreSQL connection error during execute (${err.message}); switching to JSON fallback.`);
+            isPostgres = false;
+            try {
+              return resolve(executeJson(sql, params));
+            } catch (jsonErr) {
+              return reject(jsonErr);
+            }
+          }
+          return reject(err);
+        }
+        resolve(res);
+      });
+    } else {
+      try {
+        resolve(executeJson(sql, params));
       } catch (err) {
         reject(err);
       }
     }
   });
+}
+
+function getRowJson(sql: string, params: any[] = []): any {
+  const db = getJsonDb();
+  const sqlUpper = sql.toUpperCase();
+
+  if (sqlUpper.includes('SELECT COUNT(*) AS COUNT FROM USERS') || sqlUpper.includes('COUNT(*) AS COUNT FROM USERS')) {
+    return { count: db.users.length };
+  }
+  if (sqlUpper.includes('SELECT COUNT(*) AS COUNT FROM VOUCHERS') || sqlUpper.includes('COUNT(*) AS COUNT FROM VOUCHERS')) {
+    return { count: db.vouchers.length };
+  }
+  if (sqlUpper.includes('SELECT COUNT(*) AS COUNT FROM ADMIN_SETTINGS') || sqlUpper.includes('COUNT(*) AS COUNT FROM ADMIN_SETTINGS')) {
+    return { count: Object.keys(db.admin_settings).length };
+  }
+  if (sqlUpper.includes('FROM ADMINS')) {
+    const email = (params[0] || '').toLowerCase();
+    return db.admins.find(a => a.email === email) || null;
+  }
+  if (sqlUpper.includes('FROM USERS')) {
+    const target = (params[0] || '').toLowerCase();
+    return db.users.find(u => u.email === target || u.phone === target) || null;
+  }
+  if (sqlUpper.includes('FROM VOUCHERS')) {
+    const rawCode = params[0] || params[1] || '';
+    const normCode = normVCode(String(rawCode));
+    const row = db.vouchers.find(v =>
+      v.id === rawCode ||
+      v.withdrawalid === rawCode ||
+      v.withdrawalId === rawCode ||
+      normVCode(v.code) === normCode ||
+      normVCode(v.voucherCode) === normCode
+    );
+    return row || null;
+  }
+  if (sqlUpper.includes('FROM WITHDRAW_REQUESTS')) {
+    db.withdraw_requests = db.withdraw_requests || [];
+    const idVal = params[0];
+    return db.withdraw_requests.find((w: any) => w.id === idVal) || null;
+  }
+  if (sqlUpper.includes('FROM WDV_PAYMENTS')) {
+    db.wdv_payments = db.wdv_payments || [];
+    const refVal = params[0];
+    if (sqlUpper.includes('LOWER(USEREMAIL)')) {
+      const targetEmail = String(refVal || '').toLowerCase();
+      const matches = db.wdv_payments.filter((p: any) =>
+        (p.useremail || p.userEmail || '').toLowerCase() === targetEmail &&
+        (!sqlUpper.includes("STATUS = 'PENDING'") || p.status === 'pending')
+      );
+      return matches[matches.length - 1] || null;
+    }
+    return db.wdv_payments.find((p: any) => p.reference === refVal || p.id === refVal) || null;
+  }
+  if (sqlUpper.includes('FROM PAYMENT_TRANSACTIONS')) {
+    db.payment_transactions = db.payment_transactions || [];
+    const refVal = params[0];
+    return db.payment_transactions.find((p: any) => p.reference === refVal || p.id === refVal) || null;
+  }
+  if (sqlUpper.includes('FROM ADMIN_SETTINGS')) {
+    const keyVal = params[0];
+    if (keyVal && db.admin_settings[keyVal] !== undefined) {
+      return { key: keyVal, value: db.admin_settings[keyVal] };
+    }
+    return null;
+  }
+
+  return null;
 }
 
 export function getRow(sql: string, params: any[] = []): Promise<any> {
   return new Promise((resolve, reject) => {
-    if (hasPostgresConfig()) {
-      if (!pgPool) {
-        return reject(new Error('PostgreSQL pool not initialized.'));
-      }
+    if (isPostgres && pgPool) {
       pgPool.query(sql, params, (err, res) => {
-        if (err) return reject(err);
+        if (err) {
+          if (isConnectionFailure(err)) {
+            console.warn(`[SwiftPay DB] PostgreSQL connection error during getRow (${err.message}); switching to JSON fallback.`);
+            isPostgres = false;
+            try {
+              return resolve(getRowJson(sql, params));
+            } catch (jsonErr) {
+              return reject(jsonErr);
+            }
+          }
+          return reject(err);
+        }
         resolve(res.rows[0] || null);
       });
     } else {
       try {
-        const db = getJsonDb();
-        const sqlUpper = sql.toUpperCase();
-
-        if (sqlUpper.includes('SELECT COUNT(*) AS COUNT FROM USERS') || sqlUpper.includes('COUNT(*) AS COUNT FROM USERS')) {
-          return resolve({ count: db.users.length });
-        }
-        if (sqlUpper.includes('SELECT COUNT(*) AS COUNT FROM VOUCHERS') || sqlUpper.includes('COUNT(*) AS COUNT FROM VOUCHERS')) {
-          return resolve({ count: db.vouchers.length });
-        }
-        if (sqlUpper.includes('SELECT COUNT(*) AS COUNT FROM ADMIN_SETTINGS') || sqlUpper.includes('COUNT(*) AS COUNT FROM ADMIN_SETTINGS')) {
-          return resolve({ count: Object.keys(db.admin_settings).length });
-        }
-        if (sqlUpper.includes('FROM ADMINS')) {
-          const email = (params[0] || '').toLowerCase();
-          const row = db.admins.find(a => a.email === email);
-          return resolve(row || null);
-        }
-        if (sqlUpper.includes('FROM USERS')) {
-          const target = (params[0] || '').toLowerCase();
-          const row = db.users.find(u => u.email === target || u.phone === target);
-          return resolve(row || null);
-        }
-        if (sqlUpper.includes('FROM VOUCHERS')) {
-          const rawCode = params[0] || params[1] || '';
-          const normCode = normVCode(String(rawCode));
-          const row = db.vouchers.find(v => v.id === rawCode || normVCode(v.code) === normCode || normVCode(v.voucherCode) === normCode);
-          return resolve(row || null);
-        }
-        if (sqlUpper.includes('FROM WITHDRAW_REQUESTS')) {
-          db.withdraw_requests = db.withdraw_requests || [];
-          const idVal = params[0];
-          const row = db.withdraw_requests.find((w: any) => w.id === idVal);
-          return resolve(row || null);
-        }
-        if (sqlUpper.includes('FROM WDV_PAYMENTS')) {
-          db.wdv_payments = db.wdv_payments || [];
-          const refVal = params[0];
-          const row = db.wdv_payments.find((p: any) => p.reference === refVal || p.id === refVal);
-          return resolve(row || null);
-        }
-        if (sqlUpper.includes('FROM PAYMENT_TRANSACTIONS')) {
-          db.payment_transactions = db.payment_transactions || [];
-          const refVal = params[0];
-          const row = db.payment_transactions.find((p: any) => p.reference === refVal || p.id === refVal);
-          return resolve(row || null);
-        }
-        if (sqlUpper.includes('FROM ADMIN_SETTINGS')) {
-          const keyVal = params[0];
-          if (keyVal && db.admin_settings[keyVal] !== undefined) {
-            return resolve({ key: keyVal, value: db.admin_settings[keyVal] });
-          }
-          return resolve(null);
-        }
-        
-        resolve(null);
+        resolve(getRowJson(sql, params));
       } catch (err) {
         reject(err);
       }
@@ -1319,63 +1641,254 @@ export function getRow(sql: string, params: any[] = []): Promise<any> {
   });
 }
 
+function getAllRowsJson(sql: string, params: any[] = []): any[] {
+  const db = getJsonDb();
+  const sqlUpper = sql.toUpperCase();
+
+  if (sqlUpper.includes('FROM ADMIN_SETTINGS')) {
+    return Object.entries(db.admin_settings).map(([key, value]) => ({ key, value }));
+  }
+  if (sqlUpper.includes('FROM USERS')) {
+    return db.users;
+  }
+  if (sqlUpper.includes('FROM VOUCHERS')) {
+    const sorted = [...db.vouchers].sort((a, b) => {
+      const tA = new Date(a.generatedAt || a.generatedat || 0).getTime();
+      const tB = new Date(b.generatedAt || b.generatedat || 0).getTime();
+      return tB - tA;
+    });
+    return sorted;
+  }
+  if (sqlUpper.includes('FROM PASSWORD_RESETS')) {
+    return db.password_resets;
+  }
+  if (sqlUpper.includes('FROM LOGS')) {
+    return db.logs;
+  }
+  if (sqlUpper.includes('FROM WITHDRAW_REQUESTS')) {
+    db.withdraw_requests = db.withdraw_requests || [];
+    return db.withdraw_requests;
+  }
+  if (sqlUpper.includes('FROM WDV_PAYMENTS')) {
+    db.wdv_payments = db.wdv_payments || [];
+    return db.wdv_payments;
+  }
+  if (sqlUpper.includes('FROM PAYMENT_TRANSACTIONS')) {
+    db.payment_transactions = db.payment_transactions || [];
+    return db.payment_transactions;
+  }
+  if (sqlUpper.includes('FROM AI_CHAT_LOGS')) {
+    db.ai_chat_logs = db.ai_chat_logs || [];
+    return db.ai_chat_logs;
+  }
+  if (sqlUpper.includes('FROM AI_CUSTOM_FAQS')) {
+    db.ai_custom_faqs = db.ai_custom_faqs || [];
+    return db.ai_custom_faqs;
+  }
+
+  return [];
+}
+
 export function getAllRows(sql: string, params: any[] = []): Promise<any[]> {
   return new Promise((resolve, reject) => {
-    if (hasPostgresConfig()) {
-      if (!pgPool) {
-        return reject(new Error('PostgreSQL pool not initialized.'));
-      }
+    if (isPostgres && pgPool) {
       pgPool.query(sql, params, (err, res) => {
-        if (err) return reject(err);
+        if (err) {
+          if (isConnectionFailure(err)) {
+            console.warn(`[SwiftPay DB] PostgreSQL connection error during getAllRows (${err.message}); switching to JSON fallback.`);
+            isPostgres = false;
+            try {
+              return resolve(getAllRowsJson(sql, params));
+            } catch (jsonErr) {
+              return reject(jsonErr);
+            }
+          }
+          return reject(err);
+        }
         resolve(res.rows);
       });
     } else {
       try {
-        const db = getJsonDb();
-        const sqlUpper = sql.toUpperCase();
-
-        if (sqlUpper.includes('FROM ADMIN_SETTINGS')) {
-          const rows = Object.entries(db.admin_settings).map(([key, value]) => ({ key, value }));
-          return resolve(rows);
-        }
-        if (sqlUpper.includes('FROM USERS')) {
-          return resolve(db.users);
-        }
-        if (sqlUpper.includes('FROM VOUCHERS')) {
-          return resolve(db.vouchers);
-        }
-        if (sqlUpper.includes('FROM PASSWORD_RESETS')) {
-          return resolve(db.password_resets);
-        }
-        if (sqlUpper.includes('FROM LOGS')) {
-          return resolve(db.logs);
-        }
-        if (sqlUpper.includes('FROM WITHDRAW_REQUESTS')) {
-          db.withdraw_requests = db.withdraw_requests || [];
-          return resolve(db.withdraw_requests);
-        }
-        if (sqlUpper.includes('FROM WDV_PAYMENTS')) {
-          db.wdv_payments = db.wdv_payments || [];
-          return resolve(db.wdv_payments);
-        }
-        if (sqlUpper.includes('FROM PAYMENT_TRANSACTIONS')) {
-          db.payment_transactions = db.payment_transactions || [];
-          return resolve(db.payment_transactions);
-        }
-        if (sqlUpper.includes('FROM AI_CHAT_LOGS')) {
-          db.ai_chat_logs = db.ai_chat_logs || [];
-          return resolve(db.ai_chat_logs);
-        }
-        if (sqlUpper.includes('FROM AI_CUSTOM_FAQS')) {
-          db.ai_custom_faqs = db.ai_custom_faqs || [];
-          return resolve(db.ai_custom_faqs);
-        }
-
-        resolve([]);
+        resolve(getAllRowsJson(sql, params));
       } catch (err) {
         reject(err);
       }
     }
   });
+}
+
+export function generateSecureVoucherCode(): string {
+  const hex = crypto.randomBytes(6).toString('hex').toUpperCase();
+  const p1 = hex.slice(0, 4);
+  const p2 = hex.slice(4, 8);
+  const p3 = hex.slice(8, 12);
+  return `WDV-${p1}-${p2}-${p3}`;
+}
+
+export interface CreateVoucherParams {
+  amount?: number;
+  purchasedBy?: string;
+  withdrawalId?: string;
+  preferredCode?: string;
+}
+
+export interface CreatedVoucherRecord {
+  id: string;
+  code: string;
+  voucherCode: string;
+  amount: number;
+  status: string;
+  usedBy: string;
+  usedAt: string;
+  generatedAt: string;
+  createdAt: string;
+  withdrawalId: string;
+  purchasedBy: string;
+  redeemedBy: any[];
+}
+
+/**
+ * Atomically generates and stores a cryptographically unique WDV voucher in the active datastore.
+ * Uses an explicit PostgreSQL transaction (BEGIN ... INSERT ... RETURNING ... COMMIT) when PostgreSQL is active.
+ */
+export async function createVoucherAtomic(params: CreateVoucherParams = {}): Promise<CreatedVoucherRecord> {
+  const amount = Number(params.amount ?? 6500);
+  const purchasedBy = params.purchasedBy || 'admin';
+  const withdrawalId = params.withdrawalId || '';
+  const maxAttempts = 15;
+
+  if (isPostgres && pgPool) {
+    let client: pg.PoolClient | null = null;
+    try {
+      client = await pgPool.connect();
+    } catch (connErr: any) {
+      if (isConnectionFailure(connErr)) {
+        console.warn(`[SwiftPay DB] PostgreSQL connection error in createVoucherAtomic (${connErr.message}); switching to JSON fallback.`);
+        isPostgres = false;
+      } else {
+        throw connErr;
+      }
+    }
+
+    if (client && isPostgres) {
+      let schemaCheckedOnRetry = false;
+      try {
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          const code = (attempt === 0 && params.preferredCode) ? params.preferredCode : generateSecureVoucherCode();
+          const id = `v-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+          const generatedAt = new Date().toISOString();
+
+          await client.query('BEGIN');
+          try {
+            const dupCheck = await client.query(
+              `SELECT 1 FROM vouchers WHERE voucherCode = $1 OR code = $1 OR id = $2 LIMIT 1`,
+              [code, id]
+            );
+            if (dupCheck.rows.length > 0) {
+              await client.query('ROLLBACK');
+              continue;
+            }
+
+            const insertRes = await client.query(
+              `INSERT INTO vouchers (
+                id, voucherCode, code, amount, status, usedBy, usedAt, generatedAt, createdAt, withdrawalId, purchasedBy, redeemedBy
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+              RETURNING *`,
+              [id, code, code, amount, 'unused', '', '', generatedAt, generatedAt, withdrawalId, purchasedBy, '[]']
+            );
+
+            await client.query('COMMIT');
+            const row = insertRes.rows[0] || {};
+            const finalCode = row.vouchercode || row.voucherCode || row.code || code;
+            const finalId = row.id || id;
+            const finalGenAt = row.generatedat || row.generatedAt || row.createdat || row.createdAt || generatedAt;
+
+            return {
+              id: finalId,
+              code: finalCode,
+              voucherCode: finalCode,
+              amount: Number(row.amount ?? amount),
+              status: row.status || 'unused',
+              usedBy: row.usedby || row.usedBy || '',
+              usedAt: row.usedat || row.usedAt || '',
+              generatedAt: finalGenAt,
+              createdAt: finalGenAt,
+              withdrawalId: row.withdrawalid || row.withdrawalId || withdrawalId,
+              purchasedBy: row.purchasedby || row.purchasedBy || purchasedBy,
+              redeemedBy: []
+            };
+          } catch (txErr: any) {
+            try { await client.query('ROLLBACK'); } catch (_) {}
+            const pgCode = String(txErr?.code || '');
+            // 23505 = unique_violation in PostgreSQL -> retry with a new code
+            if (pgCode === '23505') {
+              continue;
+            }
+            // If a column/table/type mismatch occurred on first attempt, auto-heal schema and retry
+            if (!schemaCheckedOnRetry && (pgCode === '42703' || pgCode === '42P01' || pgCode === '22P02' || pgCode === '23502')) {
+              schemaCheckedOnRetry = true;
+              await ensureVouchersSchemaPostgres();
+              continue;
+            }
+            if (isConnectionFailure(txErr)) {
+              console.warn(`[SwiftPay DB] PostgreSQL connection error during voucher insert (${txErr.message}); switching to JSON fallback.`);
+              isPostgres = false;
+              break;
+            }
+            throw txErr;
+          }
+        }
+        if (isPostgres) {
+          throw new Error('Exhausted attempts to generate a unique voucher code in PostgreSQL.');
+        }
+      } finally {
+        client.release();
+      }
+    }
+  }
+
+  // Fallback for local development JSON datastore
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const code = (attempt === 0 && params.preferredCode) ? params.preferredCode : generateSecureVoucherCode();
+    const existing = getRowJson(`SELECT 1 FROM vouchers WHERE voucherCode = $1 OR code = $1`, [code]);
+    if (existing) {
+      continue;
+    }
+
+    const id = `v-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const generatedAt = new Date().toISOString();
+
+    executeJson(
+      `INSERT INTO vouchers (id, voucherCode, code, amount, status, usedBy, usedAt, generatedAt, withdrawalId, purchasedBy, redeemedBy)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [id, code, code, amount, 'unused', '', '', generatedAt, withdrawalId, purchasedBy, '[]']
+    );
+
+    const verifyInserted = getRowJson(`SELECT * FROM vouchers WHERE voucherCode = $1`, [code]);
+    if (!verifyInserted) {
+      throw new Error('Failed to verify persisted voucher in datastore.');
+    }
+
+    return {
+      id,
+      code,
+      voucherCode: code,
+      amount,
+      status: 'unused',
+      usedBy: '',
+      usedAt: '',
+      generatedAt,
+      createdAt: generatedAt,
+      withdrawalId,
+      purchasedBy,
+      redeemedBy: []
+    };
+  }
+
+  throw new Error('Exhausted attempts to generate a unique voucher code.');
+}
+
+export function isPostgresActive(): boolean {
+  return isPostgres;
 }
 

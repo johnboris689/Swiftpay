@@ -224,8 +224,13 @@ export default function App() {
 
     // Set initial state
     const currentPath = window.location.pathname.toLowerCase();
+    const searchParams = new URLSearchParams(window.location.search);
+    const callbackRef = searchParams.get('reference') || searchParams.get('trxref') || searchParams.get('payment_reference');
+
     if (!currentPath.startsWith('/boris')) {
-      if (currentPath === '/dashboard/withdraw' || currentPath === '/withdraw') {
+      if (callbackRef || currentPath === '/payment/callback') {
+        setCurrentScreen('buy_wdv');
+      } else if (currentPath === '/dashboard/withdraw' || currentPath === '/withdraw') {
         setCurrentScreen('withdraw');
       } else if (currentPath === '/dashboard/transfer' || currentPath === '/transfer') {
         setTransferStep(1);
@@ -379,6 +384,8 @@ export default function App() {
   });
   const [buyWdvAmount, setBuyWdvAmount] = useState<string>('6500');
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [paymentModalPurpose, setPaymentModalPurpose] = useState<'wallet_funding' | 'wdv_voucher'>('wallet_funding');
+  const [paymentModalAmount, setPaymentModalAmount] = useState<number>(5000);
 
   const [systemSettings, setSystemSettings] = useState<Record<string, string>>({
     websiteName: "SwiftPay",
@@ -626,6 +633,11 @@ export default function App() {
   const [isInitiatingWdv, setIsInitiatingWdv] = useState(false);
   const [isVerifyingWdv, setIsVerifyingWdv] = useState(false);
   const [paymentCountdown, setPaymentCountdown] = useState<number>(900);
+  const [wdvPaymentError, setWdvPaymentError] = useState<string>('');
+  const [wdvCheckoutRef, setWdvCheckoutRef] = useState<string>('');
+  const [wdvCheckoutUrl, setWdvCheckoutUrl] = useState<string>('');
+  const wdvInitLockRef = useRef<boolean>(false);
+  const wdvVerifyLockRef = useRef<boolean>(false);
 
   // Dynamic system-wide configurations
   const [videoUrl, setVideoUrl] = useState('');
@@ -1694,25 +1706,212 @@ export default function App() {
     };
   }, [withdrawBank, withdrawAccount]);
 
-  // WDV Payment Initiate Handler (Manual Bank Transfer)
+  // Sanitize any payment error before displaying to customer
+  const sanitizeWdvCustomerError = (rawErr: any, fallback = "We couldn't start the payment. Please try again."): string => {
+    const msg = String(rawErr || '').trim();
+    if (!msg) return fallback;
+    const internalPatterns = [
+      /getaddrinfo/i,
+      /ENOTFOUND/i,
+      /EAI_AGAIN/i,
+      /ECONNREFUSED/i,
+      /ETIMEDOUT/i,
+      /[a-z]{3}-[a-z0-9]{16,}-[a-z]/i,
+      /postgres/i,
+      /DATABASE_URL/i,
+      /PGHOST/i,
+      /KORAPAY_/i,
+      /SECRET_KEY/i,
+      /stack/i,
+      /SyntaxError/i,
+      /TypeError/i,
+      /Failed to fetch/i,
+      /NetworkError/i
+    ];
+    if (internalPatterns.some((pattern) => pattern.test(msg))) {
+      return fallback;
+    }
+    return msg;
+  };
+
+  // Verify Korapay WDV Payment Server-Side (Idempotent)
+  const handleVerifyKorapayWdv = async (referenceToVerify?: string) => {
+    const ref = (referenceToVerify || wdvCheckoutRef || '').trim();
+    if (!ref || wdvVerifyLockRef.current) return;
+
+    wdvVerifyLockRef.current = true;
+    setIsVerifyingWdv(true);
+    setWdvPaymentError('');
+
+    try {
+      const authToken = localStorage.getItem('swiftpay_token') || localStorage.getItem('token') || '';
+      const resolvedEmail = user?.email || wdvFormEmail || '';
+      const endpoint = ref.startsWith('WDV_') ? '/api/wdv/verify' : '/api/payment/verify';
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
+        },
+        body: JSON.stringify({
+          reference: ref,
+          email: resolvedEmail,
+          token: authToken
+        })
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.success && (data.status === 'successful' || data.voucherCode)) {
+        localStorage.removeItem('swiftpay_pending_payment');
+        // Clean URL query parameters if present
+        if (window.location.search.includes('reference=') || window.location.pathname === '/payment/callback') {
+          window.history.replaceState({ appScreen: 'wdv_success' }, '', '/dashboard/buy-wdv');
+        }
+
+        const issuedCode = data.voucherCode || `WDV-${ref.slice(-6).toUpperCase()}`;
+        const price = Number(data.amount || wdvConfig.voucherPrice || 6500);
+        const newWdv: WdvCode = {
+          id: `wdv-${Date.now()}`,
+          code: issuedCode,
+          voucherCode: issuedCode,
+          amount: price,
+          status: 'unused',
+          createdAt: new Date().toISOString()
+        };
+
+        setGeneratedWdv(newWdv);
+        setWdvList((prev) => {
+          if (prev.some((v) => (v.code || v.voucherCode) === issuedCode)) return prev;
+          return [newWdv, ...prev];
+        });
+        setWdvCheckoutRef('');
+        setWdvCheckoutUrl('');
+        setWdvPaymentError('');
+        setCurrentScreen('wdv_success');
+        showToast(`Payment confirmed! WDV Voucher issued: ${issuedCode}`, 'success');
+        await syncWithBackend(true);
+      } else {
+        setWdvPaymentError(
+          sanitizeWdvCustomerError(
+            data.message || data.error,
+            'Your payment has not been confirmed yet. Please complete checkout on Korapay and try again.'
+          )
+        );
+      }
+    } catch (err: any) {
+      setWdvPaymentError(
+        sanitizeWdvCustomerError(
+          err?.message,
+          "We couldn't verify the payment right now. Please try again."
+        )
+      );
+    } finally {
+      setIsVerifyingWdv(false);
+      wdvVerifyLockRef.current = false;
+    }
+  };
+
+  // Automatically verify if returning from Korapay redirect with ?reference=...
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const refFromUrl = params.get('reference') || params.get('trxref') || params.get('payment_reference');
+    if (refFromUrl) {
+      setWdvCheckoutRef(refFromUrl);
+      setCurrentScreen('buy_wdv');
+      handleVerifyKorapayWdv(refFromUrl);
+    }
+  }, []);
+
+  // WDV Payment Initiate Handler (Real Korapay Checkout Only)
   const handleInitiateWdv = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    setIsInitiatingWdv(true);
-    setWdvFormName(user?.fullName || 'Client User');
-    setWdvFormEmail(user?.email || 'user@example.com');
+    if (wdvInitLockRef.current || isInitiatingWdv) return;
 
-    setActiveWdvPayment({
-      reference: `wdv-${Date.now()}`,
-      bankName: wdvConfig.bankName,
-      accountNumber: wdvConfig.accountNumber,
-      accountName: wdvConfig.accountName,
-      amount: wdvConfig.voucherPrice,
-      expiresAt: new Date(Date.now() + 900000).toISOString(),
-      status: 'pending'
-    });
-    setPaymentCountdown(900);
-    setCurrentScreen('wdv_instructions');
-    setIsInitiatingWdv(false);
+    wdvInitLockRef.current = true;
+    setIsInitiatingWdv(true);
+    setWdvPaymentError('');
+
+    const voucherAmount = Number(wdvConfig.voucherPrice || 6500);
+    const authToken = localStorage.getItem('swiftpay_token') || localStorage.getItem('token') || '';
+    let customerEmail = user?.email || wdvFormEmail || '';
+    let customerName = user?.fullName || wdvFormName || '';
+
+    if (!customerEmail) {
+      try {
+        const savedUser = localStorage.getItem('swiftpay_user');
+        if (savedUser) {
+          const parsed = JSON.parse(savedUser);
+          customerEmail = parsed.email || '';
+          customerName = parsed.fullName || '';
+        }
+      } catch (_err) {
+        // ignore parse error
+      }
+    }
+
+    try {
+      const callbackUrl = `${window.location.origin}/dashboard/buy-wdv`;
+      const res = await fetch('/api/payment/initialize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
+        },
+        body: JSON.stringify({
+          amount: voucherAmount,
+          provider: 'korapay',
+          purpose: 'wdv_voucher',
+          name: customerName || 'SwiftPay Customer',
+          email: customerEmail,
+          token: authToken,
+          callbackUrl
+        })
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success || !data.authorizationUrl) {
+        throw new Error(
+          sanitizeWdvCustomerError(data.error, "We couldn't start the payment. Please try again.")
+        );
+      }
+
+      setWdvCheckoutRef(data.reference);
+      setWdvCheckoutUrl(data.authorizationUrl);
+
+      try {
+        localStorage.setItem(
+          'swiftpay_pending_payment',
+          JSON.stringify({
+            reference: data.reference,
+            purpose: 'wdv_voucher',
+            amount: voucherAmount,
+            authorizationUrl: data.authorizationUrl,
+            createdAt: Date.now()
+          })
+        );
+      } catch (_e) {
+        // ignore storage error
+      }
+
+      // Open real Korapay checkout flow
+      if (window.self === window.top) {
+        window.location.href = data.authorizationUrl;
+      } else {
+        const popup = window.open(data.authorizationUrl, '_blank', 'noopener,noreferrer');
+        if (!popup) {
+          showToast('Tap "Open Korapay Checkout" to complete your payment.', 'info');
+        }
+      }
+    } catch (err: any) {
+      setWdvPaymentError(
+        sanitizeWdvCustomerError(err?.message, "We couldn't start the payment. Please try again.")
+      );
+    } finally {
+      setIsInitiatingWdv(false);
+      wdvInitLockRef.current = false;
+    }
   };
 
   // Generate and Download PDF Receipt for WDV Voucher
@@ -1782,7 +1981,7 @@ export default function App() {
         { label: 'Voucher Status', val: 'UNUSED / ACTIVE' },
         { label: 'Voucher Price', val: `NGN ${(generatedWdv.amount || 6500).toLocaleString()}` },
         { label: 'Purchased By', val: user?.email || wdvFormEmail || 'Customer' },
-        { label: 'Payment Method', val: 'Direct Bank Transfer' },
+        { label: 'Payment Method', val: 'Korapay Checkout' },
         { label: 'Issue Date', val: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) }
       ];
 
@@ -2506,6 +2705,7 @@ export default function App() {
     lowerNormalizedPath === '/dashboard/buy_wdv' ||
     lowerNormalizedPath === '/buy-wdv' ||
     lowerNormalizedPath === '/buy_wdv' ||
+    lowerNormalizedPath === '/payment/callback' ||
     isBorisRoute;
 
   if (!isValidRoute) {
@@ -3303,8 +3503,22 @@ export default function App() {
                           </span>
                         </div>
 
-                        {/* Action Buttons: [ Withdraw ] [ Transfer ] */}
+                        {/* Action Buttons: [ Fund ] [ Withdraw ] [ Transfer ] */}
                         <div className="relative z-10 border-t border-white/10 pt-4 mt-4 grid grid-cols-3 gap-2 sm:gap-3">
+                          <button
+                            id="btn-fund-wallet-trigger"
+                            type="button"
+                            onClick={() => {
+                              setPaymentModalPurpose('wallet_funding');
+                              setPaymentModalAmount(5000);
+                              setPaymentModalOpen(true);
+                            }}
+                            className="w-full py-2.5 px-2.5 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 text-slate-950 text-xs font-black shadow-md shadow-emerald-500/20 active:scale-95 hover:scale-[1.02] transition-all duration-200 flex items-center justify-center gap-1 cursor-pointer"
+                          >
+                            <PlusCircle className="h-4 w-4 stroke-[2.5]" />
+                            <span>Fund</span>
+                          </button>
+
                           <button
                             id="btn-withdraw-trigger"
                             type="button"
@@ -3908,58 +4122,201 @@ export default function App() {
                 </div>
               )}
 
-              {/* -------------------- FLOW 4: BUY WDV CODE FORM -------------------- */}
+              {/* -------------------- FLOW 4: BUY WDV VOUCHER (KORAPAY ONLY) -------------------- */}
               {currentScreen === 'buy_wdv' && (
-                <div className="p-5 space-y-5 animate-[fadeIn_0.2s_ease-out]">
-                  <div className="flex items-center gap-3">
-                    <button
-                      id="btn-wdv-back"
-                      onClick={() => {
-                        if (window.history.state && window.history.state.appScreen) {
-                          window.history.back();
-                        } else {
-                          setCurrentScreen(wdvBackScreen);
-                        }
-                      }}
-                      className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-500"
-                    >
-                      <ArrowLeft className="h-4 w-4" />
-                    </button>
-                    <h4 className="text-base font-bold font-display text-slate-800 dark:text-white">Purchase WDV Voucher</h4>
-                  </div>
-
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    Purchase a WDV voucher securely online. Your voucher is issued only after the payment gateway confirms the payment.
-                  </p>
-
-                  {/* Instant Online Payment Option (Paystack / Flutterwave / Korapay) */}
-                  <div className="p-4 rounded-2xl bg-gradient-to-r from-teal-500/15 via-emerald-500/10 to-indigo-500/15 border border-teal-500/30 space-y-3 shadow-lg shadow-teal-500/5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <div className="p-2 rounded-xl bg-teal-500/20 text-teal-400 border border-teal-500/30">
-                          <Zap className="h-4 w-4" />
-                        </div>
-                        <div>
-                          <span className="text-xs font-bold text-white font-display block">Instant Automated Voucher Issuance</span>
-                          <span className="text-[10px] text-teal-300/80 font-mono">Pay with Card, Bank Transfer, or USSD</span>
+                <div className="w-full max-w-full min-h-[calc(100dvh-64px)] bg-gradient-to-b from-[#070b16] via-[#090e1c] to-[#05070f] px-2.5 py-3 sm:px-6 sm:py-6 flex flex-col justify-between animate-[fadeIn_0.2s_ease-out] overflow-x-hidden pb-safe">
+                  <div className="w-full max-w-xl mx-auto flex-1 flex flex-col justify-between gap-5">
+                    {/* Top Section: Header + Voucher Details + Payment Gateway */}
+                    <div className="space-y-4 sm:space-y-5">
+                      {/* Header Panel */}
+                      <div className="p-4 sm:p-5 rounded-2xl bg-[#0c1324]/90 border border-teal-500/20 shadow-[0_8px_30px_rgba(0,0,0,0.4)] flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <button
+                            id="btn-wdv-back"
+                            type="button"
+                            onClick={() => {
+                              setWdvPaymentError('');
+                              if (window.history.state && window.history.state.appScreen && window.history.state.appScreen !== 'buy_wdv') {
+                                window.history.back();
+                              } else {
+                                setCurrentScreen(wdvBackScreen || 'dashboard');
+                              }
+                            }}
+                            className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 transition-all cursor-pointer shrink-0 mt-0.5"
+                            aria-label="Go back"
+                          >
+                            <ArrowLeft className="h-4 w-4" />
+                          </button>
+                          <div>
+                            <h4 className="text-base sm:text-lg font-black font-display text-white tracking-wide uppercase">
+                              BUY WDV VOUCHER
+                            </h4>
+                            <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
+                              Secure payment • Voucher issued after server verification
+                            </p>
+                          </div>
                         </div>
                       </div>
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[9px] font-mono font-bold border border-emerald-500/30">
-                        RECOMMENDED
-                      </span>
+
+                      {/* WDV Voucher Information Card */}
+                      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#0e1930] via-[#0b1324] to-[#080d1a] border border-teal-500/30 p-5 sm:p-6 shadow-[0_12px_35px_rgba(0,0,0,0.5)]">
+                        <div className="absolute -right-12 -top-12 w-36 h-36 rounded-full bg-teal-400/10 blur-3xl pointer-events-none" />
+                        <div className="relative z-10 space-y-3">
+                          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-teal-500/15 border border-teal-500/30 text-teal-300 text-[11px] font-mono font-bold uppercase tracking-wider">
+                            <Shield className="h-3.5 w-3.5 text-teal-400" />
+                            <span>WDV VOUCHER</span>
+                          </div>
+
+                          <div className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight">
+                            {nairaFormat(wdvConfig.voucherPrice || 6500)}
+                          </div>
+
+                          <p className="text-xs sm:text-sm text-slate-300/90 leading-relaxed">
+                            One-time purchase. The voucher is generated only after the gateway confirms your payment.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* PAYMENT GATEWAY SECTION — KORAPAY ONLY */}
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between px-1">
+                          <span className="text-xs font-mono text-slate-400 font-bold uppercase tracking-widest">
+                            PAYMENT GATEWAY
+                          </span>
+                        </div>
+
+                        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-teal-500/15 via-[#0d172a] to-[#0a1120] border border-teal-500/40 shadow-[0_0_25px_rgba(20,184,166,0.12)] flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3.5 min-w-0">
+                            <div className="p-3 rounded-2xl bg-teal-500/20 text-teal-300 border border-teal-500/30 shrink-0">
+                              <Zap className="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-sm sm:text-base font-bold text-white font-display">
+                                Korapay
+                              </div>
+                              <div className="text-xs text-slate-400 mt-0.5">
+                                Online card/bank checkout
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="shrink-0">
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-extrabold uppercase tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                              READY
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Clean Customer Error Banner */}
+                      {wdvPaymentError && (
+                        <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-200 space-y-1 animate-[fadeIn_0.15s_ease-out]">
+                          <div className="flex items-center gap-2 text-xs font-bold text-rose-400 uppercase tracking-wide">
+                            <AlertTriangle className="h-4 w-4 shrink-0" />
+                            <span>Payment Not Completed</span>
+                          </div>
+                          <p className="text-xs text-rose-200/90 leading-relaxed pl-6">
+                            {wdvPaymentError}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Active Korapay Checkout Verification Panel (when initialized or returning from redirect) */}
+                      {wdvCheckoutRef && (
+                        <div className="p-4 sm:p-5 rounded-2xl bg-[#0c1426] border border-teal-500/30 space-y-3.5 animate-[fadeIn_0.15s_ease-out]">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-mono text-teal-400 font-bold uppercase tracking-wider">
+                              ACTIVE TRANSACTION REFERENCE
+                            </span>
+                            <span className="text-xs font-mono font-bold text-white select-all">
+                              {wdvCheckoutRef}
+                            </span>
+                          </div>
+
+                          <p className="text-xs text-slate-300 leading-relaxed">
+                            Completed your payment on Korapay? Tap below to verify your transaction server-side and receive your WDV Voucher immediately.
+                          </p>
+
+                          <div className="flex flex-col sm:flex-row gap-2.5">
+                            {wdvCheckoutUrl && (
+                              <a
+                                href={wdvCheckoutUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex-1 py-3 px-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-teal-300 text-xs font-bold flex items-center justify-center gap-2 transition-all"
+                              >
+                                <span>Open Korapay Checkout</span>
+                                <ExternalLink className="h-3.5 w-3.5" />
+                              </a>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleVerifyKorapayWdv(wdvCheckoutRef)}
+                              disabled={isVerifyingWdv}
+                              className="flex-1 py-3 px-4 rounded-xl bg-teal-500/20 hover:bg-teal-500/30 border border-teal-500/40 text-teal-200 text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                            >
+                              {isVerifyingWdv ? (
+                                <>
+                                  <div className="h-3.5 w-3.5 rounded-full border-2 border-teal-300/30 border-t-teal-300 animate-spin" />
+                                  <span>Verifying payment...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle2 className="h-4 w-4 text-teal-300" />
+                                  <span>Verify Payment Now</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPaymentModalOpen(true);
-                      }}
-                      className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-teal-400 to-emerald-400 hover:from-teal-300 hover:to-emerald-300 text-slate-950 text-xs font-black uppercase tracking-wider shadow-lg shadow-teal-500/20 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <CreditCard className="h-4 w-4 stroke-[2.5]" />
-                      <span>BUY WDV VOUCHER — ₦6,500</span>
-                      <ArrowRight className="h-4 w-4" />
-                    </button>
+                    {/* Bottom Primary Action Button */}
+                    <div className="pt-2 pb-4 space-y-3">
+                      <button
+                        id="btn-wdv-submit"
+                        type="button"
+                        onClick={() => handleInitiateWdv()}
+                        disabled={isInitiatingWdv || isVerifyingWdv}
+                        className="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-teal-400 via-cyan-400 to-emerald-400 hover:from-teal-300 hover:to-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed text-slate-950 text-xs sm:text-sm font-black uppercase tracking-wider shadow-[0_10px_30px_rgba(20,184,166,0.3)] active:scale-[0.99] transition-all flex items-center justify-center gap-2.5 cursor-pointer"
+                      >
+                        {isInitiatingWdv ? (
+                          <>
+                            <div className="h-4 w-4 rounded-full border-2 border-slate-950/30 border-t-slate-950 animate-spin" />
+                            <span>Initializing secure payment...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>BUY WDV VOUCHER — ₦{(wdvConfig.voucherPrice || 6500).toLocaleString()}</span>
+                            <ArrowRight className="h-4 w-4 stroke-[2.5]" />
+                          </>
+                        )}
+                      </button>
+
+                      <div className="flex items-center justify-center gap-2 text-[11px] text-slate-400 font-mono text-center">
+                        <Lock className="h-3.5 w-3.5 text-teal-400 shrink-0" />
+                        <span>256-Bit Encrypted Korapay Checkout • Server-Verified Issuance</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* -------------------- FLOW 4.1: WDV PROCESSING LOADER -------------------- */}
+              {currentScreen === 'wdv_processing' && (
+                <div className="p-5 flex-1 flex flex-col items-center justify-center text-center space-y-6 h-full pt-20 animate-[fadeIn_0.2s_ease-out]">
+                  <div className="relative">
+                    <div className="h-16 w-16 rounded-full border-4 border-indigo-500/20 border-t-indigo-600 dark:border-t-teal-400 animate-spin" />
+                    <Ticket className="h-6 w-6 text-indigo-500 dark:text-teal-400 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+                  </div>
+
+                  <div>
+                    <h4 className="text-base font-bold text-slate-800 dark:text-white">Loading Bank Details</h4>
+                    <p className="text-xs text-slate-400 mt-2 px-10 leading-relaxed">
+                      Fetching official payment account details...
+                    </p>
                   </div>
                 </div>
               )}
@@ -6013,14 +6370,18 @@ export default function App() {
         <PaymentModal
           isOpen={paymentModalOpen}
           onClose={() => setPaymentModalOpen(false)}
+          defaultAmount={paymentModalAmount}
+          purpose={paymentModalPurpose}
           userEmail={user?.email || ''}
           userName={user?.fullName || ''}
           token={localStorage.getItem('swiftpay_token') || ''}
           onToast={showToast}
           onSuccess={async (res) => {
             await syncWithBackend(true);
-            if (res?.voucherCode) {
-              showToast(`WDV Voucher: ${res.voucherCode} generated successfully!`, 'success');
+            if (paymentModalPurpose === 'wdv_voucher') {
+              if (res?.voucherCode) {
+                showToast(`WDV Voucher: ${res.voucherCode} generated successfully!`, 'success');
+              }
             }
           }}
         />

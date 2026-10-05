@@ -1,6 +1,6 @@
 {
   "name": "SwiftPay",
-  "description": "Mobile-first Nigerian fintech digital wallet with multi-provider Paystack, Flutterwave, and Korapay payment gateways, instant wallet funding, and secure withdrawal system.",
+  "description": "Mobile-first Nigerian fintech digital wallet with Korapay payment gateway, instant wallet funding, WDV voucher issuance, and secure withdrawal system.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

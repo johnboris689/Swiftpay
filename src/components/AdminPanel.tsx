@@ -333,6 +333,8 @@ export default function AdminPanel({
   // Diagnostic Logs state
   const [logs, setLogs] = useState<any[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [dbDiagnostic, setDbDiagnostic] = useState<any>(null);
+  const [runningDbDiagnostic, setRunningDbDiagnostic] = useState(false);
 
   // WDV Voucher Management state
   const [vouchers, setVouchers] = useState<any[]>([]);
@@ -417,6 +419,28 @@ export default function AdminPanel({
       }
     } catch (err) {
       onToast('Failed to clear logs', 'error');
+    }
+  };
+
+  const handleRunDbDiagnostic = async () => {
+    setRunningDbDiagnostic(true);
+    try {
+      const res = await fetch('/api/admin/diagnostics/db', {
+        headers: getAdminHeaders()
+      });
+      const data = await res.json();
+      setDbDiagnostic(data.diagnostic || data);
+      if (data.success && (data.diagnostic?.connected || data.status === 'connected')) {
+        const d = data.diagnostic || {};
+        onToast(`DATABASE_URL Connected: ${d.database || 'PostgreSQL'} on ${d.host} (${d.latencyMs ?? 0}ms)`, 'success');
+      } else {
+        onToast(`Database query result: ${data.message || data.diagnostic?.error || 'Diagnostic query completed'}`, 'error');
+      }
+      fetchLogs();
+    } catch (err: any) {
+      onToast(`Database diagnostic request error: ${err.message || err}`, 'error');
+    } finally {
+      setRunningDbDiagnostic(false);
     }
   };
 
@@ -4169,7 +4193,15 @@ export default function AdminPanel({
             </h5>
             <p className="text-[10px] text-slate-400 mt-0.5">Real-time server exception logging &amp; threat detection</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={handleRunDbDiagnostic}
+              disabled={runningDbDiagnostic}
+              className="px-2.5 py-1 bg-teal-500/15 hover:bg-teal-500/25 text-teal-300 rounded text-[9px] font-mono border border-teal-500/30 flex items-center gap-1.5 transition-colors"
+            >
+              <Database className="h-3 w-3" />
+              {runningDbDiagnostic ? 'Querying DATABASE_URL...' : 'Test DATABASE_URL Query'}
+            </button>
             <button
               onClick={fetchLogs}
               className="px-2 py-1 bg-white/5 hover:bg-white/10 text-white rounded text-[9px] font-mono border border-white/10"
@@ -4184,6 +4216,27 @@ export default function AdminPanel({
             </button>
           </div>
         </div>
+
+        {dbDiagnostic && (
+          <div className={`p-3 rounded-lg border text-[10px] font-mono space-y-1.5 ${dbDiagnostic.connected ? 'bg-teal-950/30 border-teal-500/30 text-teal-300' : 'bg-red-950/30 border-red-500/30 text-red-300'}`}>
+            <div className="flex items-center justify-between font-bold">
+              <span className="flex items-center gap-1.5">
+                <span className={`h-2 w-2 rounded-full ${dbDiagnostic.connected ? 'bg-teal-400 animate-pulse' : 'bg-red-400'}`}></span>
+                Render PostgreSQL Status: {dbDiagnostic.connected ? 'CONNECTED & VERIFIED' : 'DISCONNECTED'}
+              </span>
+              <span className="text-slate-400">{dbDiagnostic.latencyMs ?? 0}ms</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-white/10 text-[9px]">
+              <div><span className="text-slate-400">Host:</span> <span className="text-white truncate block">{dbDiagnostic.host || 'unknown'}</span></div>
+              <div><span className="text-slate-400">Database:</span> <span className="text-white truncate block">{dbDiagnostic.database || 'unknown'}</span></div>
+              <div><span className="text-slate-400">Engine:</span> <span className="text-white truncate block">{dbDiagnostic.activeDatastore || 'unknown'}</span></div>
+              <div><span className="text-slate-400">Vouchers:</span> <span className="text-white font-bold">{dbDiagnostic.vouchersCount ?? 0}</span></div>
+            </div>
+            {dbDiagnostic.error && (
+              <p className="text-red-400 text-[9px] pt-1 border-t border-red-500/20">Error: {dbDiagnostic.error}</p>
+            )}
+          </div>
+        )}
 
         <div className="space-y-1.5 max-h-[250px] overflow-y-auto no-scrollbar font-mono text-[9px]">
           {loadingLogs ? (

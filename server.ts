@@ -5841,8 +5841,17 @@ const handleDatabaseDiagnostic = async (req: express.Request, res: express.Respo
 };
 
 app.get('/api/diagnostics/db', handleDatabaseDiagnostic);
+app.post('/api/diagnostics/db', handleDatabaseDiagnostic);
+app.get('/api/diagnostic/database', handleDatabaseDiagnostic);
+app.post('/api/diagnostic/database', handleDatabaseDiagnostic);
+app.get('/api/diagnostics/database', handleDatabaseDiagnostic);
 app.get('/api/health/db', handleDatabaseDiagnostic);
+app.get('/api/db/health', handleDatabaseDiagnostic);
+app.get('/api/db/diagnostic', handleDatabaseDiagnostic);
 app.get('/api/admin/diagnostics/db', authenticateAdminToken, handleDatabaseDiagnostic);
+app.post('/api/admin/diagnostics/db', authenticateAdminToken, handleDatabaseDiagnostic);
+app.get('/api/admin/diagnostics/database', authenticateAdminToken, handleDatabaseDiagnostic);
+app.post('/api/admin/diagnostics/database', authenticateAdminToken, handleDatabaseDiagnostic);
 
 // -------------------- VITE STATIC SERVER HANDLER --------------------
 async function startServer() {

@@ -2363,19 +2363,19 @@ app.post('/api/transactions/data', authenticateToken, async (req: any, res) => {
 });
 
 // Dynamic Korapay Banks Cache
-let korapayBanksCache: Array<{ name: string; code: string; nip_code?: string; slug?: string }> | null = null;
+let korapayBanksCache: Array<{ name: string; code: string; nip_code?: string; slug?: string; nibss_bank_code?: string }> | null = null;
 let lastKorapayBanksFetch = 0;
 
-async function getKorapayBanks(): Promise<Array<{ name: string; code: string; nip_code?: string; slug?: string }>> {
+async function getKorapayBanks(): Promise<Array<{ name: string; code: string; nip_code?: string; slug?: string; nibss_bank_code?: string }>> {
   const now = Date.now();
   if (korapayBanksCache && (now - lastKorapayBanksFetch < 3600000)) {
     return korapayBanksCache;
   }
-  const korapaySecretKey = process.env.KORAPAY_SECRET_KEY || process.env.KORAPAY_PUBLIC_KEY || '';
-  if (!korapaySecretKey) return [];
+  const korapayPublicKey = process.env.KORAPAY_PUBLIC_KEY || process.env.KORAPAY_SECRET_KEY || '';
+  if (!korapayPublicKey) return [];
   try {
-    const res = await fetch('https://api.korapay.com/merchant/api/v1/misc/banks?currency=NGN', {
-      headers: { 'Authorization': `Bearer ${korapaySecretKey}` }
+    const res = await fetch('https://api.korapay.com/merchant/api/v1/misc/banks', {
+      headers: { 'Authorization': `Bearer ${korapayPublicKey}` }
     });
     const data = await res.json();
     if (data.status && Array.isArray(data.data)) {
@@ -2391,7 +2391,17 @@ async function getKorapayBanks(): Promise<Array<{ name: string; code: string; ni
 }
 
 // Bank Account Name Verification Service Layer
-async function verifyBankAccountService(bankName: string, accountNumber: string): Promise<{ success: boolean; accountName?: string; error?: string }> {
+async function verifyBankAccountService(
+  bankName: string,
+  accountNumber: string
+): Promise<{
+  success: boolean;
+  accountName?: string;
+  error?: string;
+  detectedBank?: string;
+  matchedBankCode?: string;
+  autoDetected?: boolean;
+}> {
   if (!accountNumber || accountNumber.length !== 10 || !/^\d{10}$/.test(accountNumber)) {
     return { success: false, error: "Please enter a valid 10-digit account number." };
   }
@@ -2444,9 +2454,9 @@ async function verifyBankAccountService(bankName: string, accountNumber: string)
     'kuda': ['50211', '090267'],
     'moniepoint': ['50515', '090129', '000028'],
     'moniepoint microfinance bank': ['50515', '090129', '000028'],
-    'opay': ['100004', '090110', '304', '000010'],
-    'opay digital services': ['100004', '090110', '304', '000010'],
-    'paycom': ['100004', '090110', '304', '000010'],
+    'opay': ['305', '100004', '090110', '304', '000010'],
+    'opay digital services': ['305', '100004', '090110', '304', '000010'],
+    'paycom': ['305', '100004', '090110', '304', '000010'],
     'palmpay': ['100033', '090405'],
     'polaris bank limited': ['076'],
     'polaris bank': ['076'],
@@ -2548,14 +2558,13 @@ async function verifyBankAccountService(bankName: string, accountNumber: string)
   }
 
   try {
-    let lastErrorMsg = "Unable to verify account name. Please check account number and bank name.";
+    let lastErrorMsg = "We couldn't find this bank account. Please check the details and try again.";
     for (const bCode of validKorapayCandidateCodes) {
       const requestPayload = {
         bank: bCode,
         account: accountNumber,
         currency: 'NGN'
       };
-      console.log('[Bank Resolve Request]', JSON.stringify(requestPayload));
 
       const kRes = await fetch('https://api.korapay.com/merchant/api/v1/misc/banks/resolve', {
         method: 'POST',
@@ -2566,28 +2575,73 @@ async function verifyBankAccountService(bankName: string, accountNumber: string)
         body: JSON.stringify(requestPayload)
       });
 
-      const kData = await kRes.json();
-      console.log('[Bank Resolve Response Status]', kRes.status, JSON.stringify(kData));
+      const kData = await kRes.json().catch(() => null);
 
-      if (kData.status && kData.data && (kData.data.account_name || kData.data.accountName)) {
+      if (kData && kData.status && kData.data && (kData.data.account_name || kData.data.accountName)) {
         const resolvedName = String(kData.data.account_name || kData.data.accountName).trim().toUpperCase();
         return {
           success: true,
-          accountName: resolvedName
+          accountName: resolvedName,
+          detectedBank: bankName,
+          matchedBankCode: bCode
         };
-      } else {
-        lastErrorMsg = kData.message || 'We couldn\'t find this bank account. Please check the details and try again.';
-        console.log(`[Bank Resolve Candidate Code ${bCode} Not Matched]`, lastErrorMsg);
+      } else if (kData && kData.message) {
+        lastErrorMsg = kData.message;
       }
     }
 
-    console.log(`[Bank Resolve Result] Failed to resolve account for ${bankName} (${accountNumber}): ${lastErrorMsg}`);
+    // Smart Multi-Bank Discovery Fallback
+    // If user misselected the bank (e.g. selected OPay for a Moniepoint or GTBank account),
+    // automatically search the top Nigerian banks so the user is never stranded
+    const discoveryBanks = [
+      { name: 'Moniepoint', code: '50515' },
+      { name: 'OPay', code: '305' },
+      { name: 'PalmPay', code: '100033' },
+      { name: 'Kuda Bank', code: '50211' },
+      { name: 'Guaranty Trust Bank Limited (GTBank)', code: '058' },
+      { name: 'Access Bank Plc', code: '044' },
+      { name: 'Zenith Bank Plc', code: '057' },
+      { name: 'United Bank for Africa Plc (UBA)', code: '033' },
+      { name: 'First Bank of Nigeria Limited', code: '011' }
+    ];
+
+    for (const dBank of discoveryBanks) {
+      if (validKorapayCandidateCodes.includes(dBank.code)) continue;
+
+      try {
+        const dRes = await fetch('https://api.korapay.com/merchant/api/v1/misc/banks/resolve', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${korapaySecretKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            bank: dBank.code,
+            account: accountNumber,
+            currency: 'NGN'
+          })
+        });
+        const dData = await dRes.json().catch(() => null);
+        if (dData && dData.status && dData.data && (dData.data.account_name || dData.data.accountName)) {
+          const resolvedName = String(dData.data.account_name || dData.data.accountName).trim().toUpperCase();
+          return {
+            success: true,
+            accountName: resolvedName,
+            detectedBank: dBank.name,
+            matchedBankCode: dBank.code,
+            autoDetected: true
+          };
+        }
+      } catch (err) {
+        // Continue checking next candidate
+      }
+    }
+
     return {
       success: false,
       error: lastErrorMsg
     };
   } catch (kErr) {
-    console.error('[Bank Resolve] API Request Error:', kErr);
     return { success: false, error: "Unable to verify account name at this time." };
   }
 }
@@ -2607,14 +2661,20 @@ app.post('/api/verify-account', authenticateToken, async (req: any, res) => {
 
     const result = await verifyBankAccountService(selectedBank, accountNumber);
     if (!result.success) {
-      return res.status(400).json({ success: false, error: result.error || "Unable to verify account name" });
+      return res.json({
+        success: false,
+        error: result.error || "Unable to verify account name",
+        notFound: true
+      });
     }
 
     return res.json({
       success: true,
       accountName: result.accountName,
-      bankName: selectedBank,
-      accountNumber
+      bankName: result.detectedBank || selectedBank,
+      detectedBank: result.detectedBank,
+      accountNumber,
+      autoDetected: Boolean(result.autoDetected)
     });
   } catch (err: any) {
     console.error('Account verification error:', err);

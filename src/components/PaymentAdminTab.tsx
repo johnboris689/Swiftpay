@@ -44,6 +44,7 @@ interface PaymentTransactionRecord {
 
 interface PaymentAdminTabProps {
   onToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
+  getAdminHeaders?: (extraHeaders?: any) => Record<string, string>;
 }
 
 export const PaymentAdminTab: React.FC<PaymentAdminTabProps> = ({ onToast }) => {

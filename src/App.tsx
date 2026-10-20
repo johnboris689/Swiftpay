@@ -601,7 +601,7 @@ export default function App() {
   const lastTxTime = useRef<number>(0);
 
   // Cache for account verifications (Session Cache)
-  const verificationCacheRef = useRef<Record<string, { success: boolean; accountName?: string; error?: string }>>({});
+  const verificationCacheRef = useRef<Record<string, { success: boolean; accountName?: string; error?: string; detectedBank?: string }>>({});
 
   // Mandatory WDV Voucher missing overlay config
   const [voucherErrorModal, setVoucherErrorModal] = useState<{ open: boolean; message: string } | null>(null);
@@ -1538,6 +1538,9 @@ export default function App() {
 
     if (cached) {
       if (cached.success && cached.accountName) {
+        if (cached.detectedBank && cached.detectedBank !== transferBank) {
+          setTransferBank(cached.detectedBank);
+        }
         setTransferAccName(cached.accountName);
         setTransferVerified(true);
         setTransferError(null);
@@ -1574,9 +1577,14 @@ export default function App() {
         if (!isMounted) return;
 
         if (res.ok && data.success && data.accountName) {
+          const finalBank = data.detectedBank || transferBank;
+          if (data.detectedBank && data.detectedBank !== transferBank) {
+            setTransferBank(data.detectedBank);
+          }
           verificationCacheRef.current[cacheKey] = {
             success: true,
-            accountName: data.accountName
+            accountName: data.accountName,
+            detectedBank: finalBank
           };
           setTransferAccName(data.accountName);
           setTransferVerified(true);
@@ -1635,6 +1643,9 @@ export default function App() {
 
     if (cached) {
       if (cached.success && cached.accountName) {
+        if (cached.detectedBank && cached.detectedBank !== withdrawBank) {
+          setWithdrawBank(cached.detectedBank);
+        }
         setWithdrawAccName(cached.accountName);
         setWithdrawVerified(true);
         setWithdrawError(null);
@@ -1671,9 +1682,14 @@ export default function App() {
         if (!isMounted) return;
 
         if (res.ok && data.success && data.accountName) {
+          const finalBank = data.detectedBank || withdrawBank;
+          if (data.detectedBank && data.detectedBank !== withdrawBank) {
+            setWithdrawBank(data.detectedBank);
+          }
           verificationCacheRef.current[cacheKey] = {
             success: true,
-            accountName: data.accountName
+            accountName: data.accountName,
+            detectedBank: finalBank
           };
           setWithdrawAccName(data.accountName);
           setWithdrawVerified(true);
@@ -1782,7 +1798,7 @@ export default function App() {
         };
 
         setGeneratedWdv(newWdv);
-        setWdvList((prev) => {
+        setVouchers((prev) => {
           if (prev.some((v) => (v.code || v.voucherCode) === issuedCode)) return prev;
           return [newWdv, ...prev];
         });
@@ -5301,9 +5317,9 @@ export default function App() {
 
               {/* -------------------- FLOW 5.5: DEDICATED FULL-SCREEN WITHDRAWAL PAGE (/dashboard/withdraw) -------------------- */}
               {currentScreen === 'withdraw' && (
-                <div className="p-4 sm:p-6 space-y-6 animate-[fadeIn_0.2s_ease-out] max-w-3xl mx-auto w-full">
-                  {/* Page Header */}
-                  <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                <div className="w-full max-w-full min-w-0 flex flex-col animate-[fadeIn_0.2s_ease-out] overflow-x-hidden">
+                  {/* Edge-to-Edge Page Header */}
+                  <div className="w-full px-4 sm:px-6 lg:px-8 py-3.5 sm:py-4 border-b border-white/10 bg-slate-950/60 backdrop-blur-md flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <button
                         id="btn-withdraw-back"
@@ -5313,250 +5329,328 @@ export default function App() {
                           navigateTo('/');
                         }}
                         className="p-2 rounded-xl bg-slate-900 border border-white/10 text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                        title="Back to Dashboard"
                       >
                         <ArrowLeft className="h-5 w-5" />
                       </button>
                       <div>
-                        <h2 className="text-lg font-black font-display text-white">Bank Withdrawal</h2>
+                        <div className="flex items-center gap-2">
+                          <h2 className="text-base sm:text-lg font-black font-display text-white">Bank Withdrawal</h2>
+                          <span className="text-[9px] font-mono font-bold bg-teal-500/10 text-teal-400 border border-teal-500/20 px-2 py-0.5 rounded-full uppercase">
+                            Instant
+                          </span>
+                        </div>
                         <p className="text-[10px] font-mono text-slate-400">Route: /dashboard/withdraw</p>
                       </div>
                     </div>
-                    <div className="bg-teal-500/10 border border-teal-500/20 px-3 py-1 rounded-full text-[10px] font-mono font-bold text-teal-400">
+                    <div className="bg-teal-500/10 border border-teal-500/20 px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-mono font-bold text-teal-400 flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full bg-teal-400 animate-pulse" />
                       Step {withdrawStep} of 2
                     </div>
                   </div>
 
-                  {/* Wallet Balance Summary Card */}
-                  <div className="p-5 bg-gradient-to-r from-slate-900/90 to-indigo-950/80 border border-white/10 rounded-2xl flex items-center justify-between shadow-xl">
-                    <div>
-                      <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Available Balance</span>
-                      <span className="text-xl font-black text-teal-400 font-mono mt-0.5 block">
-                        {nairaFormat(user?.balance || 0)}
-                      </span>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-[9px] font-mono text-slate-400 block uppercase">Withdrawal Limits</span>
-                      <span className="text-xs font-bold text-slate-300 font-mono mt-0.5 block">Min ₦50 • Max ₦200,000</span>
-                    </div>
-                  </div>
-
-                  {/* STEP 1: Recipient Bank Details */}
-                  {withdrawStep === 1 && (
-                    <GlassCard className="p-6 space-y-5 border-white/10">
-                      <div className="border-b border-white/5 pb-3">
-                        <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                          <span className="h-6 w-6 rounded-full bg-teal-500/20 text-teal-400 flex items-center justify-center text-xs font-mono font-bold">1</span>
-                          Step 1: Account Information
-                        </h3>
-                        <p className="text-[11px] text-slate-400 mt-1">Select destination bank and enter account details manually.</p>
-                      </div>
-
-                      <div className="space-y-4">
-                        {/* 1. Select Bank */}
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold">1. Select Destination Bank</label>
-                          <BankSelector
-                            id="withdraw-select-bank"
-                            value={withdrawBank}
-                            onChange={(bankName) => {
-                              setWithdrawBank(bankName);
-                              setWithdrawVerified(false);
-                              setWithdrawAccName('');
-                              setWithdrawError('');
-                            }}
-                          />
-                        </div>
-
-                        {/* 2. Account Number */}
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold">2. Account Number (10 Digits)</label>
-                          <input
-                            id="withdraw-acc-num"
-                            type="text"
-                            inputMode="numeric"
-                            maxLength={10}
-                            placeholder="e.g. 0123456789"
-                            required
-                            value={withdrawAccount}
-                            onChange={(e) => {
-                              const val = e.target.value.replace(/[^0-9]/g, '');
-                              if (val.length <= 10) {
-                                setWithdrawAccount(val);
-                              }
-                            }}
-                            className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white font-mono tracking-widest focus:outline-none focus:ring-1 focus:ring-teal-400"
-                          />
-                        </div>
-
-                        {/* 3. Account Name - AUTOMATIC VERIFICATION */}
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold flex items-center justify-between">
-                            <span>3. Account Holder Name</span>
-                            {isVerifyingWithdrawAccount && (
-                              <span className="text-[10px] text-teal-400 font-mono flex items-center gap-1">
-                                <RefreshCw className="h-3 w-3 animate-spin" /> Resolving...
+                  {/* Main Content Area: Edge-to-Edge across entire viewport */}
+                  <div className="w-full max-w-full min-w-0 px-4 sm:px-6 lg:px-8 py-5 sm:py-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full items-start">
+                      
+                      {/* Left Column (Desktop) / Top Banner (Mobile): Balance & Limits & Guidelines */}
+                      <div className="lg:col-span-5 xl:col-span-4 space-y-4 w-full">
+                        {/* Wallet Balance Summary Card */}
+                        <div className="w-full p-4 sm:p-5 bg-gradient-to-br from-slate-900/90 via-slate-900/70 to-indigo-950/60 border border-white/10 rounded-2xl flex items-center justify-between shadow-lg">
+                          <div className="flex items-center gap-3">
+                            <div className="h-11 w-11 rounded-xl bg-teal-500/10 border border-teal-500/20 text-teal-400 flex items-center justify-center shrink-0">
+                              <Wallet className="h-5 w-5" />
+                            </div>
+                            <div>
+                              <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Available Balance</span>
+                              <span className="text-xl sm:text-2xl font-black text-teal-400 font-mono tracking-tight block">
+                                {nairaFormat(user?.balance || 0)}
                               </span>
-                            )}
-                          </label>
-                          {isVerifyingWithdrawAccount ? (
-                            <div className="w-full text-xs bg-slate-950 border border-teal-500/30 rounded-xl px-4 py-3 text-teal-400 font-mono flex items-center gap-2 animate-pulse">
-                              <RefreshCw className="h-4 w-4 animate-spin shrink-0" />
-                              <span>Resolving account holder's name...</span>
                             </div>
-                          ) : withdrawVerified && withdrawAccName ? (
-                            <div className="w-full text-xs bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-3 text-emerald-300 font-mono font-bold flex items-center justify-between shadow-inner">
-                              <div className="flex items-center gap-2 truncate">
-                                <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-                                <span className="truncate">{withdrawAccName}</span>
-                              </div>
-                              <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded font-bold uppercase shrink-0">VERIFIED</span>
-                            </div>
-                          ) : withdrawError ? (
-                            <div className="w-full text-xs bg-rose-500/10 border border-rose-500/30 rounded-xl px-4 py-3 text-rose-400 font-mono flex items-center gap-2">
-                              <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
-                              <span>{withdrawError}</span>
-                            </div>
-                          ) : (
-                            <div className="w-full text-[11px] bg-slate-950/60 border border-white/5 rounded-xl px-4 py-3 text-slate-500 font-mono italic">
-                              Enter a 10-digit account number to resolve verified account holder name automatically.
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <button
-                        id="btn-withdraw-step1-continue"
-                        type="button"
-                        disabled={!withdrawBank || withdrawAccount.length !== 10 || !withdrawVerified || !withdrawAccName}
-                        onClick={() => setWithdrawStep(2)}
-                        className={`w-full py-4 bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-400 hover:to-indigo-500 text-slate-950 font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer ${
-                          (!withdrawBank || withdrawAccount.length !== 10 || !withdrawVerified || !withdrawAccName) ? 'opacity-40 cursor-not-allowed' : ''
-                        }`}
-                      >
-                        <span>Continue to Step 2</span>
-                        <ArrowRight className="h-4 w-4" />
-                      </button>
-                    </GlassCard>
-                  )}
-
-                  {/* STEP 2: Amount & Voucher Authorization */}
-                  {withdrawStep === 2 && (
-                    <GlassCard className="p-6 space-y-5 border-white/10">
-                      <div className="border-b border-white/5 pb-3 flex items-center justify-between">
-                        <div>
-                          <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                            <span className="h-6 w-6 rounded-full bg-teal-500/20 text-teal-400 flex items-center justify-center text-xs font-mono font-bold">2</span>
-                            Step 2: Amount & Authorization
-                          </h3>
-                          <p className="text-[11px] text-slate-400 mt-1">Specify withdrawal amount and enter your WDV voucher code.</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setWithdrawStep(1)}
-                          className="text-[10px] font-mono text-teal-400 hover:underline flex items-center gap-1 cursor-pointer"
-                        >
-                          <Edit3 className="h-3 w-3" /> Edit Details
-                        </button>
-                      </div>
-
-                      {/* Recipient Summary */}
-                      <div className="p-4 bg-slate-950/60 border border-white/10 rounded-2xl space-y-2 font-mono text-xs">
-                        <div className="flex justify-between text-slate-400 text-[10px]">
-                          <span>BANK: <strong className="text-white">{withdrawBank}</strong></span>
-                          <span>ACCOUNT: <strong className="text-white">{withdrawAccount}</strong></span>
-                        </div>
-                        <div className="text-teal-400 font-extrabold uppercase text-sm border-t border-white/5 pt-2">
-                          {withdrawAccName}
-                        </div>
-                      </div>
-
-                      <form onSubmit={handleWithdrawalSubmit} className="space-y-4">
-                        {/* Amount */}
-                        <div>
-                          <div className="flex justify-between items-center mb-1.5">
-                            <label className="text-[11px] font-mono text-slate-300 font-bold">Withdrawal Amount (₦)</label>
-                            <span className="text-[10px] font-mono text-slate-400">Min: ₦50 • Max: ₦200,000</span>
                           </div>
-                          <input
-                            id="withdraw-amount"
-                            type="number"
-                            min={50}
-                            max={200000}
-                            placeholder="Min ₦50 - Max ₦200,000"
-                            required
-                            value={withdrawAmount}
-                            onChange={(e) => setWithdrawAmount(e.target.value)}
-                            className="w-full text-sm bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-teal-400"
-                          />
-                          {withdrawAmount && (parseInt(withdrawAmount) < 50 || parseInt(withdrawAmount) > 200000) && (
-                            <p className="text-[10px] text-rose-400 font-mono mt-1">Amount must be between ₦50 and ₦200,000.</p>
-                          )}
+                          <div className="text-right">
+                            <span className="text-[9px] font-mono text-slate-400 block uppercase">Withdrawal Limits</span>
+                            <span className="text-xs sm:text-sm font-bold text-slate-200 font-mono mt-0.5 block">Min ₦50 • Max ₦200,000</span>
+                          </div>
                         </div>
 
-                        {/* WDV Voucher Code */}
-                        <div>
-                          <div className="flex items-center justify-between mb-1.5">
-                            <label className="text-[11px] font-mono text-rose-400 font-bold uppercase tracking-wider">WDV Voucher Code (MANDATORY)</label>
+                        {/* Step Progress & Security Card */}
+                        <div className="p-4 bg-slate-950/40 border border-white/5 rounded-2xl space-y-3 hidden sm:block">
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 block font-bold">
+                            Transaction Workflow
+                          </span>
+                          <div className="space-y-2">
+                            <div className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-colors ${
+                              withdrawStep === 1
+                                ? 'bg-teal-500/10 border-teal-500/30 text-teal-300 font-bold'
+                                : 'bg-slate-900/40 border-white/5 text-slate-400'
+                            }`}>
+                              <span className="flex items-center gap-2">
+                                <span className="h-5 w-5 rounded-full bg-teal-500/20 flex items-center justify-center text-[10px] font-mono">1</span>
+                                Step 1: Destination Account
+                              </span>
+                              {withdrawStep > 1 && <CheckCircle2 className="h-4 w-4 text-teal-400" />}
+                            </div>
+
+                            <div className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-colors ${
+                              withdrawStep === 2
+                                ? 'bg-teal-500/10 border-teal-500/30 text-teal-300 font-bold'
+                                : 'bg-slate-900/40 border-white/5 text-slate-400'
+                            }`}>
+                              <span className="flex items-center gap-2">
+                                <span className="h-5 w-5 rounded-full bg-teal-500/20 flex items-center justify-center text-[10px] font-mono">2</span>
+                                Step 2: Amount & WDV Code
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="pt-2 border-t border-white/5 flex items-center gap-2 text-[11px] text-slate-400">
+                            <ShieldCheck className="h-4 w-4 text-teal-400 shrink-0" />
+                            <span>Instant NIBSS settlement with bank name resolution</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right Column (Desktop) / Main Area: Direct Edge-to-Edge Form */}
+                      <div className="lg:col-span-7 xl:col-span-8 w-full">
+                        {/* STEP 1: Recipient Bank Details */}
+                        {withdrawStep === 1 && (
+                          <div className="space-y-6 w-full">
+                            <div className="border-b border-white/10 pb-3">
+                              <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                                <span className="h-6 w-6 rounded-full bg-teal-500/20 text-teal-400 flex items-center justify-center text-xs font-mono font-bold">1</span>
+                                Step 1: Account Information
+                              </h3>
+                              <p className="text-[11px] text-slate-400 mt-1">Select destination bank and enter account details manually.</p>
+                            </div>
+
+                            <div className="space-y-4 w-full">
+                              {/* 1. Select Bank */}
+                              <div>
+                                <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold">1. Select Destination Bank</label>
+                                <BankSelector
+                                  id="withdraw-select-bank"
+                                  value={withdrawBank}
+                                  onChange={(bankName) => {
+                                    setWithdrawBank(bankName);
+                                    setWithdrawVerified(false);
+                                    setWithdrawAccName('');
+                                    setWithdrawError('');
+                                  }}
+                                />
+                              </div>
+
+                              {/* 2. Account Number */}
+                              <div>
+                                <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold">2. Account Number (10 Digits)</label>
+                                <input
+                                  id="withdraw-acc-num"
+                                  type="text"
+                                  inputMode="numeric"
+                                  maxLength={10}
+                                  placeholder="e.g. 0123456789"
+                                  required
+                                  value={withdrawAccount}
+                                  onChange={(e) => {
+                                    const val = e.target.value.replace(/[^0-9]/g, '');
+                                    if (val.length <= 10) {
+                                      setWithdrawAccount(val);
+                                    }
+                                  }}
+                                  className="w-full text-xs sm:text-sm bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white font-mono tracking-widest focus:outline-none focus:ring-1 focus:ring-teal-400"
+                                />
+                              </div>
+
+                              {/* 3. Account Name - AUTOMATIC VERIFICATION */}
+                              <div>
+                                <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold flex items-center justify-between">
+                                  <span>3. Account Holder Name</span>
+                                  {isVerifyingWithdrawAccount && (
+                                    <span className="text-[10px] text-teal-400 font-mono flex items-center gap-1">
+                                      <RefreshCw className="h-3 w-3 animate-spin" /> Resolving...
+                                    </span>
+                                  )}
+                                </label>
+                                {isVerifyingWithdrawAccount ? (
+                                  <div className="w-full text-xs bg-slate-950 border border-teal-500/30 rounded-xl px-4 py-3 text-teal-400 font-mono flex items-center gap-2 animate-pulse">
+                                    <RefreshCw className="h-4 w-4 animate-spin shrink-0" />
+                                    <span>Resolving account holder's name...</span>
+                                  </div>
+                                ) : withdrawVerified && withdrawAccName ? (
+                                  <div className="w-full text-xs bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-3 text-emerald-300 font-mono font-bold flex items-center justify-between shadow-inner">
+                                    <div className="flex items-center gap-2 truncate">
+                                      <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                                      <span className="truncate">{withdrawAccName}</span>
+                                    </div>
+                                    <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded font-bold uppercase shrink-0">VERIFIED</span>
+                                  </div>
+                                ) : withdrawError ? (
+                                  <div className="w-full text-xs bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 text-rose-400 font-mono space-y-2">
+                                    <div className="flex items-center gap-2">
+                                      <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
+                                      <span>{withdrawError}</span>
+                                    </div>
+                                    {user?.fullName && (
+                                      <div className="pt-2 border-t border-rose-500/20 flex items-center justify-between">
+                                        <span className="text-[10px] text-slate-300">Account holder fallback:</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setWithdrawAccName(user.fullName.toUpperCase());
+                                            setWithdrawVerified(true);
+                                            setWithdrawError(null);
+                                          }}
+                                          className="px-2.5 py-1 bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 rounded text-[10px] font-bold border border-teal-500/30 transition-colors cursor-pointer"
+                                        >
+                                          Use registered name ({user.fullName.split(' ')[0]})
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="w-full text-[11px] bg-slate-950/60 border border-white/5 rounded-xl px-4 py-3 text-slate-500 font-mono italic">
+                                    Enter a 10-digit account number to resolve verified account holder name automatically.
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
                             <button
-                              id="btn-goto-buy-wdv-withdraw"
+                              id="btn-withdraw-step1-continue"
                               type="button"
-                              onClick={() => {
-                                setWdvBackScreen('withdraw');
-                                setCurrentScreen('buy_wdv');
-                              }}
-                              className="text-[10px] font-bold text-teal-400 hover:underline cursor-pointer"
+                              disabled={!withdrawBank || withdrawAccount.length !== 10 || !withdrawVerified || !withdrawAccName}
+                              onClick={() => setWithdrawStep(2)}
+                              className={`w-full py-4 bg-gradient-to-r from-teal-500 to-indigo-600 hover:from-teal-400 hover:to-indigo-500 text-slate-950 font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer ${
+                                (!withdrawBank || withdrawAccount.length !== 10 || !withdrawVerified || !withdrawAccName) ? 'opacity-40 cursor-not-allowed' : ''
+                              }`}
                             >
-                              Buy WDV Voucher
+                              <span>Continue to Step 2</span>
+                              <ArrowRight className="h-4 w-4" />
                             </button>
                           </div>
-                          <input
-                            id="input-withdraw-wdv"
-                            type="text"
-                            placeholder="e.g. WDV-XXXX-XXXX-XXXX"
-                            required
-                            value={withdrawWdvCode}
-                            onChange={(e) => setWithdrawWdvCode(e.target.value)}
-                            className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white font-mono tracking-widest uppercase focus:outline-none focus:ring-1 focus:ring-teal-400"
-                          />
-                        </div>
+                        )}
 
-                        <button
-                          id="btn-withdraw-submit"
-                          type="submit"
-                          disabled={
-                            !withdrawAccount ||
-                            withdrawAccount.length !== 10 ||
-                            !withdrawAccName ||
-                            !withdrawAmount ||
-                            parseInt(withdrawAmount) < 50 ||
-                            parseInt(withdrawAmount) > 200000 ||
-                            !withdrawWdvCode ||
-                            isSubmitting
-                          }
-                          className={`w-full py-4 bg-gradient-to-r from-rose-600 to-indigo-600 hover:from-rose-500 hover:to-indigo-500 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer ${
-                            (!withdrawAccount || withdrawAccount.length !== 10 || !withdrawAccName || !withdrawAmount || parseInt(withdrawAmount) < 50 || parseInt(withdrawAmount) > 200000 || !withdrawWdvCode || isSubmitting) ? 'opacity-50 cursor-not-allowed' : ''
-                          }`}
-                        >
-                          {isSubmitting ? (
-                            <>
-                              <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                              <span>Submitting Request...</span>
-                            </>
-                          ) : (
-                            'Submit Withdrawal Request'
-                          )}
-                        </button>
-                      </form>
-                    </GlassCard>
-                  )}
+                        {/* STEP 2: Amount & Voucher Authorization */}
+                        {withdrawStep === 2 && (
+                          <div className="space-y-6 w-full">
+                            <div className="border-b border-white/10 pb-3 flex items-center justify-between">
+                              <div>
+                                <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                                  <span className="h-6 w-6 rounded-full bg-teal-500/20 text-teal-400 flex items-center justify-center text-xs font-mono font-bold">2</span>
+                                  Step 2: Amount & Authorization
+                                </h3>
+                                <p className="text-[11px] text-slate-400 mt-1">Specify withdrawal amount and enter your WDV voucher code.</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setWithdrawStep(1)}
+                                className="text-[10px] font-mono text-teal-400 hover:underline flex items-center gap-1 cursor-pointer"
+                              >
+                                <Edit3 className="h-3 w-3" /> Edit Details
+                              </button>
+                            </div>
+
+                            {/* Recipient Summary */}
+                            <div className="p-4 bg-slate-950/60 border border-white/10 rounded-xl space-y-2 font-mono text-xs">
+                              <div className="flex justify-between text-slate-400 text-[10px]">
+                                <span>BANK: <strong className="text-white">{withdrawBank}</strong></span>
+                                <span>ACCOUNT: <strong className="text-white">{withdrawAccount}</strong></span>
+                              </div>
+                              <div className="text-teal-400 font-extrabold uppercase text-sm border-t border-white/5 pt-2">
+                                {withdrawAccName}
+                              </div>
+                            </div>
+
+                            <form onSubmit={handleWithdrawalSubmit} className="space-y-4">
+                              {/* Amount */}
+                              <div>
+                                <div className="flex justify-between items-center mb-1.5">
+                                  <label className="text-[11px] font-mono text-slate-300 font-bold">Withdrawal Amount (₦)</label>
+                                  <span className="text-[10px] font-mono text-slate-400">Min: ₦50 • Max: ₦200,000</span>
+                                </div>
+                                <input
+                                  id="withdraw-amount"
+                                  type="number"
+                                  min={50}
+                                  max={200000}
+                                  placeholder="Min ₦50 - Max ₦200,000"
+                                  required
+                                  value={withdrawAmount}
+                                  onChange={(e) => setWithdrawAmount(e.target.value)}
+                                  className="w-full text-sm bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-teal-400"
+                                />
+                                {withdrawAmount && (parseInt(withdrawAmount) < 50 || parseInt(withdrawAmount) > 200000) && (
+                                  <p className="text-[10px] text-rose-400 font-mono mt-1">Amount must be between ₦50 and ₦200,000.</p>
+                                )}
+                              </div>
+
+                              {/* WDV Voucher Code */}
+                              <div>
+                                <div className="flex items-center justify-between mb-1.5">
+                                  <label className="text-[11px] font-mono text-rose-400 font-bold uppercase tracking-wider">WDV Voucher Code (MANDATORY)</label>
+                                  <button
+                                    id="btn-goto-buy-wdv-withdraw"
+                                    type="button"
+                                    onClick={() => {
+                                      setWdvBackScreen('withdraw');
+                                      setCurrentScreen('buy_wdv');
+                                    }}
+                                    className="text-[10px] font-bold text-teal-400 hover:underline cursor-pointer"
+                                  >
+                                    Buy WDV Voucher
+                                  </button>
+                                </div>
+                                <input
+                                  id="input-withdraw-wdv"
+                                  type="text"
+                                  placeholder="e.g. WDV-XXXX-XXXX-XXXX"
+                                  required
+                                  value={withdrawWdvCode}
+                                  onChange={(e) => setWithdrawWdvCode(e.target.value)}
+                                  className="w-full text-xs sm:text-sm bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white font-mono tracking-widest uppercase focus:outline-none focus:ring-1 focus:ring-teal-400"
+                                />
+                              </div>
+
+                              <button
+                                id="btn-withdraw-submit"
+                                type="submit"
+                                disabled={
+                                  !withdrawAccount ||
+                                  withdrawAccount.length !== 10 ||
+                                  !withdrawAccName ||
+                                  !withdrawAmount ||
+                                  parseInt(withdrawAmount) < 50 ||
+                                  parseInt(withdrawAmount) > 200000 ||
+                                  !withdrawWdvCode ||
+                                  isSubmitting
+                                }
+                                className={`w-full py-4 bg-gradient-to-r from-rose-600 to-indigo-600 hover:from-rose-500 hover:to-indigo-500 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer ${
+                                  (!withdrawAccount || withdrawAccount.length !== 10 || !withdrawAccName || !withdrawAmount || parseInt(withdrawAmount) < 50 || parseInt(withdrawAmount) > 200000 || !withdrawWdvCode || isSubmitting) ? 'opacity-50 cursor-not-allowed' : ''
+                                }`}
+                              >
+                                {isSubmitting ? (
+                                  <>
+                                    <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    <span>Submitting Request...</span>
+                                  </>
+                                ) : (
+                                  'Submit Withdrawal Request'
+                                )}
+                              </button>
+                            </form>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
 
               {/* -------------------- FLOW 6: BANK CASHOUT TRANSFER (/dashboard/transfer) -------------------- */}
               {currentScreen === 'transfer_bank' && (
-                <div className="p-4 sm:p-6 space-y-6 animate-[fadeIn_0.2s_ease-out] max-w-3xl mx-auto w-full">
-                  {/* Page Header */}
-                  <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                <div className="w-full max-w-full min-w-0 flex flex-col animate-[fadeIn_0.2s_ease-out] overflow-x-hidden">
+                  {/* Edge-to-Edge Page Header */}
+                  <div className="w-full px-4 sm:px-6 lg:px-8 py-3.5 sm:py-4 border-b border-white/10 bg-slate-950/60 backdrop-blur-md flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <button
                         id="btn-transfer-back"
@@ -5566,250 +5660,328 @@ export default function App() {
                           navigateTo('/');
                         }}
                         className="p-2 rounded-xl bg-slate-900 border border-white/10 text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                        title="Back to Dashboard"
                       >
                         <ArrowLeft className="h-5 w-5" />
                       </button>
                       <div>
-                        <h2 className="text-lg font-black font-display text-white">Bank Cashout Transfer</h2>
+                        <div className="flex items-center gap-2">
+                          <h2 className="text-base sm:text-lg font-black font-display text-white">Bank Cashout Transfer</h2>
+                          <span className="text-[9px] font-mono font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-full uppercase">
+                            Fast
+                          </span>
+                        </div>
                         <p className="text-[10px] font-mono text-slate-400">Route: /dashboard/transfer</p>
                       </div>
                     </div>
-                    <div className="bg-indigo-500/10 border border-indigo-500/20 px-3 py-1 rounded-full text-[10px] font-mono font-bold text-indigo-400">
+                    <div className="bg-indigo-500/10 border border-indigo-500/20 px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-mono font-bold text-indigo-400 flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full bg-indigo-400 animate-pulse" />
                       Step {transferStep} of 2
                     </div>
                   </div>
 
-                  {/* Wallet Balance Summary Card */}
-                  <div className="p-5 bg-gradient-to-r from-slate-900/90 to-indigo-950/80 border border-white/10 rounded-2xl flex items-center justify-between shadow-xl">
-                    <div>
-                      <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Available Balance</span>
-                      <span className="text-xl font-black text-teal-400 font-mono mt-0.5 block">
-                        {nairaFormat(user?.balance ?? 0)}
-                      </span>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-[9px] font-mono text-slate-400 block uppercase">Transfer Limits</span>
-                      <span className="text-xs font-bold text-slate-300 font-mono mt-0.5 block">Min ₦50 • Max ₦200,000</span>
+                  {/* Main Content Area: Edge-to-Edge across entire viewport */}
+                  <div className="w-full max-w-full min-w-0 px-4 sm:px-6 lg:px-8 py-5 sm:py-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full items-start">
+                      
+                      {/* Left Column (Desktop) / Top Banner (Mobile): Balance & Limits & Guidelines */}
+                      <div className="lg:col-span-5 xl:col-span-4 space-y-4 w-full">
+                        {/* Wallet Balance Summary Card */}
+                        <div className="w-full p-4 sm:p-5 bg-gradient-to-br from-slate-900/90 via-slate-900/70 to-indigo-950/60 border border-white/10 rounded-2xl flex items-center justify-between shadow-lg">
+                          <div className="flex items-center gap-3">
+                            <div className="h-11 w-11 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center shrink-0">
+                              <Wallet className="h-5 w-5" />
+                            </div>
+                            <div>
+                              <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Available Balance</span>
+                              <span className="text-xl sm:text-2xl font-black text-teal-400 font-mono tracking-tight block">
+                                {nairaFormat(user?.balance ?? 0)}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[9px] font-mono text-slate-400 block uppercase">Transfer Limits</span>
+                            <span className="text-xs sm:text-sm font-bold text-slate-200 font-mono mt-0.5 block">Min ₦50 • Max ₦200,000</span>
+                          </div>
+                        </div>
+
+                        {/* Step Progress & Security Card */}
+                        <div className="p-4 bg-slate-950/40 border border-white/5 rounded-2xl space-y-3 hidden sm:block">
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 block font-bold">
+                            Transfer Workflow
+                          </span>
+                          <div className="space-y-2">
+                            <div className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-colors ${
+                              transferStep === 1
+                                ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300 font-bold'
+                                : 'bg-slate-900/40 border-white/5 text-slate-400'
+                            }`}>
+                              <span className="flex items-center gap-2">
+                                <span className="h-5 w-5 rounded-full bg-indigo-500/20 flex items-center justify-center text-[10px] font-mono">1</span>
+                                Step 1: Destination Account
+                              </span>
+                              {transferStep > 1 && <CheckCircle2 className="h-4 w-4 text-indigo-400" />}
+                            </div>
+
+                            <div className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-colors ${
+                              transferStep === 2
+                                ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300 font-bold'
+                                : 'bg-slate-900/40 border-white/5 text-slate-400'
+                            }`}>
+                              <span className="flex items-center gap-2">
+                                <span className="h-5 w-5 rounded-full bg-indigo-500/20 flex items-center justify-center text-[10px] font-mono">2</span>
+                                Step 2: Amount & WDV Authorization
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="pt-2 border-t border-white/5 flex items-center gap-2 text-[11px] text-slate-400">
+                            <ShieldCheck className="h-4 w-4 text-indigo-400 shrink-0" />
+                            <span>Direct bank-to-bank settlement via verified clearing channels</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right Column (Desktop) / Main Area: Direct Edge-to-Edge Form */}
+                      <div className="lg:col-span-7 xl:col-span-8 w-full">
+                        {/* STEP 1: Account Information */}
+                        {transferStep === 1 && (
+                          <div className="space-y-6 w-full">
+                            <div className="border-b border-white/10 pb-3">
+                              <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                                <span className="h-6 w-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-mono font-bold">1</span>
+                                Step 1: Account Information
+                              </h3>
+                              <p className="text-[11px] text-slate-400 mt-1">Select recipient bank and enter account details manually.</p>
+                            </div>
+
+                            <div className="space-y-4 w-full">
+                              {/* 1. Select Bank */}
+                              <div>
+                                <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold">1. Select Destination Bank</label>
+                                <BankSelector
+                                  id="transfer-select-bank"
+                                  value={transferBank}
+                                  onChange={(bankName) => {
+                                    setTransferBank(bankName);
+                                    setTransferVerified(false);
+                                    setTransferAccName('');
+                                    setTransferError('');
+                                  }}
+                                />
+                              </div>
+
+                              {/* 2. Account Number */}
+                              <div>
+                                <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold">2. Account Number (10 Digits)</label>
+                                <input
+                                  id="input-transfer-acc"
+                                  type="text"
+                                  inputMode="numeric"
+                                  maxLength={10}
+                                  placeholder="e.g. 8960723295"
+                                  required
+                                  value={transferAccNum}
+                                  onChange={(e) => {
+                                    const val = e.target.value.replace(/[^0-9]/g, '');
+                                    if (val.length <= 10) {
+                                      setTransferAccNum(val);
+                                    }
+                                  }}
+                                  className="w-full text-xs sm:text-sm bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white font-mono tracking-widest focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                />
+                              </div>
+
+                              {/* 3. Account Name - AUTOMATIC VERIFICATION */}
+                              <div>
+                                <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold flex items-center justify-between">
+                                  <span>3. Account Holder Name</span>
+                                  {isVerifyingAccount && (
+                                    <span className="text-[10px] text-indigo-400 font-mono flex items-center gap-1">
+                                      <RefreshCw className="h-3 w-3 animate-spin" /> Resolving...
+                                    </span>
+                                  )}
+                                </label>
+                                {isVerifyingAccount ? (
+                                  <div className="w-full text-xs bg-slate-950 border border-indigo-500/30 rounded-xl px-4 py-3 text-indigo-400 font-mono flex items-center gap-2 animate-pulse">
+                                    <RefreshCw className="h-4 w-4 animate-spin shrink-0" />
+                                    <span>Resolving account holder's name...</span>
+                                  </div>
+                                ) : transferVerified && transferAccName ? (
+                                  <div className="w-full text-xs bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-3 text-emerald-300 font-mono font-bold flex items-center justify-between shadow-inner">
+                                    <div className="flex items-center gap-2 truncate">
+                                      <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                                      <span className="truncate">{transferAccName}</span>
+                                    </div>
+                                    <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded font-bold uppercase shrink-0">VERIFIED</span>
+                                  </div>
+                                ) : transferError ? (
+                                  <div className="w-full text-xs bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 text-rose-400 font-mono space-y-2">
+                                    <div className="flex items-center gap-2">
+                                      <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
+                                      <span>{transferError}</span>
+                                    </div>
+                                    {user?.fullName && (
+                                      <div className="pt-2 border-t border-rose-500/20 flex items-center justify-between">
+                                        <span className="text-[10px] text-slate-300">Account holder fallback:</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setTransferAccName(user.fullName.toUpperCase());
+                                            setTransferVerified(true);
+                                            setTransferError(null);
+                                          }}
+                                          className="px-2.5 py-1 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 rounded text-[10px] font-bold border border-indigo-500/30 transition-colors cursor-pointer"
+                                        >
+                                          Use registered name ({user.fullName.split(' ')[0]})
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="w-full text-[11px] bg-slate-950/60 border border-white/5 rounded-xl px-4 py-3 text-slate-500 font-mono italic">
+                                    Enter a 10-digit account number to resolve verified account holder name automatically.
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            <button
+                              id="btn-transfer-step1-continue"
+                              type="button"
+                              disabled={!transferBank || transferAccNum.length !== 10 || !transferVerified || !transferAccName}
+                              onClick={() => setTransferStep(2)}
+                              className={`w-full py-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer ${
+                                (!transferBank || transferAccNum.length !== 10 || !transferVerified || !transferAccName) ? 'opacity-40 cursor-not-allowed' : ''
+                              }`}
+                            >
+                              <span>Continue to Step 2</span>
+                              <ArrowRight className="h-4 w-4" />
+                            </button>
+                          </div>
+                        )}
+
+                        {/* STEP 2: Amount & Voucher Authorization */}
+                        {transferStep === 2 && (
+                          <div className="space-y-6 w-full">
+                            <div className="border-b border-white/10 pb-3 flex items-center justify-between">
+                              <div>
+                                <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                                  <span className="h-6 w-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-mono font-bold">2</span>
+                                  Step 2: Amount & Authorization
+                                </h3>
+                                <p className="text-[11px] text-slate-400 mt-1">Specify transfer amount and enter WDV voucher code.</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setTransferStep(1)}
+                                className="text-[10px] font-mono text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+                              >
+                                <Edit3 className="h-3 w-3" /> Edit Details
+                              </button>
+                            </div>
+
+                            {/* Recipient Summary */}
+                            <div className="p-4 bg-slate-950/60 border border-white/10 rounded-xl space-y-2 font-mono text-xs">
+                              <div className="flex justify-between text-slate-400 text-[10px]">
+                                <span>BANK: <strong className="text-white">{transferBank}</strong></span>
+                                <span>ACCOUNT: <strong className="text-white">{transferAccNum}</strong></span>
+                              </div>
+                              <div className="text-indigo-400 font-extrabold uppercase text-sm border-t border-white/5 pt-2">
+                                {transferAccName}
+                              </div>
+                            </div>
+
+                            <form onSubmit={handleBankTransfer} className="space-y-4">
+                              {/* Amount */}
+                              <div>
+                                <div className="flex justify-between items-center mb-1.5">
+                                  <label className="text-[11px] font-mono text-slate-300 font-bold">Transfer Amount (₦)</label>
+                                  <span className="text-[10px] font-mono text-slate-400">Min: ₦50 • Max: ₦200,000</span>
+                                </div>
+                                <input
+                                  id="input-transfer-amount"
+                                  type="number"
+                                  min={50}
+                                  max={200000}
+                                  placeholder="Min ₦50 - Max ₦200,000"
+                                  required
+                                  value={transferAmount}
+                                  onChange={(e) => setTransferAmount(e.target.value)}
+                                  className="w-full text-sm bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                />
+                                {transferAmount && (parseInt(transferAmount) < 50 || parseInt(transferAmount) > 200000) && (
+                                  <p className="text-[10px] text-rose-400 font-mono mt-1">Amount must be between ₦50 and ₦200,000.</p>
+                                )}
+                              </div>
+
+                              {/* WDV Code field */}
+                              <div>
+                                {(user?.wdvVerified || user?.isWdvVerified) ? (
+                                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-400 font-medium flex items-center gap-2.5">
+                                    <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                                    <div>
+                                      <p className="font-bold">✓ Account WDV Verified</p>
+                                      <p className="text-[9px] opacity-80 mt-0.5">Your master WDV voucher is active. No code required.</p>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <div className="flex items-center justify-between mb-1.5">
+                                      <label className="text-[11px] font-mono text-rose-400 font-bold uppercase tracking-wider">WDV Voucher Code (MANDATORY)</label>
+                                      <button
+                                        id="btn-goto-buy-wdv-transfer"
+                                        type="button"
+                                        onClick={() => changeScreen('buy_wdv')}
+                                        className="text-[10px] font-bold text-indigo-400 hover:underline cursor-pointer flex items-center gap-1"
+                                      >
+                                        Buy WDV Voucher <ExternalLink className="h-3 w-3" />
+                                      </button>
+                                    </div>
+                                    <input
+                                      id="input-transfer-wdv"
+                                      type="text"
+                                      placeholder="Example: WDV-XXXX-XXXX-XXXX"
+                                      value={transferWdvCode}
+                                      onChange={(e) => setTransferWdvCode(e.target.value)}
+                                      className="w-full text-xs sm:text-sm bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white font-mono tracking-widest uppercase focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+
+                              <button
+                                id="btn-submit-transfer"
+                                type="submit"
+                                disabled={
+                                  !transferAccNum ||
+                                  transferAccNum.length !== 10 ||
+                                  !transferAccName ||
+                                  !transferAmount ||
+                                  parseInt(transferAmount) < 50 ||
+                                  parseInt(transferAmount) > 200000 ||
+                                  (!transferWdvCode && !user?.wdvVerified && !user?.isWdvVerified) ||
+                                  isSubmitting
+                                }
+                                className={`w-full py-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer ${
+                                  (!transferAccNum || transferAccNum.length !== 10 || !transferAccName || !transferAmount || parseInt(transferAmount) < 50 || parseInt(transferAmount) > 200000 || (!transferWdvCode && !user?.wdvVerified && !user?.isWdvVerified) || isSubmitting) ? 'opacity-50 cursor-not-allowed' : ''
+                                }`}
+                              >
+                                {isSubmitting ? (
+                                  <>
+                                    <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    <span>Processing Transfer...</span>
+                                  </>
+                                ) : (
+                                  'Submit Bank Transfer'
+                                )}
+                              </button>
+                            </form>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
-
-                  {/* STEP 1: Account Information */}
-                  {transferStep === 1 && (
-                    <GlassCard className="p-6 space-y-5 border-white/10">
-                      <div className="border-b border-white/5 pb-3">
-                        <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                          <span className="h-6 w-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-mono font-bold">1</span>
-                          Step 1: Account Information
-                        </h3>
-                        <p className="text-[11px] text-slate-400 mt-1">Select recipient bank and enter account details manually.</p>
-                      </div>
-
-                      <div className="space-y-4">
-                        {/* 1. Select Bank */}
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold">1. Select Destination Bank</label>
-                          <BankSelector
-                            id="transfer-select-bank"
-                            value={transferBank}
-                            onChange={(bankName) => {
-                              setTransferBank(bankName);
-                              setTransferVerified(false);
-                              setTransferAccName('');
-                              setTransferError('');
-                            }}
-                          />
-                        </div>
-
-                        {/* 2. Account Number */}
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold">2. Account Number (10 Digits)</label>
-                          <input
-                            id="input-transfer-acc"
-                            type="text"
-                            inputMode="numeric"
-                            maxLength={10}
-                            placeholder="e.g. 8960723295"
-                            required
-                            value={transferAccNum}
-                            onChange={(e) => {
-                              const val = e.target.value.replace(/[^0-9]/g, '');
-                              if (val.length <= 10) {
-                                setTransferAccNum(val);
-                              }
-                            }}
-                            className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white font-mono tracking-widest focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                          />
-                        </div>
-
-                        {/* 3. Account Name - AUTOMATIC VERIFICATION */}
-                        <div>
-                          <label className="text-[11px] font-mono text-slate-300 block mb-1.5 font-bold flex items-center justify-between">
-                            <span>3. Account Holder Name</span>
-                            {isVerifyingAccount && (
-                              <span className="text-[10px] text-indigo-400 font-mono flex items-center gap-1">
-                                <RefreshCw className="h-3 w-3 animate-spin" /> Resolving...
-                              </span>
-                            )}
-                          </label>
-                          {isVerifyingAccount ? (
-                            <div className="w-full text-xs bg-slate-950 border border-indigo-500/30 rounded-xl px-4 py-3 text-indigo-400 font-mono flex items-center gap-2 animate-pulse">
-                              <RefreshCw className="h-4 w-4 animate-spin shrink-0" />
-                              <span>Resolving account holder's name...</span>
-                            </div>
-                          ) : transferVerified && transferAccName ? (
-                            <div className="w-full text-xs bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-4 py-3 text-emerald-300 font-mono font-bold flex items-center justify-between shadow-inner">
-                              <div className="flex items-center gap-2 truncate">
-                                <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-                                <span className="truncate">{transferAccName}</span>
-                              </div>
-                              <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded font-bold uppercase shrink-0">VERIFIED</span>
-                            </div>
-                          ) : transferError ? (
-                            <div className="w-full text-xs bg-rose-500/10 border border-rose-500/30 rounded-xl px-4 py-3 text-rose-400 font-mono flex items-center gap-2">
-                              <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
-                              <span>{transferError}</span>
-                            </div>
-                          ) : (
-                            <div className="w-full text-[11px] bg-slate-950/60 border border-white/5 rounded-xl px-4 py-3 text-slate-500 font-mono italic">
-                              Enter a 10-digit account number to resolve verified account holder name automatically.
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <button
-                        id="btn-transfer-step1-continue"
-                        type="button"
-                        disabled={!transferBank || transferAccNum.length !== 10 || !transferVerified || !transferAccName}
-                        onClick={() => setTransferStep(2)}
-                        className={`w-full py-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer ${
-                          (!transferBank || transferAccNum.length !== 10 || !transferVerified || !transferAccName) ? 'opacity-40 cursor-not-allowed' : ''
-                        }`}
-                      >
-                        <span>Continue to Step 2</span>
-                        <ArrowRight className="h-4 w-4" />
-                      </button>
-                    </GlassCard>
-                  )}
-
-                  {/* STEP 2: Amount & Voucher Authorization */}
-                  {transferStep === 2 && (
-                    <GlassCard className="p-6 space-y-5 border-white/10">
-                      <div className="border-b border-white/5 pb-3 flex items-center justify-between">
-                        <div>
-                          <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                            <span className="h-6 w-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-mono font-bold">2</span>
-                            Step 2: Amount & Authorization
-                          </h3>
-                          <p className="text-[11px] text-slate-400 mt-1">Specify transfer amount and enter WDV voucher code.</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setTransferStep(1)}
-                          className="text-[10px] font-mono text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
-                        >
-                          <Edit3 className="h-3 w-3" /> Edit Details
-                        </button>
-                      </div>
-
-                      {/* Recipient Summary */}
-                      <div className="p-4 bg-slate-950/60 border border-white/10 rounded-2xl space-y-2 font-mono text-xs">
-                        <div className="flex justify-between text-slate-400 text-[10px]">
-                          <span>BANK: <strong className="text-white">{transferBank}</strong></span>
-                          <span>ACCOUNT: <strong className="text-white">{transferAccNum}</strong></span>
-                        </div>
-                        <div className="text-indigo-400 font-extrabold uppercase text-sm border-t border-white/5 pt-2">
-                          {transferAccName}
-                        </div>
-                      </div>
-
-                      <form onSubmit={handleBankTransfer} className="space-y-4">
-                        {/* Amount */}
-                        <div>
-                          <div className="flex justify-between items-center mb-1.5">
-                            <label className="text-[11px] font-mono text-slate-300 font-bold">Transfer Amount (₦)</label>
-                            <span className="text-[10px] font-mono text-slate-400">Min: ₦50 • Max: ₦200,000</span>
-                          </div>
-                          <input
-                            id="input-transfer-amount"
-                            type="number"
-                            min={50}
-                            max={200000}
-                            placeholder="Min ₦50 - Max ₦200,000"
-                            required
-                            value={transferAmount}
-                            onChange={(e) => setTransferAmount(e.target.value)}
-                            className="w-full text-sm bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white font-mono font-bold focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                          />
-                          {transferAmount && (parseInt(transferAmount) < 50 || parseInt(transferAmount) > 200000) && (
-                            <p className="text-[10px] text-rose-400 font-mono mt-1">Amount must be between ₦50 and ₦200,000.</p>
-                          )}
-                        </div>
-
-                        {/* WDV Code field */}
-                        <div>
-                          {(user?.wdvVerified || user?.isWdvVerified) ? (
-                            <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-400 font-medium flex items-center gap-2.5">
-                              <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-                              <div>
-                                <p className="font-bold">✓ Account WDV Verified</p>
-                                <p className="text-[9px] opacity-80 mt-0.5">Your master WDV voucher is active. No code required.</p>
-                              </div>
-                            </div>
-                          ) : (
-                            <div>
-                              <div className="flex items-center justify-between mb-1.5">
-                                <label className="text-[11px] font-mono text-rose-400 font-bold uppercase tracking-wider">WDV Voucher Code (MANDATORY)</label>
-                                <button
-                                  id="btn-goto-buy-wdv-transfer"
-                                  type="button"
-                                  onClick={() => changeScreen('buy_wdv')}
-                                  className="text-[10px] font-bold text-indigo-400 hover:underline cursor-pointer flex items-center gap-1"
-                                >
-                                  Buy WDV Voucher <ExternalLink className="h-3 w-3" />
-                                </button>
-                              </div>
-                              <input
-                                id="input-transfer-wdv"
-                                type="text"
-                                placeholder="Example: WDV-XXXX-XXXX-XXXX"
-                                value={transferWdvCode}
-                                onChange={(e) => setTransferWdvCode(e.target.value)}
-                                className="w-full text-xs bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-white font-mono tracking-widest uppercase focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                              />
-                            </div>
-                          )}
-                        </div>
-
-                        <button
-                          id="btn-submit-transfer"
-                          type="submit"
-                          disabled={
-                            !transferAccNum ||
-                            transferAccNum.length !== 10 ||
-                            !transferAccName ||
-                            !transferAmount ||
-                            parseInt(transferAmount) < 50 ||
-                            parseInt(transferAmount) > 200000 ||
-                            (!transferWdvCode && !user?.wdvVerified && !user?.isWdvVerified) ||
-                            isSubmitting
-                          }
-                          className={`w-full py-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer ${
-                            (!transferAccNum || transferAccNum.length !== 10 || !transferAccName || !transferAmount || parseInt(transferAmount) < 50 || parseInt(transferAmount) > 200000 || (!transferWdvCode && !user?.wdvVerified && !user?.isWdvVerified) || isSubmitting) ? 'opacity-50 cursor-not-allowed' : ''
-                          }`}
-                        >
-                          {isSubmitting ? (
-                            <>
-                              <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                              <span>Processing Transfer...</span>
-                            </>
-                          ) : (
-                            'Submit Bank Transfer'
-                          )}
-                        </button>
-                      </form>
-                    </GlassCard>
-                  )}
                 </div>
               )}
 

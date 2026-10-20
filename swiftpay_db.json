@@ -18,14 +18,46 @@
       "isfrozen": 0,
       "registrationdate": "2026-07-14T15:05:23.894Z",
       "accountstatus": "active",
-      "beneficiaries": [],
-      "phonebeneficiaries": [],
-      "loginhistory": [],
-      "notifications": [],
-      "transactions": []
+      "beneficiaries": "[]",
+      "phonebeneficiaries": "[]",
+      "loginhistory": "[]",
+      "notifications": "[]",
+      "transactions": "[]",
+      "wdvverified": 0,
+      "iswdvverified": 0,
+      "welcomerewardshown": 0,
+      "giftday": 0,
+      "giftactive": 1,
+      "lastgiftcredittime": "",
+      "giftexpiresat": ""
     }
   ],
-  "vouchers": [],
+  "vouchers": [
+    {
+      "id": "v-1792479119724-c89bdd59",
+      "vouchercode": "WDV-749A-3406-2F64",
+      "code": "WDV-749A-3406-2F64",
+      "voucherCode": "WDV-749A-3406-2F64",
+      "amount": 6500,
+      "status": "used",
+      "usedby": "test@example.com",
+      "usedBy": "test@example.com",
+      "usedat": "2026-10-20T06:51:59.733Z",
+      "usedAt": "2026-10-20T06:51:59.733Z",
+      "generatedat": "2026-10-20T06:51:59.724Z",
+      "generatedAt": "2026-10-20T06:51:59.724Z",
+      "createdat": "2026-10-20T06:51:59.724Z",
+      "createdAt": "2026-10-20T06:51:59.724Z",
+      "withdrawalid": "tx-test-123",
+      "withdrawalId": "tx-test-123",
+      "purchasedby": "test",
+      "purchasedBy": "test",
+      "redeemedby": "[]",
+      "redeemedBy": [
+        "test@example.com"
+      ]
+    }
+  ],
   "password_resets": [],
   "admin_settings": {
     "supportEmail": "support@swiftpay.com",
@@ -46,11 +78,16 @@
   "admins": [
     {
       "email": "talkdavidjohn@gmail.com",
-      "passwordHash": "$2b$10$o57nUH.Mm8BlIIb4Z5HB6.lmMVCGieOqu6ewbsYGRMZ/bTXx4I2i2"
+      "passwordhash": "$2b$10$o57nUH.Mm8BlIIb4Z5HB6.lmMVCGieOqu6ewbsYGRMZ/bTXx4I2i2"
     },
     {
       "email": "admin@swiftpay.com",
-      "passwordHash": "$2b$10$o57nUH.Mm8BlIIb4Z5HB6.lmMVCGieOqu6ewbsYGRMZ/bTXx4I2i2"
+      "passwordhash": "$2b$10$o57nUH.Mm8BlIIb4Z5HB6.lmMVCGieOqu6ewbsYGRMZ/bTXx4I2i2"
     }
-  ]
+  ],
+  "withdraw_requests": [],
+  "wdv_payments": [],
+  "payment_transactions": [],
+  "ai_chat_logs": [],
+  "ai_custom_faqs": []
 }

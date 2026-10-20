@@ -168,7 +168,7 @@ export const BankSelector: React.FC<BankSelectorProps> = ({
 
       {/* Bank Selection Modal / Overlay Bottom Sheet */}
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-[fadeIn_0.15s_ease-out]">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-[fadeIn_0.15s_ease-out] pb-safe">
           {/* Backdrop Click */}
           <div
             className="absolute inset-0 cursor-pointer"
@@ -176,10 +176,10 @@ export const BankSelector: React.FC<BankSelectorProps> = ({
             aria-label="Close modal backdrop"
           />
 
-          {/* Modal Card */}
-          <div className="relative z-10 w-full max-w-md bg-slate-900 border border-white/10 rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col max-h-[85vh] sm:max-h-[80vh] overflow-hidden animate-[slideUp_0.2s_ease-out]">
-            {/* Modal Header */}
-            <div className="p-4 border-b border-white/10 flex items-center justify-between bg-slate-900/90 sticky top-0 z-20">
+          {/* Modal Card - Fixed consistent height so search never jumps on result count changes */}
+          <div className="relative z-10 w-full max-w-md bg-slate-900 border border-white/10 rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col h-[82vh] max-h-[85vh] sm:h-[580px] overflow-hidden animate-[slideUp_0.2s_ease-out]">
+            {/* 1. FIXED HEADER */}
+            <div className="p-4 border-b border-white/10 flex items-center justify-between bg-slate-900 shrink-0 z-20">
               <div className="flex items-center gap-2.5">
                 <div className="h-8 w-8 rounded-full bg-teal-500/10 border border-teal-500/20 text-teal-400 flex items-center justify-center shrink-0">
                   <Landmark className="h-4 w-4" />
@@ -201,8 +201,8 @@ export const BankSelector: React.FC<BankSelectorProps> = ({
               </button>
             </div>
 
-            {/* Bank Search Bar */}
-            <div className="p-3.5 bg-slate-950/60 border-b border-white/5 sticky top-[65px] z-20">
+            {/* 2. FIXED SEARCH AREA */}
+            <div className="p-3.5 bg-slate-950/90 border-b border-white/5 shrink-0 z-20">
               <div className="relative flex items-center">
                 <Search className="h-4 w-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
@@ -225,8 +225,8 @@ export const BankSelector: React.FC<BankSelectorProps> = ({
               </div>
             </div>
 
-            {/* Bank List Container */}
-            <div className="flex-1 overflow-y-auto p-2 sm:p-3 space-y-1 custom-scrollbar">
+            {/* 3. SCROLLABLE RESULTS AREA */}
+            <div className="flex-1 min-h-0 overflow-y-auto p-2 sm:p-3 space-y-1 custom-scrollbar">
               {filteredBanks.length > 0 ? (
                 filteredBanks.map((bankName) => {
                   const isSelected = selectedBankName === bankName;
@@ -257,7 +257,7 @@ export const BankSelector: React.FC<BankSelectorProps> = ({
                   );
                 })
               ) : (
-                <div className="py-10 px-4 text-center space-y-3">
+                <div className="py-12 px-4 text-center space-y-3">
                   <div className="h-10 w-10 mx-auto rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center">
                     <AlertCircle className="h-5 w-5" />
                   </div>
@@ -279,7 +279,7 @@ export const BankSelector: React.FC<BankSelectorProps> = ({
             </div>
 
             {/* Footer Summary */}
-            <div className="p-3 bg-slate-950/80 border-t border-white/5 text-[10px] font-mono text-slate-400 text-center flex items-center justify-between px-4">
+            <div className="p-3 bg-slate-950/90 border-t border-white/5 text-[10px] font-mono text-slate-400 text-center flex items-center justify-between px-4 shrink-0">
               <span>Showing {filteredBanks.length} of {sortedBanks.length} banks</span>
               <span className="text-teal-400">SwiftPay Secured</span>
             </div>

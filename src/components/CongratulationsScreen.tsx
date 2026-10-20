@@ -79,20 +79,17 @@ export default function CongratulationsScreen({ userEmail, onContinue }: Congrat
     if (isSubmitting) return;
     setIsSubmitting(true);
     try {
-      const response = await fetch('/api/user/welcome-reward-shown', {
+      const token = localStorage.getItem('swiftpay_token') || localStorage.getItem('token') || '';
+      await fetch('/api/user/complete-onboarding', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('swiftpay_token')}`
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
         }
       });
-      if (response.ok) {
-        onContinue();
-      } else {
-        onContinue();
-      }
+      onContinue();
     } catch (err) {
-      console.error('Error marking welcome reward shown:', err);
+      console.error('Error marking welcome onboarding completed:', err);
       onContinue();
     } finally {
       setIsSubmitting(false);

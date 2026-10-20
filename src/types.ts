@@ -23,6 +23,7 @@ export interface User {
   tier?: number; // Verification tier, e.g. 1, 2, 3
   is2faEnabled?: boolean;
   welcomeRewardShown?: boolean;
+  welcomeOnboardingCompletedAt?: string;
   wdvVerified?: boolean;
   isWdvVerified?: boolean;
   notifications?: NotificationItem[];

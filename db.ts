@@ -595,6 +595,12 @@ export async function initDb() {
     await execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS welcomeRewardShown INTEGER DEFAULT 0`);
   } catch (e) {}
   try {
+    await execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS welcome_onboarding_completed_at TEXT`);
+  } catch (e) {}
+  try {
+    await execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS welcomeOnboardingCompletedAt TEXT`);
+  } catch (e) {}
+  try {
     await execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS giftDay INTEGER DEFAULT 0`);
   } catch (e) {}
   try {
@@ -1927,6 +1933,182 @@ export async function createVoucherAtomic(params: CreateVoucherParams = {}): Pro
   }
 
   throw new Error('Exhausted attempts to generate a unique voucher code.');
+}
+
+export interface ConsumeVoucherParams {
+  voucherCode: string;
+  email: string;
+  transactionId: string;
+}
+
+export interface ConsumeVoucherResult {
+  success: boolean;
+  voucher?: {
+    id: string;
+    code: string;
+    amount: number;
+    status: string;
+    usedBy: string;
+    usedAt: string;
+    withdrawalId: string;
+  };
+  error?: string;
+}
+
+/**
+ * Atomically verifies and consumes a WDV voucher with row-level concurrency locking.
+ * Guarantees that ONE voucher can authorize exactly ONE successful transaction across all services.
+ */
+export async function consumeVoucherAtomic(params: ConsumeVoucherParams): Promise<ConsumeVoucherResult> {
+  const norm = (params.voucherCode || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!norm) {
+    return { success: false, error: 'Please enter a WDV voucher code.' };
+  }
+
+  const email = (params.email || '').trim().toLowerCase();
+  const txId = params.transactionId || `tx-${Date.now()}`;
+  const nowIso = new Date().toISOString();
+
+  if (isPostgres && pgPool) {
+    let client: pg.PoolClient | null = null;
+    try {
+      client = await pgPool.connect();
+    } catch (connErr: any) {
+      if (isConnectionFailure(connErr)) {
+        console.warn(`[SwiftPay DB] PostgreSQL connection error in consumeVoucherAtomic (${connErr.message}); switching to fallback.`);
+        isPostgres = false;
+      } else {
+        throw connErr;
+      }
+    }
+
+    if (client && isPostgres) {
+      try {
+        await client.query('BEGIN');
+
+        // Check if voucher exists and is unused
+        const checkRes = await client.query(
+          `SELECT id, vouchercode, code, amount, status, usedby, usedat, withdrawalid, redeemedby 
+           FROM vouchers 
+           WHERE UPPER(REPLACE(vouchercode, '-', '')) = $1 
+              OR UPPER(REPLACE(code, '-', '')) = $1 
+              OR UPPER(REPLACE(id, '-', '')) = $1
+           LIMIT 1`,
+          [norm]
+        );
+
+        if (checkRes.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return { success: false, error: 'Invalid or non-existent WDV voucher code.' };
+        }
+
+        const foundRow = checkRes.rows[0];
+        if (foundRow.status !== 'unused') {
+          await client.query('ROLLBACK');
+          return { success: false, error: 'This WDV voucher has already been consumed.' };
+        }
+
+        let redeemedList: string[] = [];
+        try {
+          redeemedList = JSON.parse(foundRow.redeemedby || '[]');
+          if (!Array.isArray(redeemedList)) redeemedList = [];
+        } catch (_) {
+          redeemedList = [];
+        }
+        if (email && !redeemedList.includes(email)) {
+          redeemedList.push(email);
+        }
+
+        // Row-level atomic conditional update: status must STILL be 'unused'
+        const updateRes = await client.query(
+          `UPDATE vouchers
+           SET status = 'used',
+               usedBy = $1,
+               usedAt = $2,
+               withdrawalId = $3,
+               redeemedBy = $4
+           WHERE id = $5 AND status = 'unused'
+           RETURNING *`,
+          [email, nowIso, txId, JSON.stringify(redeemedList), foundRow.id]
+        );
+
+        if (updateRes.rows.length === 0) {
+          // Another concurrent request just consumed this voucher!
+          await client.query('ROLLBACK');
+          return { success: false, error: 'This WDV voucher has already been consumed by another transaction.' };
+        }
+
+        await client.query('COMMIT');
+        const updatedRow = updateRes.rows[0];
+        const finalCode = updatedRow.vouchercode || updatedRow.code || norm;
+
+        return {
+          success: true,
+          voucher: {
+            id: updatedRow.id,
+            code: finalCode,
+            amount: Number(updatedRow.amount ?? 6500),
+            status: 'used',
+            usedBy: email,
+            usedAt: nowIso,
+            withdrawalId: txId
+          }
+        };
+      } catch (err: any) {
+        try { await client.query('ROLLBACK'); } catch (_) {}
+        console.error('[SwiftPay DB] PostgreSQL error in consumeVoucherAtomic:', err);
+        if (isConnectionFailure(err)) {
+          isPostgres = false;
+        } else {
+          return { success: false, error: 'Database error consuming WDV voucher.' };
+        }
+      } finally {
+        client.release();
+      }
+    }
+  }
+
+  // JSON fallback
+  const db = getJsonDb();
+  const index = db.vouchers.findIndex((v: any) => {
+    const vCodeNorm = String(v.voucherCode || v.code || v.id || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    return vCodeNorm === norm;
+  });
+
+  if (index === -1) {
+    return { success: false, error: 'Invalid or non-existent WDV voucher code.' };
+  }
+
+  const v = db.vouchers[index];
+  if (v.status !== 'unused') {
+    return { success: false, error: 'This WDV voucher has already been consumed.' };
+  }
+
+  v.status = 'used';
+  v.usedBy = email;
+  v.usedby = email;
+  v.usedAt = nowIso;
+  v.usedat = nowIso;
+  v.withdrawalId = txId;
+  v.withdrawalid = txId;
+  const redList = Array.isArray(v.redeemedBy) ? v.redeemedBy : [];
+  if (email && !redList.includes(email)) redList.push(email);
+  v.redeemedBy = redList;
+
+  saveJsonDb(db);
+
+  return {
+    success: true,
+    voucher: {
+      id: v.id,
+      code: v.voucherCode || v.code,
+      amount: Number(v.amount ?? 6500),
+      status: 'used',
+      usedBy: email,
+      usedAt: nowIso,
+      withdrawalId: txId
+    }
+  };
 }
 
 export function isPostgresActive(): boolean {

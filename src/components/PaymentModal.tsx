@@ -339,72 +339,22 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           {(flowState === 'select' || flowState === 'processing') && (
             <div className="space-y-5 flex-1 flex flex-col justify-between">
               <div className="space-y-5">
-                {purpose === 'wdv_voucher' ? (
-                  /* WDV Voucher Card */
-                  <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#0e172c] via-[#0b1222] to-[#080d1a] border border-teal-500/25 p-5 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.45)]">
-                    <div className="absolute -right-10 -top-10 w-32 h-32 rounded-full bg-teal-400/10 blur-2xl pointer-events-none" />
-                    <div className="relative z-10 space-y-2.5">
-                      <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-teal-500/10 border border-teal-500/25 text-teal-300 text-[11px] font-mono font-bold uppercase tracking-wider">
-                        <ShieldCheck className="h-3.5 w-3.5 text-teal-400" />
-                        <span>WDV VOUCHER</span>
-                      </div>
-                      <div className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight pt-1">
-                        ₦{formattedPrice}
-                      </div>
-                      <p className="text-xs sm:text-sm text-slate-300/90 leading-relaxed">
-                        One-time purchase. The voucher is generated only after the gateway confirms your payment.
-                      </p>
+                {/* WDV Voucher Card */}
+                <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#0e172c] via-[#0b1222] to-[#080d1a] border border-teal-500/25 p-5 sm:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.45)]">
+                  <div className="absolute -right-10 -top-10 w-32 h-32 rounded-full bg-teal-400/10 blur-2xl pointer-events-none" />
+                  <div className="relative z-10 space-y-2.5">
+                    <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-teal-500/10 border border-teal-500/25 text-teal-300 text-[11px] font-mono font-bold uppercase tracking-wider">
+                      <ShieldCheck className="h-3.5 w-3.5 text-teal-400" />
+                      <span>WDV VOUCHER</span>
                     </div>
+                    <div className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight pt-1">
+                      ₦{formattedPrice}
+                    </div>
+                    <p className="text-xs sm:text-sm text-slate-300/90 leading-relaxed">
+                      One-time purchase. The voucher is generated only after the gateway confirms your payment.
+                    </p>
                   </div>
-                ) : (
-                  /* Wallet Funding Input */
-                  <div className="space-y-4">
-                    <div>
-                      <label className="text-[11px] font-mono text-slate-400 block mb-1.5 font-bold uppercase tracking-wider">
-                        Amount to Pay (NGN)
-                      </label>
-                      <div className="relative">
-                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-bold text-teal-400 font-mono">
-                          ₦
-                        </span>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          value={customAmountStr}
-                          disabled={flowState === 'processing'}
-                          onChange={(e) => {
-                            const val = e.target.value.replace(/[^0-9]/g, '');
-                            setCustomAmountStr(val);
-                            setAmount(Number(val) || 0);
-                          }}
-                          className="w-full pl-10 pr-4 py-3.5 bg-[#090d1a] border border-slate-800 rounded-2xl text-white font-mono text-xl font-bold focus:outline-none focus:border-teal-400 focus:ring-1 focus:ring-teal-400/50"
-                          placeholder="5,000"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2">
-                      {presetAmounts.map((pAmt) => (
-                        <button
-                          key={pAmt}
-                          type="button"
-                          disabled={flowState === 'processing'}
-                          onClick={() => {
-                            setAmount(pAmt);
-                            setCustomAmountStr(String(pAmt));
-                          }}
-                          className={`py-2.5 px-3 rounded-xl text-xs font-mono font-bold transition-all border cursor-pointer ${
-                            amount === pAmt
-                              ? 'bg-teal-500/20 text-teal-300 border-teal-500/40 shadow-sm'
-                              : 'bg-[#090d1a] text-slate-400 border-slate-800 hover:text-white hover:border-slate-700'
-                          }`}
-                        >
-                          ₦{pAmt.toLocaleString()}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                </div>
 
                 {/* PAYMENT GATEWAY SECTION — KORAPAY ONLY */}
                 <div className="space-y-2.5">

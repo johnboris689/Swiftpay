@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 import multer from 'multer';
 import bcrypt from 'bcryptjs';
 import { GoogleGenAI } from '@google/genai';
-import { initDb, getRow, getAllRows, execute, createVoucherAtomic, generateSecureVoucherCode, isPostgresActive, runPostgresDiagnosticQuery } from './db';
+import { initDb, getRow, getAllRows, execute, createVoucherAtomic, consumeVoucherAtomic, generateSecureVoucherCode, isPostgresActive, runPostgresDiagnosticQuery } from './db';
 import { sendEmail, sendSms } from './email_sms_service';
 import { paymentManager, PaymentProviderName } from './payments/index';
 
@@ -299,6 +299,7 @@ interface UserState {
   wdvVerified?: boolean;
   isWdvVerified?: boolean;
   welcomeRewardShown?: boolean;
+  welcomeOnboardingCompletedAt?: string;
   giftDay?: number;
   giftActive?: boolean;
   lastGiftCreditTime?: string;
@@ -410,7 +411,8 @@ async function loadDbCache() {
       transactions: safeParseJson(row.transactions, []),
       wdvVerified: row.wdvverified === 1 || row.iswdvverified === 1,
       isWdvVerified: row.iswdvverified === 1 || row.wdvverified === 1,
-      welcomeRewardShown: row.welcomerewardshown === 1,
+      welcomeRewardShown: row.welcomerewardshown === 1 || Boolean(row.welcome_onboarding_completed_at) || Boolean(row.welcomeonboardingcompletedat),
+      welcomeOnboardingCompletedAt: row.welcome_onboarding_completed_at || row.welcomeonboardingcompletedat || (row.welcomerewardshown === 1 ? new Date().toISOString() : null),
       giftDay: Number(row.giftday ?? 0),
       giftActive: row.giftactive !== 0, // default true if null or not 0
       lastGiftCreditTime: row.lastgiftcredittime || '',
@@ -559,8 +561,10 @@ async function persistDbCache(data: DBStructure) {
         ]);
       } catch (uErr) {
         try {
-          await execute(`UPDATE users SET balance = $1, pinCode = $2, notifications = $3, transactions = $4 WHERE email = $5`,
-            [u.balance, u.pinCode || '', JSON.stringify(u.notifications || []), JSON.stringify(u.transactions || []), u.email.toLowerCase()]);
+          await execute(
+            `UPDATE users SET balance = $1, pinCode = $2, notifications = $3, transactions = $4, welcomeRewardShown = $5 WHERE LOWER(email) = $6`,
+            [u.balance, u.pinCode || '', JSON.stringify(u.notifications || []), JSON.stringify(u.transactions || []), u.welcomeRewardShown ? 1 : 0, u.email.toLowerCase()]
+          );
         } catch (_) {}
       }
     }
@@ -1111,7 +1115,8 @@ app.post('/api/auth/register', async (req, res) => {
       beneficiaries: newUser.beneficiaries,
       phoneBeneficiaries: newUser.phoneBeneficiaries,
       loginHistory: newUser.loginHistory,
-      welcomeRewardShown: newUser.welcomeRewardShown
+      welcomeRewardShown: false,
+      welcomeOnboardingCompletedAt: null
     }
   });
 });
@@ -1230,7 +1235,8 @@ app.post('/api/auth/login', (req, res) => {
       beneficiaries: user.beneficiaries,
       phoneBeneficiaries: user.phoneBeneficiaries,
       loginHistory: user.loginHistory,
-      welcomeRewardShown: user.welcomeRewardShown
+      welcomeRewardShown: Boolean(user.welcomeRewardShown || user.welcomeOnboardingCompletedAt),
+      welcomeOnboardingCompletedAt: user.welcomeOnboardingCompletedAt || (user.welcomeRewardShown ? new Date().toISOString() : null)
     }
   });
 });
@@ -1574,19 +1580,42 @@ app.get('/api/auth/me', authenticateToken, (req: any, res) => {
   res.json({ success: true, user: safeUser });
 });
 
-// Set Welcome Reward Shown Endpoint (Protected)
-app.post('/api/user/welcome-reward-shown', authenticateToken, (req: any, res) => {
-  const db = readDb();
-  const user = db.users[req.userIndex];
-  if (!user) {
-    return res.status(404).json({ error: 'User not found.' });
+// Set Welcome Reward / Onboarding Completed Endpoint (Protected)
+const handleCompleteOnboarding = async (req: any, res: any) => {
+  const email = (req.userEmail || '').toLowerCase();
+  const nowIso = new Date().toISOString();
+
+  try {
+    await execute(`
+      UPDATE users
+      SET welcomeRewardShown = 1,
+          welcome_onboarding_completed_at = $1
+      WHERE LOWER(email) = $2
+    `, [nowIso, email]);
+  } catch (sqlErr) {
+    console.error('Error updating welcome onboarding status in SQL:', sqlErr);
   }
 
-  user.welcomeRewardShown = true;
-  writeDb(db);
+  const db = readDb();
+  const user = db.users.find((u: any) => u.email.toLowerCase() === email);
+  if (user) {
+    user.welcomeRewardShown = true;
+    user.welcomeOnboardingCompletedAt = nowIso;
+    await writeDb(db);
+  }
 
-  res.json({ success: true, message: 'Welcome reward shown state updated successfully.' });
-});
+  logDiagnostic('INFO', 'User completed welcome reward onboarding', { email });
+
+  res.json({
+    success: true,
+    message: 'Welcome reward onboarding completed successfully.',
+    welcomeRewardShown: true,
+    welcomeOnboardingCompletedAt: nowIso
+  });
+};
+
+app.post('/api/user/complete-onboarding', authenticateToken, handleCompleteOnboarding);
+app.post('/api/user/welcome-reward-shown', authenticateToken, handleCompleteOnboarding);
 
 // Change Password Endpoint (Protected)
 app.post('/api/auth/change-password', authenticateToken, (req: any, res) => {
@@ -1966,44 +1995,19 @@ const BANK_NAME_TO_CODE: Record<string, string> = {
 };
 
 async function verifyAndConsumeVoucherSql(voucherCode: string | undefined, email: string, transactionId: string): Promise<{ error?: string }> {
-  const norm = (voucherCode || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-  if (!norm) {
-    return { error: "Please enter a WDV voucher code." };
+  const result = await consumeVoucherAtomic({
+    voucherCode: voucherCode || '',
+    email,
+    transactionId
+  });
+
+  if (!result.success) {
+    return { error: result.error || 'Invalid or already used WDV voucher.' };
   }
 
-  const isPostgres = !!process.env.DATABASE_URL || !!process.env.SQL_HOST;
-  let voucher;
   try {
-    if (isPostgres) {
-      voucher = await getRow(`SELECT * FROM vouchers WHERE UPPER(REPLACE(voucherCode, '-', '')) = $1 OR UPPER(REPLACE(code, '-', '')) = $1 FOR UPDATE`, [norm]);
-    } else {
-      voucher = await getRow(`SELECT * FROM vouchers WHERE UPPER(REPLACE(voucherCode, '-', '')) = $1 OR UPPER(REPLACE(code, '-', '')) = $1`, [norm]);
-    }
-  } catch (err: any) {
-    console.error('Error selecting voucher in verification:', err);
-  }
-
-  if (!voucher) {
-    return { error: "Invalid or already used WDV voucher." };
-  }
-
-  if (voucher.status !== 'unused') {
-    return { error: "Invalid or already used WDV voucher." };
-  }
-
-  const now = new Date().toISOString();
-  try {
-    await execute(`
-      UPDATE vouchers
-      SET status = $1, usedAt = $2, usedBy = $3, withdrawalId = $4
-      WHERE id = $5
-    `, ['used', now, email.toLowerCase(), transactionId, voucher.id]);
-  } catch (err: any) {
-    console.error('Error updating voucher status in SQL:', err);
-    return { error: "Failed to consume voucher in SQL database." };
-  }
-
-  await loadDbCache();
+    await loadDbCache();
+  } catch (_) {}
 
   return {}; // Success
 }
@@ -3728,19 +3732,23 @@ app.post('/api/payment/initialize', authenticatePaymentUser, async (req: any, re
     const db = readDb();
     const user = db.users.find((u: any) => u.email.toLowerCase() === email);
     const config = db.wdvConfig || DEFAULT_WDV_CONFIG;
-    const purpose = req.body.purpose || 'wallet_funding';
-    const rawAmount = purpose === 'wdv_voucher' ? (config.voucherPrice || 6500) : Number(req.body.amount || 0);
-    const amount = Number(rawAmount || 0);
+    const requestedPurpose = req.body.purpose;
 
-    if (!amount || isNaN(amount) || amount < 100) {
-      return res.status(400).json({ error: 'Minimum transaction amount is ₦100.' });
+    if (requestedPurpose === 'wallet_funding' || req.body.type === 'deposit') {
+      return res.status(400).json({
+        error: 'Separate deposit is disabled. Korapay is available exclusively for WDV Voucher purchases.'
+      });
     }
+
+    // Server-enforced purpose and price (₦6,500)
+    const purpose = 'wdv_voucher';
+    const amount = Number(config.voucherPrice || 6500);
 
     const provider = paymentManager.getActiveProvider('korapay');
     if (!provider || !provider.isConfigured()) {
       console.error('[SwiftPay Payment] Korapay initialization attempted without configured KORAPAY_SECRET_KEY.');
       return res.status(400).json({
-        error: "We couldn't start the payment. Please try again."
+        error: "We couldn't start the payment. Please ensure KORAPAY_SECRET_KEY is configured on the server."
       });
     }
 

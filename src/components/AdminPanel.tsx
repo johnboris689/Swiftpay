@@ -2724,6 +2724,16 @@ export default function AdminPanel({
                               <span className="text-slate-300">{safeDateStr(v.createdAt || v.generatedAt)}</span>
                             </div>
                             <div className="flex justify-between">
+                              <span>Purchased By:</span>
+                              <span className="text-slate-300 max-w-[150px] truncate">{toSafeStr(v.purchasedBy) || 'admin'}</span>
+                            </div>
+                            {v.withdrawalId && (
+                              <div className="flex justify-between">
+                                <span>Payment / Tx Ref:</span>
+                                <span className="text-amber-400 font-bold select-all max-w-[150px] truncate">{toSafeStr(v.withdrawalId)}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between">
                               <span>Used By:</span>
                               <span className="text-teal-400 max-w-[150px] truncate">{toSafeStr(v.usedBy) || '-'}</span>
                             </div>
@@ -2767,6 +2777,8 @@ export default function AdminPanel({
                         <th className="px-4 py-3 font-bold">Voucher Code</th>
                         <th className="px-3 py-3 font-bold">Status</th>
                         <th className="px-3 py-3 font-bold">Created Date</th>
+                        <th className="px-3 py-3 font-bold">Purchased By</th>
+                        <th className="px-3 py-3 font-bold">Payment / Tx Ref</th>
                         <th className="px-3 py-3 font-bold">Used By</th>
                         <th className="px-3 py-3 font-bold">Used Date</th>
                         <th className="px-4 py-3 text-right font-bold">Actions</th>
@@ -2775,14 +2787,14 @@ export default function AdminPanel({
                     <tbody className="divide-y divide-white/[0.03]">
                       {loadingVouchers ? (
                         <tr>
-                          <td colSpan={6} className="text-center py-12 text-slate-400 text-xs font-sans">
+                          <td colSpan={8} className="text-center py-12 text-slate-400 text-xs font-sans">
                             <RefreshCw className="h-4 w-4 animate-spin mx-auto mb-2 text-teal-400" />
                             Loading master SQL voucher records...
                           </td>
                         </tr>
                       ) : filteredVouchers.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="text-center py-12 text-slate-500 text-xs font-sans">
+                          <td colSpan={8} className="text-center py-12 text-slate-500 text-xs font-sans">
                             No vouchers matching your search criteria.
                           </td>
                         </tr>
@@ -2805,6 +2817,12 @@ export default function AdminPanel({
                               </td>
                               <td className="px-3 py-3.5 text-slate-300 whitespace-nowrap text-[9px]">
                                 {safeDateStr(v.createdAt || v.generatedAt)}
+                              </td>
+                              <td className="px-3 py-3.5 text-slate-300 whitespace-nowrap text-[9px] max-w-[120px] truncate" title={toSafeStr(v.purchasedBy)}>
+                                {toSafeStr(v.purchasedBy) || 'admin'}
+                              </td>
+                              <td className="px-3 py-3.5 text-amber-400 font-mono font-bold whitespace-nowrap text-[9px] max-w-[130px] truncate select-all" title={toSafeStr(v.withdrawalId)}>
+                                {toSafeStr(v.withdrawalId) || <span className="text-slate-600">-</span>}
                               </td>
                               <td className="px-3 py-3.5 text-teal-400 whitespace-nowrap max-w-[120px] truncate" title={toSafeStr(v.usedBy)}>
                                 {toSafeStr(v.usedBy) || <span className="text-slate-600">-</span>}

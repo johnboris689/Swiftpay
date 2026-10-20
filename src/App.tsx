@@ -1763,17 +1763,17 @@ export default function App() {
 
       const data = await res.json().catch(() => ({}));
 
-      if (res.ok && data.success && (data.status === 'successful' || data.voucherCode)) {
+      if (res.ok && data.success && data.voucherCode) {
         localStorage.removeItem('swiftpay_pending_payment');
         // Clean URL query parameters if present
         if (window.location.search.includes('reference=') || window.location.pathname === '/payment/callback') {
           window.history.replaceState({ appScreen: 'wdv_success' }, '', '/dashboard/buy-wdv');
         }
 
-        const issuedCode = data.voucherCode || `WDV-${ref.slice(-6).toUpperCase()}`;
+        const issuedCode = data.voucherCode;
         const price = Number(data.amount || wdvConfig.voucherPrice || 6500);
         const newWdv: WdvCode = {
-          id: `wdv-${Date.now()}`,
+          id: data.voucherId || `wdv-${Date.now()}`,
           code: issuedCode,
           voucherCode: issuedCode,
           amount: price,
@@ -2881,9 +2881,15 @@ export default function App() {
         <CongratulationsScreen
           userEmail={user.email}
           onContinue={() => {
-            setUser({ ...user, welcomeRewardShown: true });
+            const updatedUser = {
+              ...user,
+              welcomeRewardShown: true,
+              welcomeOnboardingCompletedAt: new Date().toISOString()
+            };
+            setUser(updatedUser);
+            localStorage.setItem('swiftpay_user', JSON.stringify(updatedUser));
             setCurrentScreen('dashboard');
-            showToast('Welcome reward activated!', 'success');
+            showToast('Welcome to SwiftPay!', 'success');
           }}
         />
       )}
@@ -3503,22 +3509,8 @@ export default function App() {
                           </span>
                         </div>
 
-                        {/* Action Buttons: [ Fund ] [ Withdraw ] [ Transfer ] */}
-                        <div className="relative z-10 border-t border-white/10 pt-4 mt-4 grid grid-cols-3 gap-2 sm:gap-3">
-                          <button
-                            id="btn-fund-wallet-trigger"
-                            type="button"
-                            onClick={() => {
-                              setPaymentModalPurpose('wallet_funding');
-                              setPaymentModalAmount(5000);
-                              setPaymentModalOpen(true);
-                            }}
-                            className="w-full py-2.5 px-2.5 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 text-slate-950 text-xs font-black shadow-md shadow-emerald-500/20 active:scale-95 hover:scale-[1.02] transition-all duration-200 flex items-center justify-center gap-1 cursor-pointer"
-                          >
-                            <PlusCircle className="h-4 w-4 stroke-[2.5]" />
-                            <span>Fund</span>
-                          </button>
-
+                        {/* Action Buttons: [ Withdraw ] [ Transfer ] */}
+                        <div className="relative z-10 border-t border-white/10 pt-4 mt-4 grid grid-cols-2 gap-3">
                           <button
                             id="btn-withdraw-trigger"
                             type="button"
@@ -3527,7 +3519,7 @@ export default function App() {
                               setCurrentScreen('withdraw');
                               navigateTo('/dashboard/withdraw');
                             }}
-                            className="w-full py-2.5 px-2.5 rounded-xl bg-gradient-to-r from-teal-400 to-cyan-400 hover:from-teal-300 hover:to-cyan-300 text-slate-950 text-xs font-black shadow-md shadow-teal-500/20 active:scale-95 hover:scale-[1.02] transition-all duration-200 flex items-center justify-center gap-1 cursor-pointer"
+                            className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-teal-400 to-cyan-400 hover:from-teal-300 hover:to-cyan-300 text-slate-950 text-xs font-black shadow-md shadow-teal-500/20 active:scale-95 hover:scale-[1.02] transition-all duration-200 flex items-center justify-center gap-1.5 cursor-pointer"
                           >
                             <ArrowRight className="h-4 w-4 stroke-[2.5]" />
                             <span>Withdraw</span>
@@ -3541,7 +3533,7 @@ export default function App() {
                               setCurrentScreen('transfer_bank');
                               navigateTo('/dashboard/transfer');
                             }}
-                            className="w-full py-2.5 px-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white text-xs font-black shadow-md shadow-indigo-500/25 active:scale-95 hover:scale-[1.02] transition-all duration-200 flex items-center justify-center gap-1 cursor-pointer border border-indigo-400/30"
+                            className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white text-xs font-black shadow-md shadow-indigo-500/25 active:scale-95 hover:scale-[1.02] transition-all duration-200 flex items-center justify-center gap-1.5 cursor-pointer border border-indigo-400/30"
                           >
                             <Send className="h-4 w-4 stroke-[2.5]" />
                             <span>Transfer</span>

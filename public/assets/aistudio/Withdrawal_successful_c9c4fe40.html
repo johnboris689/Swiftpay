@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Withdrawal successful</title>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#EEF3F7; --card:#FFFFFF; --ink:#0E2A47; --muted:#5B6F84; --line:#D9E2EA;
+  --ok:#0E9F8B; --ok-soft:#DDF4EF; --wait:#D9921F; --btn:#0E2A47; --btn-ink:#FFFFFF;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0A1522; --card:#13243A; --ink:#EAF1F8; --muted:#92A6BB; --line:#25384F;
+    --ok:#33CDB5; --ok-soft:#0F3A3A; --wait:#F0B24B; --btn:#EAF1F8; --btn-ink:#0A1522; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0A1522; --card:#13243A; --ink:#EAF1F8; --muted:#92A6BB; --line:#25384F;
+  --ok:#33CDB5; --ok-soft:#0F3A3A; --wait:#F0B24B; --btn:#EAF1F8; --btn-ink:#0A1522; color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Manrope",system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5;
+  min-height:100vh;display:flex;justify-content:center;padding:28px 18px 40px}
+main{width:100%;max-width:420px}
+.status{text-align:center;padding:8px 0 24px}
+.badge{width:84px;height:84px;margin:0 auto 20px;position:relative}
+.badge svg{width:100%;height:100%;overflow:visible}
+.ring{fill:var(--ok-soft);stroke:var(--ok);stroke-width:3;stroke-dasharray:252;stroke-dashoffset:252;animation:draw .7s ease-out .1s forwards}
+.tick{fill:none;stroke:var(--ok);stroke-width:5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:50;stroke-dashoffset:50;animation:draw .45s ease-out .7s forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+h1{font-size:26px;line-height:1.2;font-weight:800;letter-spacing:-.02em;margin:0 0 6px}
+.sub{margin:0 auto;color:var(--muted);font-size:15px;max-width:30ch}
+.receipt{background:var(--card);border:1px solid var(--line);border-radius:20px;position:relative}
+.amount{padding:26px 24px 22px;text-align:center}
+.amount .label{color:var(--muted);font-size:14px;margin-bottom:2px}
+.amount .value{font-size:42px;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.amount .value small{font-size:22px;font-weight:600;color:var(--muted);margin-right:2px}
+.tear{position:relative;border-top:2px dashed var(--line);margin:0 18px}
+.tear::before,.tear::after{content:"";position:absolute;top:-13px;width:24px;height:24px;border-radius:50%;background:var(--bg);border:1px solid var(--line)}
+.tear::before{left:-31px;clip-path:inset(0 0 0 50%)}
+.tear::after{right:-31px;clip-path:inset(0 50% 0 0)}
+dl{margin:0;padding:18px 24px 6px}
+.row{display:flex;justify-content:space-between;gap:16px;padding:10px 0;font-size:14.5px}
+.row dt{color:var(--muted)}
+.row dd{margin:0;font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+.row.total{border-top:1px solid var(--line);margin-top:6px;padding-top:14px}
+.row.total dd{font-weight:800}
+.track{margin:6px 24px 24px;padding:16px;border-radius:14px;background:var(--bg)}
+.track h2{font-size:14px;font-weight:700;margin:0 0 12px}
+.steps{list-style:none;margin:0;padding:0}
+.steps li{position:relative;padding:0 0 14px 28px;font-size:14px}
+.steps li:last-child{padding-bottom:0}
+.steps li::before{content:"";position:absolute;left:0;top:4px;width:14px;height:14px;border-radius:50%;border:2px solid var(--line);background:var(--card)}
+.steps li::after{content:"";position:absolute;left:6px;top:20px;bottom:-2px;width:2px;background:var(--line)}
+.steps li:last-child::after{display:none}
+.steps li.done::before{background:var(--ok);border-color:var(--ok)}
+.steps li.done::after{background:var(--ok)}
+.steps li.now::before{border-color:var(--wait);background:var(--wait);box-shadow:0 0 0 4px color-mix(in srgb,var(--wait) 25%,transparent)}
+.steps b{display:block;font-weight:700}
+.steps span{color:var(--muted);font-size:13px}
+.actions{display:grid;gap:10px;margin-top:20px}
+button{font:inherit;font-weight:700;font-size:16px;min-height:52px;border-radius:14px;border:1px solid transparent;cursor:pointer;padding:0 18px}
+.primary{background:var(--btn);color:var(--btn-ink)}
+.secondary{background:transparent;color:var(--ink);border-color:var(--line)}
+button:focus-visible{outline:3px solid var(--ok);outline-offset:3px}
+.note{text-align:center;color:var(--muted);font-size:13px;margin:18px 8px 0}
+@media (prefers-reduced-motion:reduce){.ring,.tick{animation:none;stroke-dashoffset:0}}
+</style>
+</head>
+<body>
+<main>
+  <section class="status" aria-live="polite">
+    <div class="badge">
+      <svg viewBox="0 0 84 84" aria-hidden="true">
+        <circle class="ring" cx="42" cy="42" r="40" transform="rotate(-90 42 42)"/>
+        <path class="tick" d="M27 43l11 11 20-23"/>
+      </svg>
+    </div>
+    <h1>Withdrawal successful</h1>
+    <p class="sub">Your money is on its way to your bank account.</p>
+  </section>
+
+  <article class="receipt" aria-label="Withdrawal receipt">
+    <div class="amount">
+      <div class="label">You withdrew</div>
+      <div class="value"><small>$</small>1,250.00</div>
+    </div>
+    <div class="tear" aria-hidden="true"></div>
+    <dl>
+      <div class="row"><dt>To</dt><dd>Chase Checking ••4417</dd></div>
+      <div class="row"><dt>Date</dt><dd>Oct 26, 2026, 10:42 AM</dd></div>
+      <div class="row"><dt>Reference</dt><dd id="ref">WD-48213907</dd></div>
+      <div class="row"><dt>Fee</dt><dd>$0.00</dd></div>
+      <div class="row total"><dt>Arrives in your bank</dt><dd>Oct 27–28</dd></div>
+    </dl>
+    <div class="track">
+      <h2>Where your money is</h2>
+      <ol class="steps">
+        <li class="done"><b>Requested</b><span>Oct 26, 10:42 AM</span></li>
+        <li class="now"><b>Processing</b><span>Usually takes a few hours</span></li>
+        <li><b>Arrives in your bank</b><span>Expected Oct 27–28</span></li>
+      </ol>
+    </div>
+  </article>
+
+  <div class="actions">
+    <button class="primary" type="button">Back to wallet</button>
+    <button class="secondary" type="button" id="copy">Copy reference</button>
+  </div>
+  <p class="note">We’ve emailed you a receipt. Questions? Quote your reference when you contact support.</p>
+</main>
+<script>
+(function(){
+  var b=document.getElementById('copy');
+  b.addEventListener('click',function(){
+    var t=document.getElementById('ref').textContent;
+    try{
+      navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy reference'},1800)},function(){});
+    }catch(e){}
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,9 +1,7 @@
-import React from 'react';
-import { Download, Share2, CheckCircle2, X, ShieldCheck } from 'lucide-react';
+import React, { useState } from 'react';
+import { Download, Share2, X, Check, Copy, ShieldCheck, ArrowRight } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { Transaction } from '../types';
-import GlassCard from './GlassCard';
-import { formatNaira } from '../utils/formatters';
 
 interface TransactionReceiptProps {
   transaction: Transaction | null;
@@ -12,93 +10,83 @@ interface TransactionReceiptProps {
   onToast: (msg: string, type: 'success' | 'info' | 'error') => void;
 }
 
+// Helper: Mask account number to show first 2 and last 3 digits (e.g. 12*****890)
+export function maskAccountNumber(accountNumber: string | undefined): string {
+  const clean = String(accountNumber || '').trim();
+  if (!clean) return '••••••••••';
+  if (clean.length <= 5) return clean;
+  const first2 = clean.slice(0, 2);
+  const last3 = clean.slice(-3);
+  const maskedLength = Math.max(1, clean.length - 5);
+  return `${first2}${'*'.repeat(maskedLength)}${last3}`;
+}
+
+// Helper: Format currency strictly using Nigerian Naira (₦) with 2 decimals
+export function formatReceiptNaira(amount: number | string | undefined): string {
+  const num = typeof amount === 'number' ? amount : parseFloat(String(amount || 0));
+  const safeNum = isNaN(num) ? 0 : num;
+  return `₦${safeNum.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 export default function TransactionReceipt({
   transaction,
   onClose,
   onShare,
   onToast
 }: TransactionReceiptProps) {
+  const [copiedRef, setCopiedRef] = useState(false);
+
   if (!transaction) return null;
 
   const getFormattedDate = (dateStr: string) => {
     const d = new Date(dateStr);
+    const valid = !isNaN(d.getTime());
+    const targetDate = valid ? d : new Date();
     return {
-      date: d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
-      time: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      isoDate: d.toISOString().split('T')[0]
+      date: targetDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }),
+      time: targetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      full: targetDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) + ', ' + targetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isoDate: targetDate.toISOString().split('T')[0]
     };
   };
 
-  const { date, time, isoDate } = getFormattedDate(transaction.date);
-  const refNum = transaction.reference || transaction.refNum || transaction.id;
+  const { full: formattedDate, isoDate } = getFormattedDate(transaction.date);
+  const refNum = transaction.reference || transaction.refNum || transaction.id || `TXN-${Date.now()}`;
   const newBalanceVal = transaction.newBalance ?? (transaction as any).balanceAfter ?? 0;
-
-  let title = "Transaction Receipt";
-  let contentRows: { label: string; value: string; bold?: boolean; highlight?: boolean; selectAll?: boolean }[] = [];
-
   const type = transaction.type;
 
-  if (type === 'withdraw') {
-    title = "Withdrawal Successful";
-    contentRows = [
-      { label: "Bank", value: transaction.recipientBank || 'PalmPay', bold: true },
-      { label: "Account Name", value: transaction.recipientName || 'Pwamunadi Ishaku' },
-      { label: "Account Number", value: transaction.recipientAccount || '8960723295' },
-      { label: "Amount", value: formatNaira(transaction.amount), bold: true },
-      { label: "Transaction Reference", value: refNum, selectAll: true },
-      { label: "Date & Time", value: `${date} ${time}` },
-      { label: "Remaining Wallet Balance", value: formatNaira(newBalanceVal), highlight: true }
-    ];
-  } else if (type === 'bank_transfer_direct') {
-    title = "Transfer Successful";
-    contentRows = [
-      { label: "Recipient Bank", value: transaction.recipientBank || 'N/A', bold: true },
-      { label: "Recipient Account Number", value: transaction.recipientAccount || 'N/A' },
-      { label: "Recipient Name", value: transaction.recipientName || 'N/A' },
-      { label: "Amount", value: formatNaira(transaction.amount), bold: true },
-      { label: "Transaction Reference", value: refNum, selectAll: true },
-      { label: "Date & Time", value: `${date} ${time}` },
-      { label: "Remaining Wallet Balance", value: formatNaira(newBalanceVal), highlight: true }
-    ];
-  } else if (type === 'redeem_airtime') {
-    title = "Airtime Purchase Successful";
-    contentRows = [
-      { label: "Network", value: transaction.recipientBank || transaction.network || 'MTN', bold: true },
-      { label: "Phone Number", value: transaction.recipientAccount || transaction.phoneNumber || 'N/A' },
-      { label: "Amount", value: formatNaira(transaction.amount), bold: true },
-      { label: "Transaction Reference", value: refNum, selectAll: true },
-      { label: "Date & Time", value: `${date} ${time}` },
-      { label: "Remaining Wallet Balance", value: formatNaira(newBalanceVal), highlight: true }
-    ];
-  } else if (type === 'redeem_data') {
-    let planSize = transaction.dataPlan;
-    if (!planSize && transaction.description) {
-      const match = transaction.description.match(/Data Purchase of\s+(\S+)/i);
-      if (match) planSize = match[1];
-    }
-    if (!planSize) planSize = "1.5GB";
+  // Beneficiary details
+  const bankName = transaction.recipientBank || 'PalmPay';
+  const recipientName = transaction.recipientName || 'SwiftPay User';
+  const recipientAccount = transaction.recipientAccount || '8960723295';
+  const maskedAccount = maskAccountNumber(recipientAccount);
 
-    title = "Data Purchase Successful";
-    contentRows = [
-      { label: "Network", value: transaction.recipientBank || transaction.network || 'MTN', bold: true },
-      { label: "Phone Number", value: transaction.recipientAccount || transaction.phoneNumber || 'N/A' },
-      { label: "Data Plan", value: planSize },
-      { label: "Amount", value: formatNaira(transaction.amount), bold: true },
-      { label: "Transaction Reference", value: refNum, selectAll: true },
-      { label: "Date & Time", value: `${date} ${time}` },
-      { label: "Remaining Wallet Balance", value: formatNaira(newBalanceVal), highlight: true }
-    ];
+  let title = "Withdrawal successful";
+  let subtitle = "Your money is on its way to your bank account.";
+
+  if (type === 'withdraw') {
+    title = "Withdrawal successful";
+    subtitle = "Your money is on its way to your bank account.";
+  } else if (type === 'bank_transfer_direct') {
+    title = "Transfer successful";
+    subtitle = "Your transfer has been processed and sent to the recipient.";
+  } else if (type === 'redeem_airtime') {
+    title = "Airtime purchase successful";
+    subtitle = "Mobile line has been credited with airtime.";
+  } else if (type === 'redeem_data') {
+    title = "Data bundle successful";
+    subtitle = "Data bundle subscription is active.";
   } else {
-    title = "Operation Successful";
-    contentRows = [
-      { label: "Transaction Reference", value: transaction.id, selectAll: true },
-      { label: "Date & Time", value: `${date} ${time}` },
-      { label: "Type", value: transaction.type.toUpperCase() },
-      { label: "Amount", value: formatNaira(transaction.amount), bold: true },
-      { label: "Description", value: transaction.description },
-      { label: "Remaining Wallet Balance", value: formatNaira(newBalanceVal), highlight: true }
-    ];
+    title = "Transaction successful";
+    subtitle = "Your payment transaction has been processed successfully.";
   }
+
+  const handleCopyReference = () => {
+    navigator.clipboard.writeText(refNum);
+    setCopiedRef(true);
+    onToast('Reference copied to clipboard!', 'success');
+    setTimeout(() => setCopiedRef(false), 2000);
+  };
 
   const handleDownload = () => {
     try {
@@ -109,8 +97,8 @@ export default function TransactionReceipt({
       });
 
       // Colors
-      const primaryDark = [12, 12, 20]; // #0c0c14
-      const tealAccent = [45, 212, 191]; // #2dd4bf
+      const primaryDark = [15, 23, 42]; // #0f172a
+      const emeraldAccent = [16, 185, 129]; // #10b981
       const slateDark = [15, 23, 42]; // #0f172a
       const borderGray = [226, 232, 240]; // #e2e8f0
       const textDark = [30, 41, 59]; // #1e293b
@@ -120,11 +108,11 @@ export default function TransactionReceipt({
       doc.setFillColor(primaryDark[0], primaryDark[1], primaryDark[2]);
       doc.rect(0, 0, 210, 48, 'F');
 
-      // Top Header Accent Bar
-      doc.setFillColor(tealAccent[0], tealAccent[1], tealAccent[2]);
+      // Top Accent Line
+      doc.setFillColor(emeraldAccent[0], emeraldAccent[1], emeraldAccent[2]);
       doc.rect(0, 0, 210, 4, 'F');
 
-      // Header Brand Text
+      // Brand Text
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(22);
       doc.setTextColor(255, 255, 255);
@@ -132,18 +120,18 @@ export default function TransactionReceipt({
 
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(10);
-      doc.setTextColor(tealAccent[0], tealAccent[1], tealAccent[2]);
+      doc.setTextColor(emeraldAccent[0], emeraldAccent[1], emeraldAccent[2]);
       doc.text('Official Settlement Confirmation & Transaction Receipt', 20, 31);
 
       // Status Badge
-      doc.setFillColor(16, 185, 129); // Emerald 500
+      doc.setFillColor(16, 185, 129);
       doc.roundedRect(150, 18, 40, 10, 2, 2, 'F');
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8);
       doc.setTextColor(255, 255, 255);
       doc.text('SUCCESSFUL', 156, 24.5);
 
-      // Amount Display Box
+      // Amount Box
       doc.setFillColor(248, 250, 252);
       doc.setDrawColor(borderGray[0], borderGray[1], borderGray[2]);
       doc.roundedRect(20, 56, 170, 28, 3, 3, 'FD');
@@ -151,12 +139,12 @@ export default function TransactionReceipt({
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
       doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-      doc.text('TOTAL TRANSACTION SETTLEMENT', 30, 66);
+      doc.text('TOTAL AMOUNT', 30, 66);
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(20);
       doc.setTextColor(slateDark[0], slateDark[1], slateDark[2]);
-      const amountStr = `NGN ${transaction.amount.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+      const amountStr = `NGN ${Number(transaction.amount).toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
       doc.text(amountStr, 30, 77);
 
       // Receipt Title
@@ -166,37 +154,33 @@ export default function TransactionReceipt({
       doc.text(title.toUpperCase(), 20, 96);
 
       // Items Card Table
-      let startY = 104;
+      const contentRows = [
+        { label: "To", value: `${bankName} • ${recipientName} • ${maskedAccount}` },
+        { label: "Date & Time", value: formattedDate },
+        { label: "Transaction Reference", value: refNum },
+        { label: "Fee", value: "NGN 0.00" },
+        { label: "Remaining Wallet Balance", value: `NGN ${Number(newBalanceVal).toLocaleString('en-NG', { minimumFractionDigits: 2 })}` },
+        { label: "Arrives in your bank", value: "Expected within 24 hours" }
+      ];
+
+      const startY = 104;
       doc.setFillColor(255, 255, 255);
       doc.setDrawColor(borderGray[0], borderGray[1], borderGray[2]);
       doc.roundedRect(20, startY, 170, (contentRows.length * 12) + 12, 3, 3, 'D');
 
       let currentY = startY + 10;
-
-      // Table Rows
       contentRows.forEach((row, idx) => {
-        // Label
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9.5);
         doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
         doc.text(row.label, 26, currentY);
 
-        // Value
-        doc.setFont('helvetica', row.bold || row.highlight ? 'bold' : 'normal');
+        doc.setFont('helvetica', 'bold');
         doc.setFontSize(9.5);
-        if (row.highlight) {
-          doc.setTextColor(13, 148, 136); // Teal 600
-        } else {
-          doc.setTextColor(textDark[0], textDark[1], textDark[2]);
-        }
-
-        // Clean value string for PDF compatibility
-        const cleanVal = row.value.replace(/₦/g, 'NGN ');
-        doc.text(cleanVal, 184, currentY, { align: 'right' });
+        doc.setTextColor(textDark[0], textDark[1], textDark[2]);
+        doc.text(row.value, 184, currentY, { align: 'right' });
 
         currentY += 12;
-
-        // Row Separator Line
         if (idx < contentRows.length - 1) {
           doc.setDrawColor(241, 245, 249);
           doc.line(26, currentY - 6, 184, currentY - 6);
@@ -217,16 +201,14 @@ export default function TransactionReceipt({
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8.5);
       doc.setTextColor(textMuted[0], textMuted[1], textMuted[2]);
-      doc.text('• End-to-end encrypted transaction settlement record.', 28, footerY + 17);
-      doc.text('• Support: support@swiftpay.com | Website: www.swiftpay.com', 28, footerY + 23);
+      doc.text('• End-to-end encrypted settlement record.', 28, footerY + 17);
+      doc.text('• Support: support@swiftpay.com | www.swiftpay.com', 28, footerY + 23);
 
-      // Bottom Watermark & Time
       doc.setFontSize(7.5);
       doc.setTextColor(148, 163, 184);
       doc.text(`Generated on ${new Date().toLocaleString()} • SwiftPay Enterprise Engine`, 105, 280, { align: 'center' });
 
-      // Save PDF file cleanly triggering direct download
-      const filename = `${type === 'withdraw' ? 'Withdrawal' : 'SwiftPay'}-Receipt-${isoDate}.pdf`;
+      const filename = `SwiftPay-Withdrawal-${isoDate}.pdf`;
       doc.save(filename);
       onToast(`PDF receipt downloaded: ${filename}`, 'success');
     } catch (err) {
@@ -236,85 +218,275 @@ export default function TransactionReceipt({
   };
 
   const handleShareClick = () => {
-    const summary = `SwiftPay Receipt:\n${title}\n` + contentRows.map(row => `${row.label}: ${row.value}`).join('\n');
+    const summary = `SwiftPay Receipt\n${title}\nAmount: ${formatReceiptNaira(transaction.amount)}\nTo: ${bankName} • ${recipientName} • ${maskedAccount}\nReference: ${refNum}\nDate: ${formattedDate}`;
     onShare(summary);
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm bg-[#0c0c14] border border-white/10 rounded-[32px] overflow-hidden shadow-2xl relative animate-[scaleUp_0.25s_ease-out] font-sans">
+    <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+      {/* SVG Animation Keyframes */}
+      <style>{`
+        @keyframes receiptRingDraw {
+          0% { stroke-dashoffset: 140; }
+          100% { stroke-dashoffset: 0; }
+        }
+        @keyframes receiptTickDraw {
+          0% { stroke-dashoffset: 35; }
+          100% { stroke-dashoffset: 0; }
+        }
+        .anim-receipt-ring {
+          stroke-dasharray: 140;
+          stroke-dashoffset: 140;
+          animation: receiptRingDraw 0.7s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+        }
+        .anim-receipt-tick {
+          stroke-dasharray: 35;
+          stroke-dashoffset: 35;
+          animation: receiptTickDraw 0.45s 0.25s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+        }
+      `}</style>
+
+      {/* Main Receipt Card */}
+      <div className="relative w-full max-w-[420px] bg-[#10141e] text-slate-100 rounded-3xl border border-white/10 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.8)] overflow-hidden my-auto animate-[scaleUp_0.22s_ease-out]">
         
-        {/* Receipt Header Banner */}
-        <div className="bg-gradient-to-r from-indigo-600 to-teal-500 p-6 text-center text-white relative">
-          <button
-            onClick={onClose}
-            className="absolute top-4 right-4 p-1.5 rounded-full bg-black/20 hover:bg-black/40 text-white/80 hover:text-white transition-colors cursor-pointer"
-          >
-            <X className="h-4 w-4" />
-          </button>
-          
-          <div className="mx-auto h-12 w-12 rounded-full bg-white/10 flex items-center justify-center mb-2">
-            <CheckCircle2 className="h-7 w-7 text-teal-300" />
+        {/* Top Dismiss Button */}
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 z-20 p-2 rounded-full bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors cursor-pointer"
+          aria-label="Close receipt"
+        >
+          <X className="h-4 w-4" />
+        </button>
+
+        {/* Top Header Section with Animated Badge */}
+        <div className="pt-8 pb-4 px-6 text-center">
+          {/* Animated SVG Badge */}
+          <div className="relative inline-flex items-center justify-center mb-3">
+            <div className="h-16 w-16 rounded-full bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center shadow-[0_0_35px_rgba(16,185,129,0.2)]">
+              <svg className="h-10 w-10 text-emerald-400" viewBox="0 0 48 48" fill="none">
+                <circle
+                  cx="24"
+                  cy="24"
+                  r="20"
+                  stroke="currentColor"
+                  strokeWidth="2.75"
+                  strokeLinecap="round"
+                  className="anim-receipt-ring opacity-80"
+                />
+                <path
+                  d="M15 24.5 L21.5 31 L33 19"
+                  stroke="currentColor"
+                  strokeWidth="3.25"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="anim-receipt-tick"
+                />
+              </svg>
+            </div>
           </div>
-          <h4 className="text-sm font-black tracking-widest uppercase font-mono">{title}</h4>
-          <p className="text-[10px] text-teal-200 mt-1">Official settlement confirmation</p>
+
+          <h3 className="text-xl font-bold tracking-tight text-white font-sans">
+            {title}
+          </h3>
+          <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto leading-relaxed">
+            {subtitle}
+          </p>
+
+          {/* Amount Display */}
+          <div className="mt-4 pt-1">
+            <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 font-semibold">
+              Amount
+            </div>
+            <div className="text-3xl sm:text-[34px] font-black text-white font-mono tracking-tight mt-1 tabular-nums">
+              {formatReceiptNaira(transaction.amount)}
+            </div>
+            <div className="inline-flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-0.5 rounded-full text-[11px] font-semibold mt-2.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              Status: Successful
+            </div>
+          </div>
         </div>
 
-        {/* Content Body */}
-        <div className="p-5 space-y-4">
-          <div className="text-center">
-            <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Total Settlement</span>
-            <h3 className="text-2xl font-black font-mono text-white mt-1">
-              ₦{transaction.amount.toLocaleString()}
-            </h3>
-            <span className="text-[9px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full inline-block mt-2">
-              Status: Successful
+        {/* Decorative Tear Cutout Divider */}
+        <div className="relative my-2 flex items-center px-1">
+          <div className="absolute -left-3.5 h-7 w-7 rounded-full bg-slate-950/85 border-r border-white/10"></div>
+          <div className="w-full border-t border-dashed border-white/15"></div>
+          <div className="absolute -right-3.5 h-7 w-7 rounded-full bg-slate-950/85 border-l border-white/10"></div>
+        </div>
+
+        {/* Receipt Body & Timeline */}
+        <div className="px-6 py-4 space-y-5">
+          {/* Detailed Transaction Fields */}
+          <dl className="space-y-2.5 text-xs">
+            {/* Beneficiary */}
+            <div className="flex justify-between items-baseline gap-2">
+              <dt className="text-slate-400 text-[11px] font-medium shrink-0">To</dt>
+              <dd className="text-right text-slate-100 font-semibold truncate">
+                <span>{bankName}</span>
+                <span className="mx-1 text-slate-500">•</span>
+                <span className="text-slate-200">{recipientName}</span>
+                <span className="mx-1 text-slate-500">•</span>
+                <span className="font-mono text-emerald-300 tracking-wider">{maskedAccount}</span>
+              </dd>
+            </div>
+
+            {/* Date */}
+            <div className="flex justify-between items-baseline gap-2">
+              <dt className="text-slate-400 text-[11px] font-medium shrink-0">Date</dt>
+              <dd className="text-right text-slate-200 font-medium font-mono text-[11px]">
+                {formattedDate}
+              </dd>
+            </div>
+
+            {/* Reference with inline copy */}
+            <div className="flex justify-between items-center gap-2">
+              <dt className="text-slate-400 text-[11px] font-medium shrink-0">Reference</dt>
+              <dd className="flex items-center gap-1.5 text-slate-200 font-mono text-[11px]">
+                <span className="select-all truncate max-w-[170px] sm:max-w-[210px]">{refNum}</span>
+                <button
+                  type="button"
+                  onClick={handleCopyReference}
+                  className="p-1 text-slate-400 hover:text-teal-300 transition-colors rounded hover:bg-white/5 cursor-pointer"
+                  title="Copy reference"
+                >
+                  {copiedRef ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                </button>
+              </dd>
+            </div>
+
+            {/* Fee */}
+            <div className="flex justify-between items-baseline gap-2">
+              <dt className="text-slate-400 text-[11px] font-medium shrink-0">Fee</dt>
+              <dd className="text-right text-emerald-400 font-semibold font-mono text-[11px]">
+                ₦0.00
+              </dd>
+            </div>
+
+            {/* Remaining Wallet Balance */}
+            <div className="flex justify-between items-baseline gap-2 pt-1 border-t border-white/5">
+              <dt className="text-slate-400 text-[11px] font-medium shrink-0">Remaining Wallet Balance</dt>
+              <dd className="text-right text-teal-300 font-bold font-mono text-xs">
+                {formatReceiptNaira(newBalanceVal)}
+              </dd>
+            </div>
+
+            {/* Arrival Notice */}
+            <div className="flex justify-between items-baseline gap-2">
+              <dt className="text-slate-400 text-[11px] font-medium shrink-0">Arrives in your bank</dt>
+              <dd className="text-right text-slate-300 font-medium text-[11px]">
+                Expected within 24 hours
+              </dd>
+            </div>
+          </dl>
+
+          {/* Timeline Tracker: Where your money is */}
+          <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-4">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-3 font-mono">
+              Where your money is
             </span>
-          </div>
 
-          <GlassCard className="p-4 bg-white/[0.02] border-white/5 space-y-3 font-mono text-[10px] text-slate-300">
-            {contentRows.map((row, i) => (
-              <div key={i}>
-                {row.label === 'New Wallet Balance' || row.label === 'New Balance' || row.label === 'Remaining Wallet Balance' ? (
-                  <div className="border-t border-dashed border-white/10 my-2 pt-2 flex justify-between text-xs font-bold text-teal-400">
-                    <span>{row.label}</span>
-                    <span>{row.value}</span>
-                  </div>
-                ) : (
-                  <div className="flex justify-between items-center py-0.5">
-                    <span className="text-slate-500">{row.label}</span>
-                    <span className={`text-white truncate max-w-[200px] ${row.bold ? 'font-bold' : ''} ${row.selectAll ? 'select-all' : ''}`}>
-                      {row.value}
-                    </span>
-                  </div>
-                )}
+            <div className="relative pl-6 space-y-4">
+              {/* Vertical connector line */}
+              <div className="absolute left-[9px] top-2 bottom-2 w-0.5 bg-gradient-to-b from-emerald-500 via-teal-500 to-slate-700"></div>
+
+              {/* Step 1: Requested */}
+              <div className="relative flex items-start gap-2.5">
+                <div className="absolute -left-6 mt-0.5 h-5 w-5 rounded-full bg-emerald-500/20 border border-emerald-500 flex items-center justify-center">
+                  <Check className="h-3 w-3 text-emerald-400 stroke-[3]" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-white">Withdrawal requested</div>
+                  <div className="text-[10px] text-emerald-400 font-mono">Completed</div>
+                </div>
               </div>
-            ))}
-          </GlassCard>
 
-          <div className="flex gap-2">
-            <button
-              id="btn-download-pdf-receipt"
-              onClick={handleDownload}
-              className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-teal-500 hover:from-indigo-700 hover:to-teal-600 text-white text-xs font-bold uppercase tracking-wider rounded-xl transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2"
-            >
-              <Download className="h-3.5 w-3.5" /> Download PDF
-            </button>
-            <button
-              onClick={handleShareClick}
-              className="px-4 bg-white/5 hover:bg-white/10 text-slate-300 rounded-xl transition-all active:scale-95 cursor-pointer flex items-center justify-center"
-              title="Share Receipt Summary"
-            >
-              <Share2 className="h-4 w-4" />
-            </button>
+              {/* Step 2: Processing */}
+              <div className="relative flex items-start gap-2.5">
+                <div className="absolute -left-6 mt-0.5 h-5 w-5 rounded-full bg-teal-500/20 border border-teal-400 flex items-center justify-center">
+                  <span className="h-2 w-2 rounded-full bg-teal-400 animate-ping"></span>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-white">Processing settlement</div>
+                  <div className="text-[10px] text-slate-400">Usually takes a few minutes</div>
+                </div>
+              </div>
+
+              {/* Step 3: Arrives in your bank */}
+              <div className="relative flex items-start gap-2.5">
+                <div className="absolute -left-6 mt-0.5 h-5 w-5 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center">
+                  <span className="h-1.5 w-1.5 rounded-full bg-slate-500"></span>
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-slate-300">Arrives in your bank account</div>
+                  <div className="text-[10px] text-slate-500">Expected within 24 hours</div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="flex items-center gap-1.5 text-[9px] text-slate-500 justify-center">
-            <ShieldCheck className="h-3.5 w-3.5 text-teal-500" /> Fully Encrypted &amp; Verified Settlement Receipt
+          {/* Action Buttons */}
+          <div className="space-y-2 pt-1">
+            {/* Primary Action: Back to wallet */}
+            <button
+              id="btn-receipt-back-wallet"
+              type="button"
+              onClick={onClose}
+              className="w-full py-3 px-4 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-950 font-bold text-xs uppercase tracking-wider rounded-xl transition-all active:scale-[0.98] shadow-lg shadow-teal-500/20 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              Back to wallet <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+
+            {/* Secondary Actions: Copy reference, Download PDF, Share */}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleCopyReference}
+                className="flex-1 py-2.5 px-3 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 text-xs font-semibold rounded-xl transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                {copiedRef ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-emerald-400" />
+                    <span className="text-emerald-400">Reference Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3.5 w-3.5 text-slate-400" />
+                    <span>Copy reference</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                id="btn-download-pdf-receipt"
+                type="button"
+                onClick={handleDownload}
+                className="px-3.5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+                title="Download PDF"
+              >
+                <Download className="h-4 w-4 text-slate-400" />
+              </button>
+
+              <button
+                type="button"
+                onClick={handleShareClick}
+                className="px-3.5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+                title="Share Receipt"
+              >
+                <Share2 className="h-4 w-4 text-slate-400" />
+              </button>
+            </div>
+          </div>
+
+          {/* Footer Note */}
+          <div className="pt-2 text-center text-[10px] text-slate-500 leading-relaxed">
+            <p>We've emailed you a receipt. Questions? Quote your reference when you contact support.</p>
+            <div className="flex items-center justify-center gap-1 text-[9px] text-slate-600 mt-2">
+              <ShieldCheck className="h-3 w-3 text-teal-500/80" />
+              <span>End-to-End Encrypted Settlement Record</span>
+            </div>
           </div>
         </div>
       </div>
     </div>
   );
 }
-

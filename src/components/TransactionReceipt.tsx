@@ -62,11 +62,11 @@ export default function TransactionReceipt({
   const maskedAccount = maskAccountNumber(recipientAccount);
 
   let title = "Withdrawal successful";
-  let subtitle = "Your money is on its way to your bank account.";
+  let subtitle = "Your withdrawal has been successful, and your funds have been credited into your account.";
 
   if (type === 'withdraw') {
     title = "Withdrawal successful";
-    subtitle = "Your money is on its way to your bank account.";
+    subtitle = "Your withdrawal has been successful, and your funds have been credited into your account.";
   } else if (type === 'bank_transfer_direct') {
     title = "Transfer successful";
     subtitle = "Your transfer has been processed and sent to the recipient.";
@@ -372,9 +372,9 @@ export default function TransactionReceipt({
 
             {/* Arrival Notice */}
             <div className="flex justify-between items-baseline gap-2">
-              <dt className="text-slate-400 text-[11px] font-medium shrink-0">Arrives in your bank</dt>
-              <dd className="text-right text-slate-300 font-medium text-[11px]">
-                Expected within 24 hours
+              <dt className="text-slate-400 text-[11px] font-medium shrink-0">Status</dt>
+              <dd className="text-right text-emerald-400 font-medium text-[11px]">
+                Credited to your bank
               </dd>
             </div>
           </dl>
@@ -387,7 +387,7 @@ export default function TransactionReceipt({
 
             <div className="relative pl-6 space-y-4">
               {/* Vertical connector line */}
-              <div className="absolute left-[9px] top-2 bottom-2 w-0.5 bg-gradient-to-b from-emerald-500 via-teal-500 to-slate-700"></div>
+              <div className="absolute left-[9px] top-2 bottom-2 w-0.5 bg-emerald-500"></div>
 
               {/* Step 1: Requested */}
               <div className="relative flex items-start gap-2.5">
@@ -395,30 +395,30 @@ export default function TransactionReceipt({
                   <Check className="h-3 w-3 text-emerald-400 stroke-[3]" />
                 </div>
                 <div>
-                  <div className="text-xs font-semibold text-white">Withdrawal requested</div>
+                  <div className="text-xs font-semibold text-white">Requested</div>
                   <div className="text-[10px] text-emerald-400 font-mono">Completed</div>
                 </div>
               </div>
 
-              {/* Step 2: Processing */}
+              {/* Step 2: Processed */}
               <div className="relative flex items-start gap-2.5">
-                <div className="absolute -left-6 mt-0.5 h-5 w-5 rounded-full bg-teal-500/20 border border-teal-400 flex items-center justify-center">
-                  <span className="h-2 w-2 rounded-full bg-teal-400 animate-ping"></span>
+                <div className="absolute -left-6 mt-0.5 h-5 w-5 rounded-full bg-emerald-500/20 border border-emerald-500 flex items-center justify-center">
+                  <Check className="h-3 w-3 text-emerald-400 stroke-[3]" />
                 </div>
                 <div>
-                  <div className="text-xs font-semibold text-white">Processing settlement</div>
-                  <div className="text-[10px] text-slate-400">Usually takes a few minutes</div>
+                  <div className="text-xs font-semibold text-white">Processed</div>
+                  <div className="text-[10px] text-emerald-400 font-mono">Sent to your bank</div>
                 </div>
               </div>
 
-              {/* Step 3: Arrives in your bank */}
+              {/* Step 3: Credited */}
               <div className="relative flex items-start gap-2.5">
-                <div className="absolute -left-6 mt-0.5 h-5 w-5 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center">
-                  <span className="h-1.5 w-1.5 rounded-full bg-slate-500"></span>
+                <div className="absolute -left-6 mt-0.5 h-5 w-5 rounded-full bg-emerald-500/20 border border-emerald-500 flex items-center justify-center">
+                  <Check className="h-3 w-3 text-emerald-400 stroke-[3]" />
                 </div>
                 <div>
-                  <div className="text-xs font-medium text-slate-300">Arrives in your bank account</div>
-                  <div className="text-[10px] text-slate-500">Expected within 24 hours</div>
+                  <div className="text-xs font-semibold text-white">Credited to your account</div>
+                  <div className="text-[10px] text-emerald-400 font-mono">Funds credited into account</div>
                 </div>
               </div>
             </div>

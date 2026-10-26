@@ -2507,13 +2507,13 @@ export default function App() {
       // Trigger notification update
       const newNotif: NotificationItem = {
         id: `notif-${Date.now()}`,
-        title: 'Withdrawal Pending Approval',
-        body: `Your withdrawal request of ₦${price.toLocaleString()} to ${withdrawAccName} (${withdrawBank}) has been received successfully and is currently under manual review by our compliance team. You will receive another notification once it has been approved or rejected.`,
+        title: 'Withdrawal Successful',
+        body: `Your withdrawal of ₦${price.toLocaleString()} to ${withdrawAccName} (${withdrawBank}) has been processed successfully and credited into your account.`,
         date: new Date().toISOString(),
         unread: true,
         type: 'withdraw',
         category: 'Withdrawal',
-        status: 'Pending Review',
+        status: 'Completed',
         amount: price,
         recipientName: withdrawAccName,
         bankName: withdrawBank,

@@ -636,6 +636,10 @@ export default function App() {
   const [wdvPaymentError, setWdvPaymentError] = useState<string>('');
   const [wdvCheckoutRef, setWdvCheckoutRef] = useState<string>('');
   const [wdvCheckoutUrl, setWdvCheckoutUrl] = useState<string>('');
+  const [paymentProviders, setPaymentProviders] = useState<Array<{ name: 'korapay' | 'paystack'; displayName: string; isConfigured: boolean; missingEnvVars?: string[] }>>([]);
+  const [selectedPaymentProvider, setSelectedPaymentProvider] = useState<'korapay' | 'paystack'>('korapay');
+  const [paymentProviderCase, setPaymentProviderCase] = useState<'both' | 'paystack_only' | 'korapay_only' | 'none'>('both');
+  const [isLoadingPaymentProviders, setIsLoadingPaymentProviders] = useState<boolean>(true);
   const wdvInitLockRef = useRef<boolean>(false);
   const wdvVerifyLockRef = useRef<boolean>(false);
 
@@ -1750,14 +1754,53 @@ export default function App() {
     return msg;
   };
 
-  // Verify Korapay WDV Payment Server-Side (Idempotent)
-  const handleVerifyKorapayWdv = async (referenceToVerify?: string) => {
+  // Dynamic payment gateway configuration loader
+  const fetchPaymentGatewayConfig = async () => {
+    try {
+      setIsLoadingPaymentProviders(true);
+      const res = await fetch('/api/payment/config');
+      const data = await res.json().catch(() => ({}));
+      if (data && data.success && Array.isArray(data.providers)) {
+        setPaymentProviders(data.providers);
+        const kAvail = data.korapayAvailable ?? data.providers.find((p: any) => p.name === 'korapay')?.isConfigured ?? false;
+        const pAvail = data.paystackAvailable ?? data.providers.find((p: any) => p.name === 'paystack')?.isConfigured ?? false;
+
+        let pCase: 'both' | 'paystack_only' | 'korapay_only' | 'none' = 'none';
+        if (kAvail && pAvail) {
+          pCase = 'both';
+          setSelectedPaymentProvider((prev) => (prev === 'paystack' || prev === 'korapay' ? prev : 'paystack'));
+        } else if (pAvail) {
+          pCase = 'paystack_only';
+          setSelectedPaymentProvider('paystack');
+        } else if (kAvail) {
+          pCase = 'korapay_only';
+          setSelectedPaymentProvider('korapay');
+        } else {
+          pCase = 'none';
+        }
+        setPaymentProviderCase(pCase);
+      }
+    } catch (_err) {
+      // keep default fallback
+    } finally {
+      setIsLoadingPaymentProviders(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPaymentGatewayConfig();
+  }, []);
+
+  // Verify WDV Payment Server-Side (Idempotent, Multi-Provider)
+  const handleVerifyWdvPayment = async (referenceToVerify?: string, providerHint?: string) => {
     const ref = (referenceToVerify || wdvCheckoutRef || '').trim();
     if (!ref || wdvVerifyLockRef.current) return;
 
     wdvVerifyLockRef.current = true;
     setIsVerifyingWdv(true);
     setWdvPaymentError('');
+
+    const resolvedProvider = providerHint || selectedPaymentProvider || (ref.startsWith('SPAY_PSTK') ? 'paystack' : 'korapay');
 
     try {
       const authToken = localStorage.getItem('swiftpay_token') || localStorage.getItem('token') || '';
@@ -1772,6 +1815,7 @@ export default function App() {
         },
         body: JSON.stringify({
           reference: ref,
+          provider: resolvedProvider,
           email: resolvedEmail,
           token: authToken
         })
@@ -1782,7 +1826,7 @@ export default function App() {
       if (res.ok && data.success && data.voucherCode) {
         localStorage.removeItem('swiftpay_pending_payment');
         // Clean URL query parameters if present
-        if (window.location.search.includes('reference=') || window.location.pathname === '/payment/callback') {
+        if (window.location.search.includes('reference=') || window.location.search.includes('trxref=') || window.location.pathname === '/payment/callback') {
           window.history.replaceState({ appScreen: 'wdv_success' }, '', '/dashboard/buy-wdv');
         }
 
@@ -1809,10 +1853,11 @@ export default function App() {
         showToast(`Payment confirmed! WDV Voucher issued: ${issuedCode}`, 'success');
         await syncWithBackend(true);
       } else {
+        const provName = data.provider === 'paystack' ? 'Paystack' : (data.provider === 'korapay' ? 'Korapay' : 'the payment gateway');
         setWdvPaymentError(
           sanitizeWdvCustomerError(
             data.message || data.error,
-            'Your payment has not been confirmed yet. Please complete checkout on Korapay and try again.'
+            `Your payment has not been confirmed yet. Please complete checkout on ${provName} and try again.`
           )
         );
       }
@@ -1829,22 +1874,29 @@ export default function App() {
     }
   };
 
-  // Automatically verify if returning from Korapay redirect with ?reference=...
+  const handleVerifyKorapayWdv = (ref?: string) => handleVerifyWdvPayment(ref);
+
+  // Automatically verify if returning from Paystack / Korapay redirect with ?reference=... or ?trxref=...
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const refFromUrl = params.get('reference') || params.get('trxref') || params.get('payment_reference');
+    const providerFromUrl = params.get('provider') || (refFromUrl?.startsWith('SPAY_PSTK') ? 'paystack' : 'korapay');
     if (refFromUrl) {
       setWdvCheckoutRef(refFromUrl);
+      if (providerFromUrl === 'paystack' || providerFromUrl === 'korapay') {
+        setSelectedPaymentProvider(providerFromUrl);
+      }
       setCurrentScreen('buy_wdv');
-      handleVerifyKorapayWdv(refFromUrl);
+      handleVerifyWdvPayment(refFromUrl, providerFromUrl);
     }
   }, []);
 
-  // WDV Payment Initiate Handler (Real Korapay Checkout Only)
-  const handleInitiateWdv = async (e?: React.FormEvent) => {
+  // WDV Payment Initiate Handler (Dynamic Provider: Paystack or Korapay)
+  const handleInitiateWdv = async (e?: React.FormEvent, providerOverride?: 'korapay' | 'paystack') => {
     if (e) e.preventDefault();
     if (wdvInitLockRef.current || isInitiatingWdv) return;
 
+    const providerToUse = providerOverride || selectedPaymentProvider;
     wdvInitLockRef.current = true;
     setIsInitiatingWdv(true);
     setWdvPaymentError('');
@@ -1877,7 +1929,7 @@ export default function App() {
         },
         body: JSON.stringify({
           amount: voucherAmount,
-          provider: 'korapay',
+          provider: providerToUse,
           purpose: 'wdv_voucher',
           name: customerName || 'SwiftPay Customer',
           email: customerEmail,
@@ -1895,12 +1947,14 @@ export default function App() {
 
       setWdvCheckoutRef(data.reference);
       setWdvCheckoutUrl(data.authorizationUrl);
+      setSelectedPaymentProvider(data.provider || providerToUse);
 
       try {
         localStorage.setItem(
           'swiftpay_pending_payment',
           JSON.stringify({
             reference: data.reference,
+            provider: data.provider || providerToUse,
             purpose: 'wdv_voucher',
             amount: voucherAmount,
             authorizationUrl: data.authorizationUrl,
@@ -1911,13 +1965,13 @@ export default function App() {
         // ignore storage error
       }
 
-      // Open real Korapay checkout flow
+      // Open checkout flow
       if (window.self === window.top) {
         window.location.href = data.authorizationUrl;
       } else {
         const popup = window.open(data.authorizationUrl, '_blank', 'noopener,noreferrer');
         if (!popup) {
-          showToast('Tap "Open Korapay Checkout" to complete your payment.', 'info');
+          showToast(`Tap "Open ${data.provider === 'paystack' ? 'Paystack' : 'Korapay'} Checkout" to complete your payment.`, 'info');
         }
       }
     } catch (err: any) {
@@ -4185,36 +4239,117 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* PAYMENT GATEWAY SECTION — KORAPAY ONLY */}
-                      <div className="space-y-2.5">
+                      {/* PAYMENT GATEWAY SECTION — DYNAMIC MULTI-PROVIDER */}
+                      <div className="space-y-3">
                         <div className="flex items-center justify-between px-1">
                           <span className="text-xs font-mono text-slate-400 font-bold uppercase tracking-widest">
                             PAYMENT GATEWAY
                           </span>
-                        </div>
-
-                        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-teal-500/15 via-[#0d172a] to-[#0a1120] border border-teal-500/40 shadow-[0_0_25px_rgba(20,184,166,0.12)] flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3.5 min-w-0">
-                            <div className="p-3 rounded-2xl bg-teal-500/20 text-teal-300 border border-teal-500/30 shrink-0">
-                              <Zap className="h-5 w-5" />
-                            </div>
-                            <div className="min-w-0">
-                              <div className="text-sm sm:text-base font-bold text-white font-display">
-                                Korapay
-                              </div>
-                              <div className="text-xs text-slate-400 mt-0.5">
-                                Online card/bank checkout
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="shrink-0">
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-extrabold uppercase tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                              READY
+                          {paymentProviderCase === 'both' && (
+                            <span className="text-[10px] font-mono text-teal-400 font-semibold">
+                              Select preferred provider
                             </span>
-                          </div>
+                          )}
                         </div>
+
+                        {/* CASE D: NEITHER CONFIGURED */}
+                        {paymentProviderCase === 'none' && (
+                          <div className="p-4 sm:p-5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 space-y-2 animate-[fadeIn_0.15s_ease-out]">
+                            <div className="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wide">
+                              <AlertCircle className="h-4 w-4 shrink-0" />
+                              <span>Gateway Maintenance</span>
+                            </div>
+                            <p className="text-xs text-amber-200/90 leading-relaxed">
+                              Online payment processing is temporarily undergoing maintenance or configuration. Please contact customer support or try again shortly.
+                            </p>
+                          </div>
+                        )}
+
+                        {/* CASE A & B: PAYSTACK OPTION (when configured or both) */}
+                        {(paymentProviderCase === 'both' || paymentProviderCase === 'paystack_only') && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPaymentProvider('paystack')}
+                            className={`w-full text-left p-4 sm:p-5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                              selectedPaymentProvider === 'paystack'
+                                ? 'bg-gradient-to-r from-sky-500/20 via-[#0d1e38] to-[#0a1120] border-sky-400/60 shadow-[0_0_25px_rgba(56,189,248,0.15)] ring-1 ring-sky-400/40'
+                                : 'bg-[#0b1324]/80 border-slate-800 hover:border-slate-700 opacity-80 hover:opacity-100'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3.5 min-w-0">
+                              <div className={`p-3 rounded-2xl border shrink-0 transition-colors ${
+                                selectedPaymentProvider === 'paystack'
+                                  ? 'bg-sky-500/20 text-sky-300 border-sky-500/40'
+                                  : 'bg-slate-800/80 text-slate-400 border-slate-700'
+                              }`}>
+                                <CreditCard className="h-5 w-5" />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="text-sm sm:text-base font-bold text-white font-display flex items-center gap-2">
+                                  <span>Paystack</span>
+                                  {selectedPaymentProvider === 'paystack' && paymentProviderCase === 'both' && (
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                                      SELECTED
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-slate-400 mt-0.5">
+                                  Cards, Bank Transfer, USSD &amp; Mobile Money
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="shrink-0 flex items-center gap-2">
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-extrabold uppercase tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                                READY
+                              </span>
+                            </div>
+                          </button>
+                        )}
+
+                        {/* CASE A & C: KORAPAY OPTION (when configured or both) */}
+                        {(paymentProviderCase === 'both' || paymentProviderCase === 'korapay_only') && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPaymentProvider('korapay')}
+                            className={`w-full text-left p-4 sm:p-5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                              selectedPaymentProvider === 'korapay'
+                                ? 'bg-gradient-to-r from-teal-500/20 via-[#0d1f30] to-[#0a1120] border-teal-400/60 shadow-[0_0_25px_rgba(20,184,166,0.15)] ring-1 ring-teal-400/40'
+                                : 'bg-[#0b1324]/80 border-slate-800 hover:border-slate-700 opacity-80 hover:opacity-100'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3.5 min-w-0">
+                              <div className={`p-3 rounded-2xl border shrink-0 transition-colors ${
+                                selectedPaymentProvider === 'korapay'
+                                  ? 'bg-teal-500/20 text-teal-300 border-teal-500/40'
+                                  : 'bg-slate-800/80 text-slate-400 border-slate-700'
+                              }`}>
+                                <Zap className="h-5 w-5" />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="text-sm sm:text-base font-bold text-white font-display flex items-center gap-2">
+                                  <span>Korapay</span>
+                                  {selectedPaymentProvider === 'korapay' && paymentProviderCase === 'both' && (
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30">
+                                      SELECTED
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-slate-400 mt-0.5">
+                                  Cards, Virtual Accounts &amp; Direct Bank
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="shrink-0 flex items-center gap-2">
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-extrabold uppercase tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                                READY
+                              </span>
+                            </div>
+                          </button>
+                        )}
                       </div>
 
                       {/* Clean Customer Error Banner */}
@@ -4230,7 +4365,7 @@ export default function App() {
                         </div>
                       )}
 
-                      {/* Active Korapay Checkout Verification Panel (when initialized or returning from redirect) */}
+                      {/* Active Checkout Verification Panel (when initialized or returning from redirect) */}
                       {wdvCheckoutRef && (
                         <div className="p-4 sm:p-5 rounded-2xl bg-[#0c1426] border border-teal-500/30 space-y-3.5 animate-[fadeIn_0.15s_ease-out]">
                           <div className="flex items-center justify-between gap-2">
@@ -4243,7 +4378,7 @@ export default function App() {
                           </div>
 
                           <p className="text-xs text-slate-300 leading-relaxed">
-                            Completed your payment on Korapay? Tap below to verify your transaction server-side and receive your WDV Voucher immediately.
+                            Completed your payment on {selectedPaymentProvider === 'paystack' ? 'Paystack' : 'Korapay'}? Tap below to verify your transaction server-side and receive your WDV Voucher immediately.
                           </p>
 
                           <div className="flex flex-col sm:flex-row gap-2.5">
@@ -4254,13 +4389,13 @@ export default function App() {
                                 rel="noopener noreferrer"
                                 className="flex-1 py-3 px-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-teal-300 text-xs font-bold flex items-center justify-center gap-2 transition-all"
                               >
-                                <span>Open Korapay Checkout</span>
+                                <span>Open {selectedPaymentProvider === 'paystack' ? 'Paystack' : 'Korapay'} Checkout</span>
                                 <ExternalLink className="h-3.5 w-3.5" />
                               </a>
                             )}
                             <button
                               type="button"
-                              onClick={() => handleVerifyKorapayWdv(wdvCheckoutRef)}
+                              onClick={() => handleVerifyWdvPayment(wdvCheckoutRef)}
                               disabled={isVerifyingWdv}
                               className="flex-1 py-3 px-4 rounded-xl bg-teal-500/20 hover:bg-teal-500/30 border border-teal-500/40 text-teal-200 text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
                             >
@@ -4283,29 +4418,41 @@ export default function App() {
 
                     {/* Bottom Primary Action Button */}
                     <div className="pt-2 pb-4 space-y-3">
-                      <button
-                        id="btn-wdv-submit"
-                        type="button"
-                        onClick={() => handleInitiateWdv()}
-                        disabled={isInitiatingWdv || isVerifyingWdv}
-                        className="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-teal-400 via-cyan-400 to-emerald-400 hover:from-teal-300 hover:to-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed text-slate-950 text-xs sm:text-sm font-black uppercase tracking-wider shadow-[0_10px_30px_rgba(20,184,166,0.3)] active:scale-[0.99] transition-all flex items-center justify-center gap-2.5 cursor-pointer"
-                      >
-                        {isInitiatingWdv ? (
-                          <>
-                            <div className="h-4 w-4 rounded-full border-2 border-slate-950/30 border-t-slate-950 animate-spin" />
-                            <span>Initializing secure payment...</span>
-                          </>
-                        ) : (
-                          <>
-                            <span>BUY WDV VOUCHER — ₦{(wdvConfig.voucherPrice || 6500).toLocaleString()}</span>
-                            <ArrowRight className="h-4 w-4 stroke-[2.5]" />
-                          </>
-                        )}
-                      </button>
+                      {paymentProviderCase === 'none' ? (
+                        <button
+                          id="btn-wdv-submit-disabled"
+                          type="button"
+                          disabled={true}
+                          className="w-full py-4 px-5 rounded-2xl bg-slate-800 text-slate-500 border border-slate-700/60 text-xs sm:text-sm font-black uppercase tracking-wider cursor-not-allowed flex items-center justify-center gap-2"
+                        >
+                          <AlertCircle className="h-4 w-4 text-amber-400" />
+                          <span>PAYMENT TEMPORARILY UNAVAILABLE</span>
+                        </button>
+                      ) : (
+                        <button
+                          id="btn-wdv-submit"
+                          type="button"
+                          onClick={() => handleInitiateWdv()}
+                          disabled={isInitiatingWdv || isVerifyingWdv}
+                          className="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-teal-400 via-cyan-400 to-emerald-400 hover:from-teal-300 hover:to-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed text-slate-950 text-xs sm:text-sm font-black uppercase tracking-wider shadow-[0_10px_30px_rgba(20,184,166,0.3)] active:scale-[0.99] transition-all flex items-center justify-center gap-2.5 cursor-pointer"
+                        >
+                          {isInitiatingWdv ? (
+                            <>
+                              <div className="h-4 w-4 rounded-full border-2 border-slate-950/30 border-t-slate-950 animate-spin" />
+                              <span>Initializing secure payment...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>BUY WDV VOUCHER VIA {selectedPaymentProvider.toUpperCase()} — ₦{(wdvConfig.voucherPrice || 6500).toLocaleString()}</span>
+                              <ArrowRight className="h-4 w-4 stroke-[2.5]" />
+                            </>
+                          )}
+                        </button>
+                      )}
 
                       <div className="flex items-center justify-center gap-2 text-[11px] text-slate-400 font-mono text-center">
                         <Lock className="h-3.5 w-3.5 text-teal-400 shrink-0" />
-                        <span>256-Bit Encrypted Korapay Checkout • Server-Verified Issuance</span>
+                        <span>256-Bit Encrypted {selectedPaymentProvider === 'paystack' ? 'Paystack' : 'Korapay'} Checkout • Server-Verified Issuance</span>
                       </div>
                     </div>
                   </div>

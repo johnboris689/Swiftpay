@@ -3305,11 +3305,13 @@ async function processSuccessfulPayment(params: {
       existingVoucherRow?.code ||
       '';
 
+    const resolvedProvider: PaymentProviderName = params.providerName || (tx?.provider as PaymentProviderName) || (wdvPayment?.provider as PaymentProviderName) || 'korapay';
+
     if (tx && (tx.status === 'successful' || tx.status === 'settled')) {
       // If purpose is wdv_voucher and voucher was not yet issued, ensure it is issued once
       let finalVoucherCode = existingVoucherCode;
       if ((tx.purpose === 'wdv_voucher' || wdvPayment) && !finalVoucherCode) {
-        const vRes = await processSuccessfulWdvPayment(reference, 'korapay', typeof params.rawData === 'string' ? params.rawData : JSON.stringify(params.rawData || {}));
+        const vRes = await processSuccessfulWdvPayment(reference, resolvedProvider, typeof params.rawData === 'string' ? params.rawData : JSON.stringify(params.rawData || {}));
         finalVoucherCode = vRes.voucherCode || '';
       }
       return {
@@ -3327,10 +3329,16 @@ async function processSuccessfulPayment(params: {
     const userEmail = ((tx?.useremail || tx?.userEmail || wdvPayment?.useremail || wdvPayment?.userEmail || '') as string).toLowerCase();
     const rawAmount = params.verifiedAmount !== undefined ? params.verifiedAmount : Number(tx?.amount || wdvPayment?.amount || 0);
     const amount = Number(rawAmount || 0);
-    const purpose = tx?.purpose || (wdvPayment ? 'wdv_voucher' : 'wallet_funding');
-    const provider: PaymentProviderName = 'korapay';
-    const providerRef = params.providerReference || tx?.providerReference || '';
     const rawDataStr = typeof params.rawData === 'string' ? params.rawData : JSON.stringify(params.rawData || {});
+    let parsedMetaPurpose = '';
+    try {
+      const parsedRaw = typeof params.rawData === 'string' ? JSON.parse(params.rawData) : (params.rawData || {});
+      parsedMetaPurpose = parsedRaw?.data?.metadata?.purpose || parsedRaw?.metadata?.purpose || '';
+    } catch (_e) {}
+
+    const purpose = tx?.purpose || (wdvPayment ? 'wdv_voucher' : (parsedMetaPurpose || (reference.startsWith('SPAY_') ? 'wdv_voucher' : 'wallet_funding')));
+    const provider: PaymentProviderName = resolvedProvider;
+    const providerRef = params.providerReference || tx?.providerReference || '';
 
     // 2. Mark or create in payment_transactions
     if (tx) {
@@ -3410,7 +3418,7 @@ async function processSuccessfulPayment(params: {
           await execute(`
             INSERT INTO wdv_payments (id, reference, userEmail, amount, bankName, accountNumber, accountName, status, createdAt, expiresAt, paidAt, voucherCode, provider, webhookData)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-          `, [id, reference, userEmail, amount, `KORAPAY Checkout`, 'Online Gateway', `SwiftPay / Customer`, 'pending', nowIso, nowIso, '', '', provider, '']);
+          `, [id, reference, userEmail, amount, `${provider === 'paystack' ? 'Paystack' : 'Korapay'} Checkout`, 'Online Gateway', `SwiftPay / Customer`, 'pending', nowIso, nowIso, '', '', provider, '']);
         }
         const vResult = await processSuccessfulWdvPayment(reference, provider, rawDataStr);
         voucherCode = vResult.voucherCode || '';
@@ -3669,25 +3677,45 @@ app.post('/api/korapay/webhook', express.raw({ type: 'application/json' }), asyn
   }
 });
 
-// -------------------- KORAPAY UNIFIED PAYMENT GATEWAY --------------------
+// -------------------- UNIFIED PAYMENT GATEWAY (KORAPAY + PAYSTACK) --------------------
 
-// 1. Get Payment Configuration & Available Providers
-app.get('/api/payment/config', (req, res) => {
+// 1. Get Payment Configuration & Dynamic Provider Availability
+const getPaymentConfigHandler = (req: any, res: any) => {
   try {
     const providers = paymentManager.getAllProvidersStatus();
     const activeProvider = paymentManager.getConfiguredActiveProviderName();
     const isAvailable = providers.some(p => p.isConfigured);
+    const korapayAvailable = providers.find(p => p.name === 'korapay')?.isConfigured ?? false;
+    const paystackAvailable = providers.find(p => p.name === 'paystack')?.isConfigured ?? false;
+
+    let providerCase: 'both' | 'paystack_only' | 'korapay_only' | 'none' = 'none';
+    if (korapayAvailable && paystackAvailable) {
+      providerCase = 'both';
+    } else if (paystackAvailable) {
+      providerCase = 'paystack_only';
+    } else if (korapayAvailable) {
+      providerCase = 'korapay_only';
+    } else {
+      providerCase = 'none';
+      console.warn('[SwiftPay Payment] Neither Korapay nor Paystack is configured with valid server credentials.');
+    }
 
     res.json({
       success: true,
       activeProvider,
       providers,
-      isAvailable
+      isAvailable,
+      korapayAvailable,
+      paystackAvailable,
+      case: providerCase
     });
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to fetch payment configuration.' });
   }
-});
+};
+
+app.get('/api/payment/config', getPaymentConfigHandler);
+app.get('/api/payments/available-providers', getPaymentConfigHandler);
 
 // Flexible authentication middleware for payment endpoints (accepts Bearer header, body token, or verified user email)
 async function authenticatePaymentUser(req: any, res: any, next: any) {
@@ -3785,8 +3813,8 @@ async function authenticatePaymentUser(req: any, res: any, next: any) {
   return res.status(401).json({ error: 'Please sign in to continue with your payment.' });
 }
 
-// 2. Initialize Payment (Server-side Korapay Initialization)
-app.post('/api/payment/initialize', authenticatePaymentUser, async (req: any, res) => {
+// 2. Initialize Payment (Server-side Paystack / Korapay Initialization)
+app.post(['/api/payment/initialize', '/api/wdv/purchase/initialize'], authenticatePaymentUser, async (req: any, res) => {
   try {
     const email = (req.userEmail || '').toLowerCase();
     const db = readDb();
@@ -3796,7 +3824,7 @@ app.post('/api/payment/initialize', authenticatePaymentUser, async (req: any, re
 
     if (requestedPurpose === 'wallet_funding' || req.body.type === 'deposit') {
       return res.status(400).json({
-        error: 'Separate deposit is disabled. Korapay is available exclusively for WDV Voucher purchases.'
+        error: 'Separate deposit is disabled. Online payment is available exclusively for WDV Voucher purchases.'
       });
     }
 
@@ -3804,18 +3832,28 @@ app.post('/api/payment/initialize', authenticatePaymentUser, async (req: any, re
     const purpose = 'wdv_voucher';
     const amount = Number(config.voucherPrice || 6500);
 
-    const provider = paymentManager.getActiveProvider('korapay');
+    // Resolve provider from request or available configured providers
+    const requestedProviderName = (req.body.provider || '').toLowerCase().trim();
+    let provider = paymentManager.getProvider(requestedProviderName || undefined);
+
     if (!provider || !provider.isConfigured()) {
-      console.error('[SwiftPay Payment] Korapay initialization attempted without configured KORAPAY_SECRET_KEY.');
-      return res.status(400).json({
-        error: "We couldn't start the payment. Please ensure KORAPAY_SECRET_KEY is configured on the server."
-      });
+      // If requested was specific but not configured, try any available provider
+      const available = paymentManager.getAvailableProviders();
+      if (available.length === 0) {
+        console.error('[SwiftPay Payment] Payment initialization attempted but no payment provider is configured with secret keys.');
+        return res.status(503).json({
+          error: 'Online payment processing is temporarily undergoing maintenance or configuration. Please contact support or try again shortly.'
+        });
+      }
+      provider = available[0];
     }
 
-    const reference = `SPAY_${Date.now()}_${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    const providerName = provider.name;
+    const prefix = providerName === 'paystack' ? 'SPAY_PSTK' : 'SPAY_KORA';
+    const reference = `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
     const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
     const host = req.headers['x-forwarded-host'] || req.get('host');
-    const defaultCallbackUrl = `${protocol}://${host}/payment/callback?reference=${reference}&provider=korapay`;
+    const defaultCallbackUrl = `${protocol}://${host}/dashboard/buy-wdv?reference=${reference}&provider=${providerName}`;
     const callbackUrl = req.body.callbackUrl || defaultCallbackUrl;
 
     const initResult = await provider.initializePayment({
@@ -3830,6 +3868,7 @@ app.post('/api/payment/initialize', authenticatePaymentUser, async (req: any, re
         userId: email,
         purpose,
         userFullName: user?.fullName,
+        provider: providerName,
         ...(req.body.metadata || {})
       }
     });
@@ -3841,7 +3880,7 @@ app.post('/api/payment/initialize', authenticatePaymentUser, async (req: any, re
       await execute(`
         INSERT INTO payment_transactions (id, reference, userEmail, userName, amount, currency, provider, providerReference, purpose, status, channel, authorizationUrl, metadata, createdAt, verifiedAt, webhookData)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-      `, [id, reference, email, user?.fullName || '', amount, 'NGN', 'korapay', '', purpose, 'pending', 'card', initResult.authorizationUrl || '', JSON.stringify({ callbackUrl }), nowIso, '', '']);
+      `, [id, reference, email, user?.fullName || '', amount, 'NGN', providerName, '', purpose, 'pending', 'card', initResult.authorizationUrl || '', JSON.stringify({ callbackUrl, provider: providerName }), nowIso, '', '']);
 
       // If purpose is WDV voucher, create synchronized record in wdv_payments
       if (purpose === 'wdv_voucher') {
@@ -3850,29 +3889,29 @@ app.post('/api/payment/initialize', authenticatePaymentUser, async (req: any, re
         await execute(`
           INSERT INTO wdv_payments (id, reference, userEmail, amount, bankName, accountNumber, accountName, status, createdAt, expiresAt, paidAt, voucherCode, provider, webhookData)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-        `, [dvaId, reference, email, amount, `Korapay Checkout`, 'Online Gateway', `SwiftPay / ${user?.fullName || 'User'}`, 'pending', nowIso, expiresIso, '', '', 'korapay', '']);
+        `, [dvaId, reference, email, amount, `${provider.displayName} Checkout`, 'Online Gateway', `SwiftPay / ${user?.fullName || 'User'}`, 'pending', nowIso, expiresIso, '', '', providerName, '']);
       }
 
       await loadDbCache();
     } catch (dbWriteErr) {
-      console.error('[SwiftPay Payment] Database write error after Korapay init (non-fatal):', dbWriteErr);
+      console.error('[SwiftPay Payment] Database write error after payment init (non-fatal):', dbWriteErr);
     }
 
-    logDiagnostic('INFO', 'Payment initialized successfully', { reference, email, amount, provider: 'korapay' });
+    logDiagnostic('INFO', 'Payment initialized successfully', { reference, email, amount, provider: providerName });
 
     res.json({
       success: true,
       reference,
       authorizationUrl: initResult.authorizationUrl,
       accessCode: initResult.accessCode,
-      provider: 'korapay',
-      providerDisplayName: 'Korapay',
+      provider: providerName,
+      providerDisplayName: provider.displayName,
       amount,
       purpose
     });
   } catch (err: any) {
-    console.error('[SwiftPay Payment] Error during Korapay payment initialization:', err);
-    logDiagnostic('API_ERROR', 'Korapay payment initialization failed', { error: err?.message });
+    console.error('[SwiftPay Payment] Error during payment initialization:', err);
+    logDiagnostic('API_ERROR', 'Payment initialization failed', { error: err?.message });
     res.status(500).json({
       error: sanitizeCustomerPaymentError(err, "We couldn't start the payment. Please try again.")
     });
@@ -3904,6 +3943,19 @@ const verifyPaymentUnifiedHandler = async (req: any, res: any) => {
       existingVoucher?.code ||
       '';
 
+    // Determine provider for this transaction
+    let providerName: PaymentProviderName = 'korapay';
+    if (reference.startsWith('SPAY_PSTK')) {
+      providerName = 'paystack';
+    } else if (tx?.provider) {
+      providerName = tx.provider as PaymentProviderName;
+    } else if (wdvPayment?.provider) {
+      providerName = wdvPayment.provider as PaymentProviderName;
+    } else if (req.body?.provider || req.query?.provider) {
+      providerName = (req.body?.provider || req.query?.provider).toLowerCase() as PaymentProviderName;
+    }
+
+
     // Idempotency: Return immediately if already successful
     if (
       (tx && (tx.status === 'successful' || tx.status === 'settled')) ||
@@ -3915,7 +3967,7 @@ const verifyPaymentUnifiedHandler = async (req: any, res: any) => {
 
       let finalVoucherCode = existingVoucherCode;
       if (((tx?.purpose || 'wdv_voucher') === 'wdv_voucher' || wdvPayment) && !finalVoucherCode) {
-        const vRes = await processSuccessfulWdvPayment(reference, 'korapay', '');
+        const vRes = await processSuccessfulWdvPayment(reference, providerName, '');
         finalVoucherCode = vRes.voucherCode || '';
       }
 
@@ -3925,6 +3977,7 @@ const verifyPaymentUnifiedHandler = async (req: any, res: any) => {
         status: 'successful',
         amount: Number(tx?.amount || wdvPayment?.amount || 6500),
         reference,
+        provider: providerName,
         purpose: tx?.purpose || (wdvPayment ? 'wdv_voucher' : 'wallet_funding'),
         balance: user?.balance,
         voucherCode: finalVoucherCode,
@@ -3932,15 +3985,15 @@ const verifyPaymentUnifiedHandler = async (req: any, res: any) => {
       });
     }
 
-    const provider = paymentManager.getProvider('korapay');
-    if (!provider.isConfigured()) {
-      console.error('[SwiftPay Payment] Korapay verification attempted without configured KORAPAY_SECRET_KEY.');
+    const provider = paymentManager.getProvider(providerName);
+    if (!provider || !provider.isConfigured()) {
+      console.error(`[SwiftPay Payment] Verification attempted for ${providerName} without configured credentials.`);
       return res.status(400).json({
         error: "We couldn't verify the payment right now. Please try again."
       });
     }
 
-    // 2. Query Korapay's verification API server-side
+    // 2. Query provider verification API server-side
     const verifyRes = await provider.verifyPayment(reference);
 
     if (verifyRes.success && verifyRes.status === 'successful') {
@@ -3950,7 +4003,7 @@ const verifyPaymentUnifiedHandler = async (req: any, res: any) => {
       const verifiedAmount = Number(verifyRes.amount || 0);
 
       if (verifiedCurrency !== 'NGN') {
-        logDiagnostic('SECURITY_ALERT', 'Korapay verification currency mismatch', { reference, verifiedCurrency });
+        logDiagnostic('SECURITY_ALERT', `${provider.displayName} verification currency mismatch`, { reference, verifiedCurrency });
         return res.status(400).json({
           success: false,
           status: 'failed',
@@ -3960,7 +4013,7 @@ const verifyPaymentUnifiedHandler = async (req: any, res: any) => {
       }
 
       if (expectedAmount > 0 && verifiedAmount < expectedAmount) {
-        logDiagnostic('SECURITY_ALERT', 'Korapay verification amount mismatch', { reference, expectedAmount, verifiedAmount });
+        logDiagnostic('SECURITY_ALERT', `${provider.displayName} verification amount mismatch`, { reference, expectedAmount, verifiedAmount });
         return res.status(400).json({
           success: false,
           status: 'failed',
@@ -3971,7 +4024,7 @@ const verifyPaymentUnifiedHandler = async (req: any, res: any) => {
 
       const processRes = await processSuccessfulPayment({
         reference,
-        providerName: 'korapay',
+        providerName,
         verifiedAmount: verifiedAmount || expectedAmount,
         channel: verifyRes.channel,
         providerReference: verifyRes.providerReference,
@@ -3987,6 +4040,7 @@ const verifyPaymentUnifiedHandler = async (req: any, res: any) => {
         status: 'successful',
         amount: verifiedAmount || expectedAmount,
         reference,
+        provider: providerName,
         purpose: tx?.purpose || (wdvPayment ? 'wdv_voucher' : 'wallet_funding'),
         balance: user?.balance,
         voucherCode: processRes.voucherCode,
@@ -4000,6 +4054,7 @@ const verifyPaymentUnifiedHandler = async (req: any, res: any) => {
         success: false,
         status: verifyRes.status,
         reference,
+        provider: providerName,
         message: 'Payment was not completed or was cancelled.'
       });
     }
@@ -4008,20 +4063,21 @@ const verifyPaymentUnifiedHandler = async (req: any, res: any) => {
       success: false,
       status: 'pending',
       reference,
-      message: 'Payment is still awaiting confirmation from Korapay. Please complete payment on the checkout page and try again.'
+      provider: providerName,
+      message: `Payment is still awaiting confirmation from ${provider.displayName}. Please complete payment on the checkout page and try again.`
     });
   } catch (err: any) {
-    console.error('[SwiftPay Payment] Error during Korapay payment verification:', err);
+    console.error('[SwiftPay Payment] Error during payment verification:', err);
     res.status(500).json({
       error: sanitizeCustomerPaymentError(err, "We couldn't verify the payment right now. Please try again.")
     });
   }
 };
 
-app.post('/api/payment/verify', authenticatePaymentUser, verifyPaymentUnifiedHandler);
-app.get('/api/payment/verify/:reference', authenticatePaymentUser, verifyPaymentUnifiedHandler);
+app.post(['/api/payment/verify', '/api/wdv/purchase/verify'], authenticatePaymentUser, verifyPaymentUnifiedHandler);
+app.get(['/api/payment/verify/:reference', '/api/wdv/purchase/verify/:reference'], authenticatePaymentUser, verifyPaymentUnifiedHandler);
 
-// 4. Unified Korapay Webhook Receiver
+// 4. Unified Webhook Receivers (Korapay & Paystack)
 const handleWebhookUnified = async (providerName: PaymentProviderName, req: any, res: any) => {
   try {
     const provider = paymentManager.getProvider(providerName);
@@ -4039,7 +4095,7 @@ const handleWebhookUnified = async (providerName: PaymentProviderName, req: any,
     if (parsed.status === 'successful' && parsed.reference) {
       await processSuccessfulPayment({
         reference: parsed.reference,
-        providerName: 'korapay',
+        providerName,
         verifiedAmount: parsed.amount,
         providerReference: parsed.providerReference,
         rawData: parsed.rawData
@@ -4053,7 +4109,8 @@ const handleWebhookUnified = async (providerName: PaymentProviderName, req: any,
   }
 };
 
-app.post('/api/payment/webhook/korapay', (req, res) => handleWebhookUnified('korapay', req, res));
+app.post(['/api/payment/webhook/korapay', '/api/webhooks/korapay'], (req, res) => handleWebhookUnified('korapay', req, res));
+app.post(['/api/payment/webhook/paystack', '/api/webhooks/paystack'], (req, res) => handleWebhookUnified('paystack', req, res));
 
 // 5. Admin Payment Gateway Configuration & Transaction Oversight
 app.get('/api/admin/payment-config', authenticateAdminToken, (req, res) => {
@@ -4073,29 +4130,31 @@ app.get('/api/admin/payment-config', authenticateAdminToken, (req, res) => {
 app.post('/api/admin/payment-config/active-provider', authenticateAdminToken, async (req, res) => {
   try {
     const { provider } = req.body;
-    if (!provider || provider !== 'korapay') {
-      return res.status(400).json({ error: 'Korapay is the only supported payment gateway.' });
+    if (!provider || (provider !== 'korapay' && provider !== 'paystack' && provider !== 'both')) {
+      return res.status(400).json({ error: 'Provider must be "korapay", "paystack", or "both".' });
     }
 
-    paymentManager.setActiveProviderName('korapay');
+    if (provider !== 'both') {
+      paymentManager.setActiveProviderName(provider);
+    }
 
     // Persist in admin_settings
     await execute(`INSERT INTO admin_settings (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = $2`, [
       'payment_provider',
-      'korapay'
+      provider
     ]);
 
     res.json({
       success: true,
-      activeProvider: 'korapay',
-      message: `Active payment provider set to KORAPAY`
+      activeProvider: provider,
+      message: `Active payment provider updated to ${provider.toUpperCase()}`
     });
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to update active payment provider.' });
   }
 });
 
-app.get('/api/admin/payment-transactions', authenticateAdminToken, async (req, res) => {
+app.get(['/api/admin/payment-transactions', '/api/admin/payment/transactions'], authenticateAdminToken, async (req, res) => {
   try {
     const transactions = await getAllRows(`SELECT * FROM payment_transactions ORDER BY createdAt DESC`);
     res.json({
@@ -4114,10 +4173,18 @@ app.post('/api/admin/payment-transactions/manual-verify', authenticateAdminToken
       return res.status(400).json({ error: 'Payment reference is required.' });
     }
 
-    const provider = paymentManager.getProvider('korapay');
-    if (!provider.isConfigured()) {
+    const tx = await getRow(`SELECT * FROM payment_transactions WHERE reference = $1`, [reference]);
+    const wdvPayment = await getRow(`SELECT * FROM wdv_payments WHERE reference = $1`, [reference]);
+
+    let providerName: PaymentProviderName = 'korapay';
+    if (reference.startsWith('SPAY_PSTK') || tx?.provider === 'paystack' || wdvPayment?.provider === 'paystack') {
+      providerName = 'paystack';
+    }
+
+    const provider = paymentManager.getProvider(providerName);
+    if (!provider || !provider.isConfigured()) {
       return res.status(400).json({
-        error: `Provider ${provider.displayName} is missing API credentials for verification.`
+        error: `Provider ${provider?.displayName || providerName} is missing API credentials for verification.`
       });
     }
 
@@ -4125,7 +4192,7 @@ app.post('/api/admin/payment-transactions/manual-verify', authenticateAdminToken
     if (verifyRes.success && verifyRes.status === 'successful') {
       const processRes = await processSuccessfulPayment({
         reference,
-        providerName: 'korapay',
+        providerName,
         verifiedAmount: verifyRes.amount,
         channel: verifyRes.channel,
         providerReference: verifyRes.providerReference,
@@ -4134,7 +4201,7 @@ app.post('/api/admin/payment-transactions/manual-verify', authenticateAdminToken
 
       return res.json({
         success: true,
-        message: 'Transaction successfully verified with Korapay and settled.',
+        message: `Transaction successfully verified with ${provider.displayName} and settled.`,
         data: processRes
       });
     }
@@ -4142,12 +4209,13 @@ app.post('/api/admin/payment-transactions/manual-verify', authenticateAdminToken
     res.json({
       success: false,
       status: verifyRes.status,
-      message: verifyRes.message || 'Korapay verification was not successful.'
+      message: verifyRes.message || `${provider.displayName} verification was not successful.`
     });
   } catch (err: any) {
     res.status(500).json({ error: sanitizeCustomerPaymentError(err, 'Manual verification failed.') });
   }
 });
+
 
 // Bank Account Name Resolution Endpoint
 app.get('/api/bank/resolve', authenticateToken, async (req: any, res) => {

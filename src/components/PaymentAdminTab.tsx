@@ -16,7 +16,7 @@ import {
 import GlassCard from './GlassCard';
 
 interface ProviderStatus {
-  name: 'korapay';
+  name: 'korapay' | 'paystack';
   displayName: string;
   isConfigured: boolean;
   missingEnvVars: string[];
@@ -49,12 +49,13 @@ interface PaymentAdminTabProps {
 
 export const PaymentAdminTab: React.FC<PaymentAdminTabProps> = ({ onToast }) => {
   const [providers, setProviders] = useState<ProviderStatus[]>([]);
-  const [activeProvider, setActiveProvider] = useState<string>('korapay');
+  const [activeProvider, setActiveProvider] = useState<string>('both');
   const [transactions, setTransactions] = useState<PaymentTransactionRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [verifyingRef, setVerifyingRef] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [providerFilter, setProviderFilter] = useState<string>('all');
 
   const getAdminToken = () => localStorage.getItem('swiftpay_admin_token') || '';
 
@@ -66,7 +67,7 @@ export const PaymentAdminTab: React.FC<PaymentAdminTabProps> = ({ onToast }) => 
         fetch('/api/payment/config', {
           headers: { Authorization: `Bearer ${token}` }
         }),
-        fetch('/api/admin/payment/transactions', {
+        fetch('/api/admin/payment-transactions', {
           headers: { Authorization: `Bearer ${token}` }
         })
       ]);
@@ -74,7 +75,7 @@ export const PaymentAdminTab: React.FC<PaymentAdminTabProps> = ({ onToast }) => 
       const configData = await configRes.json();
       if (configData.success) {
         setProviders(configData.providers || []);
-        setActiveProvider('korapay');
+        setActiveProvider(configData.activeProvider || 'both');
       }
 
       if (txRes.ok) {
@@ -99,7 +100,7 @@ export const PaymentAdminTab: React.FC<PaymentAdminTabProps> = ({ onToast }) => 
     setVerifyingRef(reference);
     try {
       const token = getAdminToken();
-      const res = await fetch('/api/payment/verify', {
+      const res = await fetch('/api/admin/payment-transactions/manual-verify', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -108,8 +109,8 @@ export const PaymentAdminTab: React.FC<PaymentAdminTabProps> = ({ onToast }) => 
         body: JSON.stringify({ reference })
       });
       const data = await res.json();
-      if (data.success && data.status === 'successful') {
-        onToast(`Transaction ${reference} verified & confirmed!`, 'success');
+      if (data.success) {
+        onToast(`Transaction ${reference} verified & settled!`, 'success');
       } else {
         onToast(data.message || `Status: ${data.status || 'pending'}`, 'info');
       }
@@ -132,15 +133,23 @@ export const PaymentAdminTab: React.FC<PaymentAdminTabProps> = ({ onToast }) => 
       prov.includes(searchQuery.toLowerCase());
 
     const matchesStatus = statusFilter === 'all' || tx.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesProvider = providerFilter === 'all' || prov === providerFilter;
+    return matchesSearch && matchesStatus && matchesProvider;
   });
 
   const totalRevenue = transactions
     .filter((t) => t.status === 'successful')
     .reduce((acc, curr) => acc + Number(curr.amount || 0), 0);
 
-  const korapayProvider = providers[0] || {
-    name: 'korapay',
+  const paystackProvider = providers.find(p => p.name === 'paystack') || {
+    name: 'paystack' as const,
+    displayName: 'Paystack',
+    isConfigured: false,
+    missingEnvVars: ['PAYSTACK_SECRET_KEY']
+  };
+
+  const korapayProvider = providers.find(p => p.name === 'korapay') || {
+    name: 'korapay' as const,
     displayName: 'Korapay',
     isConfigured: false,
     missingEnvVars: ['KORAPAY_SECRET_KEY']
@@ -157,17 +166,17 @@ export const PaymentAdminTab: React.FC<PaymentAdminTabProps> = ({ onToast }) => 
                 <Globe className="h-5 w-5" />
               </div>
               <h2 className="text-lg font-bold text-white font-display">
-                Korapay Payment Gateway Architecture
+                Multi-Gateway Payment Architecture
               </h2>
             </div>
             <p className="text-xs text-slate-400 max-w-2xl">
-              Manage Korapay checkout integration, inspect webhook readiness, and audit live WDV voucher &amp; wallet transactions.
+              Inspect dynamic Paystack &amp; Korapay gateways, webhook readiness, and audit live WDV voucher transactions.
             </p>
           </div>
 
           <div className="flex items-center gap-3">
             <div className="px-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-right">
-              <span className="text-[10px] font-mono text-slate-400 block uppercase">Verified Gateway Volume</span>
+              <span className="text-[10px] font-mono text-slate-400 block uppercase">Verified Volume</span>
               <span className="text-base font-mono font-black text-emerald-400">
                 ₦{totalRevenue.toLocaleString()}
               </span>
@@ -184,9 +193,90 @@ export const PaymentAdminTab: React.FC<PaymentAdminTabProps> = ({ onToast }) => 
         </div>
       </GlassCard>
 
-      {/* Korapay Gateway Card */}
-      <div className="grid grid-cols-1 gap-4">
-        <GlassCard className="p-5 flex flex-col justify-between border transition-all border-teal-500/50 bg-teal-950/10 shadow-[0_0_25px_rgba(20,184,166,0.08)]">
+      {/* Gateway Cards Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Paystack Gateway Card */}
+        <GlassCard className={`p-5 flex flex-col justify-between border transition-all ${
+          paystackProvider.isConfigured
+            ? 'border-sky-500/50 bg-sky-950/10 shadow-[0_0_25px_rgba(56,189,248,0.08)]'
+            : 'border-slate-800 bg-slate-900/40'
+        }`}>
+          <div className="space-y-4">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-xl border bg-sky-500/20 text-sky-300 border-sky-500/30">
+                  <CreditCard className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white font-display flex items-center gap-2">
+                    {paystackProvider.displayName}
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                      GATEWAY
+                    </span>
+                  </h3>
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    Provider ID: paystack
+                  </span>
+                </div>
+              </div>
+
+              {paystackProvider.isConfigured ? (
+                <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3" />
+                  Configured
+                </span>
+              ) : (
+                <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1">
+                  <AlertTriangle className="h-3 w-3" />
+                  Keys Missing
+                </span>
+              )}
+            </div>
+
+            {/* Environment Variables Audit */}
+            <div className="p-3 rounded-xl bg-slate-950/90 border border-slate-800/80 space-y-2">
+              <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
+                <span>PAYSTACK CREDENTIALS</span>
+                <Lock className="h-3 w-3 text-slate-500" />
+              </div>
+
+              {paystackProvider.isConfigured ? (
+                <div className="text-xs text-emerald-400 flex items-center gap-1.5 font-mono">
+                  <Check className="h-3.5 w-3.5" />
+                  <span>PAYSTACK_SECRET_KEY Loaded in Server Memory</span>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <span className="text-[11px] text-amber-400 block">
+                    Missing in environment:
+                  </span>
+                  <div className="flex flex-wrap gap-1">
+                    {paystackProvider.missingEnvVars.map((envVar) => (
+                      <span
+                        key={envVar}
+                        className="px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 text-rose-300 font-mono text-[10px]"
+                      >
+                        {envVar}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono text-slate-400">
+                <span>Webhook Endpoint:</span>
+                <code className="text-sky-400">/api/payment/webhook/paystack</code>
+              </div>
+            </div>
+          </div>
+        </GlassCard>
+
+        {/* Korapay Gateway Card */}
+        <GlassCard className={`p-5 flex flex-col justify-between border transition-all ${
+          korapayProvider.isConfigured
+            ? 'border-teal-500/50 bg-teal-950/10 shadow-[0_0_25px_rgba(20,184,166,0.08)]'
+            : 'border-slate-800 bg-slate-900/40'
+        }`}>
           <div className="space-y-4">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-2.5">
@@ -197,11 +287,11 @@ export const PaymentAdminTab: React.FC<PaymentAdminTabProps> = ({ onToast }) => 
                   <h3 className="text-sm font-bold text-white font-display flex items-center gap-2">
                     {korapayProvider.displayName}
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30">
-                      ACTIVE GATEWAY
+                      GATEWAY
                     </span>
                   </h3>
                   <span className="text-[11px] text-slate-400 font-mono">
-                    Provider ID: {activeProvider}
+                    Provider ID: korapay
                   </span>
                 </div>
               </div>
@@ -222,19 +312,19 @@ export const PaymentAdminTab: React.FC<PaymentAdminTabProps> = ({ onToast }) => 
             {/* Environment Variables Audit */}
             <div className="p-3 rounded-xl bg-slate-950/90 border border-slate-800/80 space-y-2">
               <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
-                <span>ENVIRONMENT CREDENTIALS</span>
+                <span>KORAPAY CREDENTIALS</span>
                 <Lock className="h-3 w-3 text-slate-500" />
               </div>
 
               {korapayProvider.isConfigured ? (
                 <div className="text-xs text-emerald-400 flex items-center gap-1.5 font-mono">
                   <Check className="h-3.5 w-3.5" />
-                  <span>Secret Key Loaded in Server Memory</span>
+                  <span>KORAPAY_SECRET_KEY Loaded in Server Memory</span>
                 </div>
               ) : (
                 <div className="space-y-1">
                   <span className="text-[11px] text-amber-400 block">
-                    Missing in <code className="text-white">.env</code>:
+                    Missing in environment:
                   </span>
                   <div className="flex flex-wrap gap-1">
                     {korapayProvider.missingEnvVars.map((envVar) => (
@@ -267,7 +357,7 @@ export const PaymentAdminTab: React.FC<PaymentAdminTabProps> = ({ onToast }) => 
               <span>Gateway Transaction Ledger</span>
             </h3>
             <p className="text-xs text-slate-400">
-              Real-time record of initialized, pending, and server-verified Korapay payments
+              Live audit of initialized, pending, and confirmed Paystack &amp; Korapay transactions
             </p>
           </div>
 
@@ -282,6 +372,16 @@ export const PaymentAdminTab: React.FC<PaymentAdminTabProps> = ({ onToast }) => 
                 className="pl-8 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-teal-400"
               />
             </div>
+
+            <select
+              value={providerFilter}
+              onChange={(e) => setProviderFilter(e.target.value)}
+              className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-teal-400"
+            >
+              <option value="all">All Providers</option>
+              <option value="paystack">Paystack</option>
+              <option value="korapay">Korapay</option>
+            </select>
 
             <select
               value={statusFilter}
@@ -314,7 +414,7 @@ export const PaymentAdminTab: React.FC<PaymentAdminTabProps> = ({ onToast }) => 
               {filteredTransactions.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-8 text-center text-slate-500 font-mono">
-                    No Korapay transactions matching filter criteria.
+                    No gateway transactions matching filter criteria.
                   </td>
                 </tr>
               ) : (
@@ -322,6 +422,7 @@ export const PaymentAdminTab: React.FC<PaymentAdminTabProps> = ({ onToast }) => 
                   const status = (tx.status || 'pending').toLowerCase();
                   const email = tx.userEmail || tx.useremail || 'Unknown';
                   const created = tx.createdAt || tx.createdat || '';
+                  const prov = (tx.provider || 'korapay').toLowerCase();
 
                   return (
                     <tr key={tx.reference} className="hover:bg-slate-900/50 transition-colors">
@@ -333,8 +434,12 @@ export const PaymentAdminTab: React.FC<PaymentAdminTabProps> = ({ onToast }) => 
                         ₦{Number(tx.amount || 0).toLocaleString()}
                       </td>
                       <td className="py-3 px-3">
-                        <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-200 font-mono text-[10px] uppercase">
-                          korapay
+                        <span className={`px-2 py-0.5 rounded font-mono text-[10px] uppercase font-bold ${
+                          prov === 'paystack'
+                            ? 'bg-sky-500/15 text-sky-300 border border-sky-500/30'
+                            : 'bg-teal-500/15 text-teal-300 border border-teal-500/30'
+                        }`}>
+                          {prov}
                         </span>
                       </td>
                       <td className="py-3 px-3 text-slate-400 text-[11px]">

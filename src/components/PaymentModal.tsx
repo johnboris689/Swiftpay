@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 
 export interface PaymentConfigProvider {
-  name: 'korapay';
+  name: 'korapay' | 'paystack';
   displayName: string;
   isConfigured: boolean;
   missingEnvVars: string[];
@@ -74,7 +74,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 }) => {
   const [amount, setAmount] = useState<number>(defaultAmount);
   const [customAmountStr, setCustomAmountStr] = useState<string>(String(defaultAmount));
-  const [isKorapayReady, setIsKorapayReady] = useState<boolean>(true);
+  const [providers, setProviders] = useState<PaymentConfigProvider[]>([]);
+  const [selectedProvider, setSelectedProvider] = useState<'korapay' | 'paystack'>('korapay');
+  const [providerCase, setProviderCase] = useState<'both' | 'paystack_only' | 'korapay_only' | 'none'>('both');
   const [loadingConfig, setLoadingConfig] = useState(false);
 
   // Flow states: 'select' | 'processing' | 'awaiting_payment' | 'verifying' | 'success'
@@ -129,8 +131,24 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       });
       const data = await res.json();
       if (data.success && Array.isArray(data.providers)) {
-        const korapay = data.providers.find((p: any) => p.name === 'korapay');
-        setIsKorapayReady(korapay ? Boolean(korapay.isConfigured) : true);
+        setProviders(data.providers);
+        const kAvail = data.korapayAvailable ?? data.providers.find((p: any) => p.name === 'korapay')?.isConfigured ?? false;
+        const pAvail = data.paystackAvailable ?? data.providers.find((p: any) => p.name === 'paystack')?.isConfigured ?? false;
+
+        let pCase: 'both' | 'paystack_only' | 'korapay_only' | 'none' = 'none';
+        if (kAvail && pAvail) {
+          pCase = 'both';
+          setSelectedProvider(prev => (prev === 'paystack' || prev === 'korapay' ? prev : 'paystack'));
+        } else if (pAvail) {
+          pCase = 'paystack_only';
+          setSelectedProvider('paystack');
+        } else if (kAvail) {
+          pCase = 'korapay_only';
+          setSelectedProvider('korapay');
+        } else {
+          pCase = 'none';
+        }
+        setProviderCase(pCase);
       }
     } catch (_err) {
       // Keep UI ready; server validates on initialize
@@ -186,7 +204,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         },
         body: JSON.stringify({
           amount,
-          provider: 'korapay',
+          provider: selectedProvider,
           purpose,
           name,
           email,
@@ -204,6 +222,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
       setActiveReference(data.reference);
       setAuthorizationUrl(data.authorizationUrl);
+      if (data.provider) setSelectedProvider(data.provider);
 
       if (typeof window !== 'undefined') {
         try {
@@ -211,6 +230,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             'swiftpay_pending_payment',
             JSON.stringify({
               reference: data.reference,
+              provider: data.provider || selectedProvider,
               purpose,
               amount,
               authorizationUrl: data.authorizationUrl,
@@ -230,7 +250,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         } else {
           const popup = window.open(data.authorizationUrl, '_blank', 'noopener,noreferrer');
           if (!popup && onToast) {
-            onToast('Tap "Continue to Korapay Checkout" below to complete your payment.', 'info');
+            onToast(`Tap "Continue to ${data.provider === 'paystack' ? 'Paystack' : 'Korapay'} Checkout" below to complete your payment.`, 'info');
           }
         }
       }
@@ -262,6 +282,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         },
         body: JSON.stringify({
           reference: activeReference,
+          provider: selectedProvider,
           email,
           token: authToken
         })
@@ -285,10 +306,11 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         }
         if (onSuccess) onSuccess(data);
       } else {
+        const provName = selectedProvider === 'paystack' ? 'Paystack' : 'Korapay';
         setErrorMessage(
           sanitizeClientPaymentError(
             data.message || data.error,
-            'Your payment has not been confirmed yet. Please complete checkout on Korapay and try again.'
+            `Your payment has not been confirmed yet. Please complete checkout on ${provName} and try again.`
           )
         );
         setFlowState('awaiting_payment');
@@ -356,36 +378,117 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                   </div>
                 </div>
 
-                {/* PAYMENT GATEWAY SECTION — KORAPAY ONLY */}
-                <div className="space-y-2.5">
+                {/* PAYMENT GATEWAY SECTION — DYNAMIC MULTI-PROVIDER */}
+                <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-mono text-slate-400 font-bold uppercase tracking-widest">
                       PAYMENT GATEWAY
                     </span>
-                  </div>
-
-                  <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-teal-500/12 via-[#0d1629] to-[#0a1020] border border-teal-500/40 shadow-[0_0_25px_rgba(20,184,166,0.1)] flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3.5 min-w-0">
-                      <div className="p-3 rounded-2xl bg-teal-500/20 text-teal-300 border border-teal-500/30 shrink-0">
-                        <Zap className="h-5 w-5" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-sm sm:text-base font-bold text-white font-display">
-                          Korapay
-                        </div>
-                        <div className="text-xs text-slate-400 mt-0.5">
-                          Online card/bank checkout
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="shrink-0">
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-extrabold uppercase tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                        <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                        READY
+                    {providerCase === 'both' && (
+                      <span className="text-[10px] font-mono text-teal-400">
+                        Select payment method
                       </span>
-                    </div>
+                    )}
                   </div>
+
+                  {/* CASE D: NEITHER CONFIGURED */}
+                  {providerCase === 'none' && (
+                    <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 space-y-2 animate-[fadeIn_0.15s_ease-out]">
+                      <div className="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wide">
+                        <AlertCircle className="h-4 w-4 shrink-0" />
+                        <span>Gateway Maintenance</span>
+                      </div>
+                      <p className="text-xs text-amber-200/90 leading-relaxed">
+                        Online payment processing is temporarily undergoing maintenance or configuration. Please contact customer support or try again shortly.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* CASE A & B: PAYSTACK */}
+                  {(providerCase === 'both' || providerCase === 'paystack_only') && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProvider('paystack')}
+                      className={`w-full text-left p-4 sm:p-5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                        selectedProvider === 'paystack'
+                          ? 'bg-gradient-to-r from-sky-500/20 via-[#0d1e38] to-[#0a1120] border-sky-400/60 shadow-[0_0_25px_rgba(56,189,248,0.15)] ring-1 ring-sky-400/40'
+                          : 'bg-[#0b1324]/80 border-slate-800 hover:border-slate-700 opacity-80 hover:opacity-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3.5 min-w-0">
+                        <div className={`p-3 rounded-2xl border shrink-0 transition-colors ${
+                          selectedProvider === 'paystack'
+                            ? 'bg-sky-500/20 text-sky-300 border-sky-500/40'
+                            : 'bg-slate-800/80 text-slate-400 border-slate-700'
+                        }`}>
+                          <CreditCard className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-sm sm:text-base font-bold text-white font-display flex items-center gap-2">
+                            <span>Paystack</span>
+                            {selectedProvider === 'paystack' && providerCase === 'both' && (
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                                SELECTED
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-slate-400 mt-0.5">
+                            Cards, Bank Transfer, USSD &amp; Mobile Money
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 flex items-center gap-2">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-extrabold uppercase tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                          <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                          READY
+                        </span>
+                      </div>
+                    </button>
+                  )}
+
+                  {/* CASE A & C: KORAPAY */}
+                  {(providerCase === 'both' || providerCase === 'korapay_only') && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProvider('korapay')}
+                      className={`w-full text-left p-4 sm:p-5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                        selectedProvider === 'korapay'
+                          ? 'bg-gradient-to-r from-teal-500/20 via-[#0d1f30] to-[#0a1120] border-teal-400/60 shadow-[0_0_25px_rgba(20,184,166,0.15)] ring-1 ring-teal-400/40'
+                          : 'bg-[#0b1324]/80 border-slate-800 hover:border-slate-700 opacity-80 hover:opacity-100'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3.5 min-w-0">
+                        <div className={`p-3 rounded-2xl border shrink-0 transition-colors ${
+                          selectedProvider === 'korapay'
+                            ? 'bg-teal-500/20 text-teal-300 border-teal-500/40'
+                            : 'bg-slate-800/80 text-slate-400 border-slate-700'
+                        }`}>
+                          <Zap className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-sm sm:text-base font-bold text-white font-display flex items-center gap-2">
+                            <span>Korapay</span>
+                            {selectedProvider === 'korapay' && providerCase === 'both' && (
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30">
+                                SELECTED
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-slate-400 mt-0.5">
+                            Cards, Virtual Accounts &amp; Direct Bank
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 flex items-center gap-2">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-extrabold uppercase tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                          <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                          READY
+                        </span>
+                      </div>
+                    </button>
+                  )}
                 </div>
 
                 {/* Error Banner */}
@@ -404,45 +507,56 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
               {/* Action Footer */}
               <div className="space-y-3 pt-2">
-                <button
-                  type="button"
-                  onClick={handleInitiatePayment}
-                  disabled={flowState === 'processing' || !amount || amount < 100 || loadingConfig}
-                  className="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-teal-400 via-cyan-400 to-emerald-400 hover:from-teal-300 hover:to-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed text-slate-950 text-xs sm:text-sm font-black uppercase tracking-wider transition-all active:scale-[0.99] shadow-[0_8px_25px_rgba(20,184,166,0.3)] flex items-center justify-center gap-2.5 cursor-pointer"
-                >
-                  {flowState === 'processing' ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin text-slate-950" />
-                      <span>Initializing secure payment...</span>
-                    </>
-                  ) : purpose === 'wdv_voucher' ? (
-                    <>
-                      <span>BUY WDV VOUCHER — ₦{Number(amount || 6500).toLocaleString()}</span>
-                      <ArrowRight className="h-4 w-4 stroke-[2.5]" />
-                    </>
-                  ) : (
-                    <>
-                      <span>PROCEED TO PAY — ₦{Number(amount || 0).toLocaleString()}</span>
-                      <ArrowRight className="h-4 w-4 stroke-[2.5]" />
-                    </>
-                  )}
-                </button>
+                {providerCase === 'none' ? (
+                  <button
+                    type="button"
+                    disabled={true}
+                    className="w-full py-4 px-5 rounded-2xl bg-slate-800 text-slate-500 border border-slate-700/60 text-xs sm:text-sm font-black uppercase tracking-wider cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    <AlertCircle className="h-4 w-4 text-amber-400" />
+                    <span>PAYMENT TEMPORARILY UNAVAILABLE</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleInitiatePayment}
+                    disabled={flowState === 'processing' || !amount || amount < 100 || loadingConfig}
+                    className="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-teal-400 via-cyan-400 to-emerald-400 hover:from-teal-300 hover:to-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed text-slate-950 text-xs sm:text-sm font-black uppercase tracking-wider transition-all active:scale-[0.99] shadow-[0_8px_25px_rgba(20,184,166,0.3)] flex items-center justify-center gap-2.5 cursor-pointer"
+                  >
+                    {flowState === 'processing' ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 animate-spin text-slate-950" />
+                        <span>Initializing secure payment...</span>
+                      </>
+                    ) : purpose === 'wdv_voucher' ? (
+                      <>
+                        <span>BUY WDV VOUCHER VIA {selectedProvider.toUpperCase()} — ₦{Number(amount || 6500).toLocaleString()}</span>
+                        <ArrowRight className="h-4 w-4 stroke-[2.5]" />
+                      </>
+                    ) : (
+                      <>
+                        <span>PROCEED TO PAY VIA {selectedProvider.toUpperCase()} — ₦{Number(amount || 0).toLocaleString()}</span>
+                        <ArrowRight className="h-4 w-4 stroke-[2.5]" />
+                      </>
+                    )}
+                  </button>
+                )}
 
                 <div className="flex items-center justify-center gap-2 text-[11px] text-slate-400/80 font-mono">
                   <Lock className="h-3.5 w-3.5 text-teal-400" />
-                  <span>Encrypted Korapay checkout • Server-side verification</span>
+                  <span>Encrypted {selectedProvider === 'paystack' ? 'Paystack' : 'Korapay'} checkout • Server-side verification</span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* STEP 2: Awaiting / Verifying Korapay Payment */}
+          {/* STEP 2: Awaiting / Verifying Payment */}
           {(flowState === 'awaiting_payment' || flowState === 'verifying') && (
             <div className="space-y-5 flex-1 flex flex-col justify-between py-1">
               <div className="space-y-4">
                 <div className="p-5 rounded-2xl bg-teal-500/10 border border-teal-500/25 text-center space-y-2">
                   <span className="text-[10px] font-mono text-teal-400 font-bold uppercase tracking-widest block">
-                    KORAPAY TRANSACTION REFERENCE
+                    {selectedProvider === 'paystack' ? 'PAYSTACK' : 'KORAPAY'} TRANSACTION REFERENCE
                   </span>
                   <span className="text-sm sm:text-base font-mono font-black text-white block select-all break-all">
                     {activeReference}
@@ -455,10 +569,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 <div className="p-5 rounded-2xl bg-[#0b1120] border border-white/10 space-y-3">
                   <div className="flex items-center gap-2 text-xs sm:text-sm text-white font-bold">
                     <ExternalLink className="h-4 w-4 text-teal-400 shrink-0" />
-                    <span>Complete Your Payment on Korapay</span>
+                    <span>Complete Your Payment on {selectedProvider === 'paystack' ? 'Paystack' : 'Korapay'}</span>
                   </div>
                   <p className="text-xs text-slate-300 leading-relaxed">
-                    Complete your card or bank transfer payment in the secure Korapay checkout window. Once completed, tap the verification button below to confirm your transaction and issue your voucher.
+                    Complete your card or bank transfer payment in the secure {selectedProvider === 'paystack' ? 'Paystack' : 'Korapay'} checkout window. Once completed, tap the verification button below to confirm your transaction and issue your voucher.
                   </p>
 
                   {authorizationUrl && (
@@ -468,7 +582,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                       rel="noopener noreferrer"
                       className="w-full py-3 px-4 rounded-xl bg-teal-500/15 hover:bg-teal-500/25 border border-teal-500/30 text-teal-300 text-xs font-bold flex items-center justify-center gap-2 transition-all"
                     >
-                      <span>Open Korapay Checkout</span>
+                      <span>Open {selectedProvider === 'paystack' ? 'Paystack' : 'Korapay'} Checkout</span>
                       <ExternalLink className="h-3.5 w-3.5" />
                     </a>
                   )}

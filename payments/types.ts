@@ -1,4 +1,4 @@
-export type PaymentProviderName = 'korapay';
+export type PaymentProviderName = 'korapay' | 'paystack';
 
 export interface InitializePaymentParams {
   amount: number; // in NGN

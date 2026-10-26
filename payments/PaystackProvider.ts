@@ -12,6 +12,13 @@ export class PaystackProvider implements PaymentProvider {
   readonly name: PaymentProviderName = 'paystack';
   readonly displayName = 'Paystack';
   private readonly baseUrl = 'https://api.paystack.co';
+  private isKeyValid: boolean | null = null;
+  private keyHealthPromise: Promise<boolean> | null = null;
+
+  constructor() {
+    // Proactively validate the configured secret key in the background
+    this.checkKeyHealth().catch(() => {});
+  }
 
   private getSecretKey(): string {
     return (process.env.PAYSTACK_SECRET_KEY || '').trim();
@@ -24,21 +31,84 @@ export class PaystackProvider implements PaymentProvider {
 
   isConfigured(): boolean {
     const key = this.getSecretKey();
-    return Boolean(key && (key.startsWith('sk_') || key.length >= 10));
+    if (!key || !(key.startsWith('sk_') || key.length >= 10)) {
+      return false;
+    }
+    // If the key has been validated and rejected by Paystack's API, it is NOT configured
+    if (this.isKeyValid === false) {
+      return false;
+    }
+    return true;
   }
 
   getMissingEnvVars(): string[] {
     const missing: string[] = [];
     if (!this.getSecretKey()) {
       missing.push('PAYSTACK_SECRET_KEY');
+    } else if (this.isKeyValid === false) {
+      missing.push('PAYSTACK_SECRET_KEY (Invalid key rejected by Paystack API)');
     }
     return missing;
+  }
+
+  async checkKeyHealth(): Promise<boolean> {
+    const key = this.getSecretKey();
+    if (!key || !(key.startsWith('sk_') || key.length >= 10)) {
+      this.isKeyValid = false;
+      return false;
+    }
+
+    if (this.isKeyValid !== null) {
+      return this.isKeyValid;
+    }
+
+    if (this.keyHealthPromise) {
+      return this.keyHealthPromise;
+    }
+
+    this.keyHealthPromise = (async () => {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 4000);
+        const res = await fetch(`${this.baseUrl}/integration/payment_session_timeout`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${key}`
+          },
+          signal: controller.signal
+        }).finally(() => clearTimeout(timeout));
+
+        if (res.status === 401) {
+          const body: any = await res.json().catch(() => ({}));
+          if (body?.code === 'invalid_Key' || body?.message?.toLowerCase().includes('invalid key')) {
+            console.warn('[PaystackProvider] Configured PAYSTACK_SECRET_KEY was rejected by Paystack API (Invalid key). Marking Paystack as unavailable.');
+            this.isKeyValid = false;
+            return false;
+          }
+        }
+
+        if (res.ok) {
+          this.isKeyValid = true;
+          return true;
+        }
+
+        // For non-401 responses, keep optimistic
+        this.isKeyValid = null;
+        return true;
+      } catch (_err) {
+        return true;
+      } finally {
+        this.keyHealthPromise = null;
+      }
+    })();
+
+    return this.keyHealthPromise;
   }
 
   async initializePayment(params: InitializePaymentParams): Promise<InitializePaymentResult> {
     const secretKey = this.getSecretKey();
     if (!this.isConfigured()) {
-      throw new Error('Paystack is not configured. Missing PAYSTACK_SECRET_KEY environment variable.');
+      throw new Error('Paystack is not configured. Missing or invalid PAYSTACK_SECRET_KEY environment variable.');
     }
 
     // Paystack requires amount in KOBO (1 NGN = 100 Kobo)
@@ -83,6 +153,10 @@ export class PaystackProvider implements PaymentProvider {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.status) {
       const errMsg = data.message || `Paystack payment initiation failed with HTTP ${res.status}`;
+      if (res.status === 401 || data.code === 'invalid_Key' || errMsg.toLowerCase().includes('invalid key')) {
+        this.isKeyValid = false;
+        console.warn('[PaystackProvider] Paystack API rejected secret key during transaction initialization. Marking key as invalid.');
+      }
       throw new Error(`Paystack error: ${errMsg}`);
     }
 
@@ -102,7 +176,7 @@ export class PaystackProvider implements PaymentProvider {
   async verifyPayment(reference: string): Promise<VerifyPaymentResult> {
     const secretKey = this.getSecretKey();
     if (!this.isConfigured()) {
-      throw new Error('Paystack is not configured. Missing PAYSTACK_SECRET_KEY environment variable.');
+      throw new Error('Paystack is not configured. Missing or invalid PAYSTACK_SECRET_KEY environment variable.');
     }
 
     const res = await fetch(`${this.baseUrl}/transaction/verify/${encodeURIComponent(reference)}`, {
@@ -115,6 +189,9 @@ export class PaystackProvider implements PaymentProvider {
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.status) {
+      if (res.status === 401 || data.code === 'invalid_Key') {
+        this.isKeyValid = false;
+      }
       return {
         success: false,
         status: 'failed',
@@ -161,12 +238,10 @@ export class PaystackProvider implements PaymentProvider {
 
   verifyWebhookSignature(headers: Record<string, any>, rawBody: string): boolean {
     const secret = this.getSecretKey();
-    // Paystack signature is passed in header 'x-paystack-signature'
     const signature = String(headers['x-paystack-signature'] || '').trim();
     if (!secret || !signature || !rawBody) return false;
 
     try {
-      // Paystack calculates HMAC SHA-512 over the raw request body
       const expected = crypto.createHmac('sha512', secret).update(rawBody).digest('hex');
       const a = Buffer.from(expected, 'utf8');
       const b = Buffer.from(signature, 'utf8');

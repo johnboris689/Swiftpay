@@ -3680,8 +3680,9 @@ app.post('/api/korapay/webhook', express.raw({ type: 'application/json' }), asyn
 // -------------------- UNIFIED PAYMENT GATEWAY (KORAPAY + PAYSTACK) --------------------
 
 // 1. Get Payment Configuration & Dynamic Provider Availability
-const getPaymentConfigHandler = (req: any, res: any) => {
+const getPaymentConfigHandler = async (req: any, res: any) => {
   try {
+    await paymentManager.validateProvidersHealth();
     const providers = paymentManager.getAllProvidersStatus();
     const activeProvider = paymentManager.getConfiguredActiveProviderName();
     const isAvailable = providers.some(p => p.isConfigured);
@@ -3832,6 +3833,9 @@ app.post(['/api/payment/initialize', '/api/wdv/purchase/initialize'], authentica
     const purpose = 'wdv_voucher';
     const amount = Number(config.voucherPrice || 6500);
 
+    // Ensure dynamic provider credentials health is verified
+    await paymentManager.validateProvidersHealth();
+
     // Resolve provider from request or available configured providers
     const requestedProviderName = (req.body.provider || '').toLowerCase().trim();
     let provider = paymentManager.getProvider(requestedProviderName || undefined);
@@ -3848,30 +3852,69 @@ app.post(['/api/payment/initialize', '/api/wdv/purchase/initialize'], authentica
       provider = available[0];
     }
 
-    const providerName = provider.name;
-    const prefix = providerName === 'paystack' ? 'SPAY_PSTK' : 'SPAY_KORA';
-    const reference = `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    let providerName = provider.name;
+    let prefix = providerName === 'paystack' ? 'SPAY_PSTK' : 'SPAY_KORA';
+    let reference = `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
     const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
     const host = req.headers['x-forwarded-host'] || req.get('host');
-    const defaultCallbackUrl = `${protocol}://${host}/dashboard/buy-wdv?reference=${reference}&provider=${providerName}`;
-    const callbackUrl = req.body.callbackUrl || defaultCallbackUrl;
+    let defaultCallbackUrl = `${protocol}://${host}/dashboard/buy-wdv?reference=${reference}&provider=${providerName}`;
+    let callbackUrl = req.body.callbackUrl || defaultCallbackUrl;
 
-    const initResult = await provider.initializePayment({
-      amount,
-      email,
-      name: user?.fullName || req.body.name || 'SwiftPay Customer',
-      phone: user?.phone || req.body.phone || '',
-      reference,
-      callbackUrl,
-      purpose,
-      metadata: {
-        userId: email,
+    let initResult;
+    try {
+      initResult = await provider.initializePayment({
+        amount,
+        email,
+        name: user?.fullName || req.body.name || 'SwiftPay Customer',
+        phone: user?.phone || req.body.phone || '',
+        reference,
+        callbackUrl,
         purpose,
-        userFullName: user?.fullName,
-        provider: providerName,
-        ...(req.body.metadata || {})
+        metadata: {
+          userId: email,
+          purpose,
+          userFullName: user?.fullName,
+          provider: providerName,
+          ...(req.body.metadata || {})
+        }
+      });
+    } catch (providerInitErr: any) {
+      console.warn(`[SwiftPay Payment] Provider ${provider.name} failed initialization: ${providerInitErr?.message}. Checking fallback provider...`);
+      
+      // Fallback: If Paystack or requested provider failed, switch to alternative working provider
+      const altProvider = provider.name === 'paystack' 
+        ? paymentManager.getProvider('korapay')
+        : paymentManager.getProvider('paystack');
+
+      if (altProvider && altProvider.isConfigured() && altProvider.name !== provider.name) {
+        console.log(`[SwiftPay Payment] Falling back to working gateway: ${altProvider.displayName}...`);
+        provider = altProvider;
+        providerName = provider.name;
+        prefix = providerName === 'paystack' ? 'SPAY_PSTK' : 'SPAY_KORA';
+        reference = `${prefix}_${Date.now()}_${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+        defaultCallbackUrl = `${protocol}://${host}/dashboard/buy-wdv?reference=${reference}&provider=${providerName}`;
+        callbackUrl = req.body.callbackUrl || defaultCallbackUrl;
+
+        initResult = await provider.initializePayment({
+          amount,
+          email,
+          name: user?.fullName || req.body.name || 'SwiftPay Customer',
+          phone: user?.phone || req.body.phone || '',
+          reference,
+          callbackUrl,
+          purpose,
+          metadata: {
+            userId: email,
+            purpose,
+            userFullName: user?.fullName,
+            provider: providerName,
+            ...(req.body.metadata || {})
+          }
+        });
+      } else {
+        throw providerInitErr;
       }
-    });
+    }
 
     const nowIso = new Date().toISOString();
     const id = `ptx-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;

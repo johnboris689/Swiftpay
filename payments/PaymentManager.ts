@@ -16,13 +16,16 @@ export class PaymentManager {
   getProvider(name?: string): PaymentProvider {
     const key = (name || '').toLowerCase().trim() as PaymentProviderName;
     if (key && this.providers.has(key)) {
-      return this.providers.get(key)!;
+      const candidate = this.providers.get(key)!;
+      if (candidate.isConfigured()) {
+        return candidate;
+      }
     }
 
-    // Default to configured provider
+    // Default to configured available provider
     const configured = this.getAvailableProviders();
     if (configured.length > 0) {
-      const preferred = configured.find(p => p.name === this.preferredActiveProvider);
+      const preferred = configured.find(p => p.name === this.preferredActiveProvider && p.isConfigured());
       return preferred || configured[0];
     }
 
@@ -52,6 +55,13 @@ export class PaymentManager {
 
   getActiveProvider(requestedName?: string): PaymentProvider {
     return this.getProvider(requestedName);
+  }
+
+  async validateProvidersHealth(): Promise<void> {
+    const paystack = this.providers.get('paystack');
+    if (paystack && typeof (paystack as any).checkKeyHealth === 'function') {
+      await (paystack as any).checkKeyHealth().catch(() => {});
+    }
   }
 
   getAllProvidersStatus(): ProviderStatusInfo[] {

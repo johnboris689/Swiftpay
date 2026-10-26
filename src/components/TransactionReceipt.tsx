@@ -33,6 +33,15 @@ export default function TransactionReceipt({
   const refNum = transaction.reference || transaction.refNum || transaction.id;
   const newBalanceVal = transaction.newBalance ?? (transaction as any).balanceAfter ?? 0;
 
+  // Mask bank account details on the visible receipt and downloaded PDF.
+  // Keep the first two digits and final three digits visible; never expose the full number.
+  const maskAccountNumber = (accountNumber: string | number | null | undefined) => {
+    const raw = String(accountNumber ?? '').replace(/\s+/g, '');
+    if (!raw || raw === 'N/A') return 'N/A';
+    if (raw.length <= 5) return '*'.repeat(Math.max(1, raw.length));
+    return `${raw.slice(0, 2)}${'*'.repeat(Math.max(1, raw.length - 5))}${raw.slice(-3)}`;
+  };
+
   let title = "Transaction Receipt";
   let contentRows: { label: string; value: string; bold?: boolean; highlight?: boolean; selectAll?: boolean }[] = [];
 
@@ -42,8 +51,8 @@ export default function TransactionReceipt({
     title = "Withdrawal Successful";
     contentRows = [
       { label: "Bank", value: transaction.recipientBank || 'PalmPay', bold: true },
-      { label: "Account Name", value: transaction.recipientName || 'Pwamunadi Ishaku' },
-      { label: "Account Number", value: transaction.recipientAccount || '8960723295' },
+      { label: "Account Name", value: transaction.recipientName || 'N/A' },
+      { label: "Account Number", value: maskAccountNumber(maskAccountNumber(transaction.recipientAccount || '8960723295')) },
       { label: "Amount", value: formatNaira(transaction.amount), bold: true },
       { label: "Transaction Reference", value: refNum, selectAll: true },
       { label: "Date & Time", value: `${date} ${time}` },
@@ -241,8 +250,8 @@ export default function TransactionReceipt({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm bg-[#0c0c14] border border-white/10 rounded-[32px] overflow-hidden shadow-2xl relative animate-[scaleUp_0.25s_ease-out] font-sans">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+      <div className="w-full max-w-sm max-h-[calc(100dvh-1.5rem)] overflow-y-auto bg-[#0c0c14] border border-white/10 rounded-[32px] shadow-2xl relative animate-[scaleUp_0.25s_ease-out] font-sans my-auto">
         
         {/* Receipt Header Banner */}
         <div className="bg-gradient-to-r from-indigo-600 to-teal-500 p-6 text-center text-white relative">

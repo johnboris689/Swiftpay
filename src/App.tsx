@@ -63,6 +63,7 @@ import {
 
 import GlassCard from './components/GlassCard';
 import CongratulationsScreen from './components/CongratulationsScreen';
+import WithdrawalSuccessScreen from './components/WithdrawalSuccessScreen';
 import NumericPad from './components/NumericPad';
 import BottomNav from './components/BottomNav';
 import WdvVoucher from './components/WdvVoucher';
@@ -721,6 +722,7 @@ export default function App() {
   });
 
   const [selectedReceiptTx, setSelectedReceiptTx] = useState<Transaction | null>(null);
+  const [withdrawSuccess, setWithdrawSuccess] = useState<{ tx: Transaction; bank: string; accountName: string; accountNumber: string } | null>(null);
   
   // Security 2FA / sensitive action states
   const [securityOtp, setSecurityOtp] = useState('');
@@ -2521,14 +2523,21 @@ export default function App() {
       setNotifications([newNotif, ...notifications]);
 
       showToast('Withdrawal completed successfully!', 'success');
-      setSelectedReceiptTx(data.transaction);
 
-      // Reset and return
+      // Show the dedicated success screen (captures details before the form is reset)
+      setWithdrawSuccess({
+        tx: data.transaction,
+        bank: withdrawBank,
+        accountName: withdrawAccName,
+        accountNumber: withdrawAccount
+      });
+
+      // Reset form fields
       setWithdrawAccount('');
       setWithdrawAmount('');
       setWithdrawWdvCode('');
       setWithdrawAccName('');
-      setCurrentScreen('dashboard');
+      setCurrentScreen('withdraw_success');
       setActiveTab('wallet');
     } catch (err) {
       showToast('Error performing withdrawal.', 'error');
@@ -5791,6 +5800,23 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+              )}
+
+              {/* -------------------- FLOW 5.6: WITHDRAWAL SUCCESS SCREEN -------------------- */}
+              {currentScreen === 'withdraw_success' && withdrawSuccess && (
+                <WithdrawalSuccessScreen
+                  transaction={withdrawSuccess.tx}
+                  bankName={withdrawSuccess.bank}
+                  accountName={withdrawSuccess.accountName}
+                  accountNumber={withdrawSuccess.accountNumber}
+                  onViewReceipt={() => setSelectedReceiptTx(withdrawSuccess.tx)}
+                  onDone={() => {
+                    setWithdrawSuccess(null);
+                    setCurrentScreen('dashboard');
+                    setActiveTab('wallet');
+                    navigateTo('/');
+                  }}
+                />
               )}
 
               {/* -------------------- FLOW 6: BANK CASHOUT TRANSFER (/dashboard/transfer) -------------------- */}
